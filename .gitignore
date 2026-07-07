@@ -1,0 +1,28 @@
+.DS_Store
+*.xcuserstate
+*.xcactivitylog
+*.xcresult
+*.log
+xcuserdata/
+
+# Xcode/build artifacts
+DerivedData/
+.derivedData/
+DerivedDataLocal/
+build/
+release/
+dist/
+*.dSYM
+*.app
+*.dmg
+
+# Local caches and generated helper data
+.codegraph/
+.codex/
+.devin/
+.xcodebuildmcp/
+.swiftpm/
+
+# Temporary patch/debug files
+*_patch
+*.tmp

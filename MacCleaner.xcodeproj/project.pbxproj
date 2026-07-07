@@ -1,0 +1,499 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		A001 /* MacCleanerApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = F001 /* MacCleanerApp.swift */; };
+		A004_SM /* SettingsManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = F004_SM /* SettingsManager.swift */; };
+		A005_SV /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F005_SV /* SettingsView.swift */; };
+		A002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F002 /* ContentView.swift */; };
+		A003 /* SystemInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = F003 /* SystemInfo.swift */; };
+		A004 /* SystemMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = F004 /* SystemMonitor.swift */; };
+		A005 /* OverviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F005 /* OverviewView.swift */; };
+		A006 /* MemoryDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F006 /* MemoryDetailView.swift */; };
+		A007 /* CPUDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F007 /* CPUDetailView.swift */; };
+		A008 /* DiskDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F008 /* DiskDetailView.swift */; };
+		A009 /* ProcessesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F009 /* ProcessesView.swift */; };
+		A010 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F010 /* Assets.xcassets */; };
+		A011 /* DesignSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = F011DS /* DesignSystem.swift */; };
+		A012 /* ProcessTreeService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F012PT /* ProcessTreeService.swift */; };
+		A013 /* WindowsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F013WV /* WindowsView.swift */; };
+		A014 /* SMCService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F014SM /* SMCService.swift */; };
+		A015 /* FansView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F015FV /* FansView.swift */; };
+		A016 /* CleanerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F016CS /* CleanerService.swift */; };
+		A017 /* CleanerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F017CV /* CleanerView.swift */; };
+		A018 /* AboutView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F018AV /* AboutView.swift */; };
+		A019_DS /* DesktopService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F019DS /* DesktopService.swift */; };
+		A019_DV /* DesktopManagerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F019DV /* DesktopManagerView.swift */; };
+		A019_WA /* WebAppsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F019WA /* WebAppsView.swift */; };
+		A020_AIM /* AIWorkload.swift in Sources */ = {isa = PBXBuildFile; fileRef = F020AIM /* AIWorkload.swift */; };
+		A021_AIS /* AIWorkloadService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F021AIS /* AIWorkloadService.swift */; };
+		A022_AIV /* AIWorkloadViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = F022AIV /* AIWorkloadViews.swift */; };
+		A023_AII /* AIIndexStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F023AII /* AIIndexStore.swift */; };
+		A024_AIIS /* AIIndexStoreService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F024AIIS /* AIIndexStoreService.swift */; };
+		A025_LFIM /* LLMFitModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F025LFIM /* LLMFitModels.swift */; };
+		A026_LFIS /* LLMFitService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F026LFIS /* LLMFitService.swift */; };
+		A027_PDS /* ProcessDetailService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F027PDS /* ProcessDetailService.swift */; };
+		A028_PDV /* ProcessDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F028PDV /* ProcessDetailView.swift */; };
+		A028_US /* UninstallerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F028US /* UninstallerService.swift */; };
+		A029_SAS /* StorageAnalyzerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F029SAS /* StorageAnalyzerService.swift */; };
+		A030_SV /* StorageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F030SV /* StorageView.swift */; };
+		A031_LFV /* LargeFilesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F031LFV /* LargeFilesView.swift */; };
+		A032_UV /* UninstallerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F032UV /* UninstallerView.swift */; };
+		A033_DAV /* DiskAnalyzerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F033DAV /* DiskAnalyzerView.swift */; };
+		A034_MS /* MaintenanceService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F034MS /* MaintenanceService.swift */; };
+		A034_MV /* MaintenanceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F034MV /* MaintenanceView.swift */; };
+		A034_KDS /* KeyboardDiagnosticService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F034KDS /* KeyboardDiagnosticService.swift */; };
+		A034_KDV /* KeyboardDiagnosticView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F034KDV /* KeyboardDiagnosticView.swift */; };
+		A038_HDS /* HardwareDiagnosticServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = F038HDS /* HardwareDiagnosticServices.swift */; };
+		A039_TDV /* ToolDiagnosticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F039TDV /* ToolDiagnosticsView.swift */; };
+		A035_LIV /* LaunchIntroView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F035LIV /* LaunchIntroView.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		F001 /* MacCleanerApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacCleanerApp.swift; sourceTree = "<group>"; };
+		F004_SM /* SettingsManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Settings/SettingsManager.swift; sourceTree = "<group>"; };
+		F005_SV /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Settings/SettingsView.swift; sourceTree = "<group>"; };
+		F002 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		F003 /* SystemInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemInfo.swift; sourceTree = "<group>"; };
+		F004 /* SystemMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemMonitor.swift; sourceTree = "<group>"; };
+		F005 /* OverviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverviewView.swift; sourceTree = "<group>"; };
+		F006 /* MemoryDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryDetailView.swift; sourceTree = "<group>"; };
+		F007 /* CPUDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CPUDetailView.swift; sourceTree = "<group>"; };
+		F008 /* DiskDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiskDetailView.swift; sourceTree = "<group>"; };
+		F009 /* ProcessesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessesView.swift; sourceTree = "<group>"; };
+		F011DS /* DesignSystem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignSystem.swift; sourceTree = "<group>"; };
+		F012PT /* ProcessTreeService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessTreeService.swift; sourceTree = "<group>"; };
+		F013WV /* WindowsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowsView.swift; sourceTree = "<group>"; };
+		F014SM /* SMCService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SMCService.swift; sourceTree = "<group>"; };
+		F015FV /* FansView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FansView.swift; sourceTree = "<group>"; };
+		F016CS /* CleanerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CleanerService.swift; sourceTree = "<group>"; };
+		F017CV /* CleanerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CleanerView.swift; sourceTree = "<group>"; };
+		F018AV /* AboutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutView.swift; sourceTree = "<group>"; };
+		F019DS /* DesktopService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesktopService.swift; sourceTree = "<group>"; };
+		F019DV /* DesktopManagerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesktopManagerView.swift; sourceTree = "<group>"; };
+		F019WA /* WebAppsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebAppsView.swift; sourceTree = "<group>"; };
+		F020AIM /* AIWorkload.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIWorkload.swift; sourceTree = "<group>"; };
+		F021AIS /* AIWorkloadService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIWorkloadService.swift; sourceTree = "<group>"; };
+		F022AIV /* AIWorkloadViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIWorkloadViews.swift; sourceTree = "<group>"; };
+		F023AII /* AIIndexStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIIndexStore.swift; sourceTree = "<group>"; };
+		F024AIIS /* AIIndexStoreService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIIndexStoreService.swift; sourceTree = "<group>"; };
+		F025LFIM /* LLMFitModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LLMFitModels.swift; sourceTree = "<group>"; };
+		F026LFIS /* LLMFitService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LLMFitService.swift; sourceTree = "<group>"; };
+		F027PDS /* ProcessDetailService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessDetailService.swift; sourceTree = "<group>"; };
+		F028PDV /* ProcessDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessDetailView.swift; sourceTree = "<group>"; };
+		F028US /* UninstallerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UninstallerService.swift; sourceTree = "<group>"; };
+		F029SAS /* StorageAnalyzerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorageAnalyzerService.swift; sourceTree = "<group>"; };
+		F030SV /* StorageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorageView.swift; sourceTree = "<group>"; };
+		F031LFV /* LargeFilesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LargeFilesView.swift; sourceTree = "<group>"; };
+		F032UV /* UninstallerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UninstallerView.swift; sourceTree = "<group>"; };
+		F033DAV /* DiskAnalyzerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiskAnalyzerView.swift; sourceTree = "<group>"; };
+		F034MS /* MaintenanceService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MaintenanceService.swift; sourceTree = "<group>"; };
+		F034MV /* MaintenanceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MaintenanceView.swift; sourceTree = "<group>"; };
+		F034KDS /* KeyboardDiagnosticService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardDiagnosticService.swift; sourceTree = "<group>"; };
+		F034KDV /* KeyboardDiagnosticView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardDiagnosticView.swift; sourceTree = "<group>"; };
+		F038HDS /* HardwareDiagnosticServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HardwareDiagnosticServices.swift; sourceTree = "<group>"; };
+		F039TDV /* ToolDiagnosticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolDiagnosticsView.swift; sourceTree = "<group>"; };
+		F035LIV /* LaunchIntroView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchIntroView.swift; sourceTree = "<group>"; };
+		F010 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		F011 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		F012 /* MacCleaner.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = MacCleaner.entitlements; sourceTree = "<group>"; };
+		PROD /* MacCleaner.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MacCleaner.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		ROOT = {
+			isa = PBXGroup;
+			children = (
+				G_APP /* MacCleaner */,
+				G_PROD /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		G_PROD /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				PROD /* MacCleaner.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		G_APP /* MacCleaner */ = {
+			isa = PBXGroup;
+			children = (
+				F001 /* MacCleanerApp.swift */,
+				F004_SM /* SettingsManager.swift */,
+				F005_SV /* SettingsView.swift */,
+				G_MODELS /* Models */,
+				G_SERVICES /* Services */,
+				G_VIEWS /* Views */,
+				F010 /* Assets.xcassets */,
+				F011 /* Info.plist */,
+				F012 /* MacCleaner.entitlements */,
+			);
+			path = MacCleaner;
+			sourceTree = "<group>";
+		};
+		G_MODELS /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				F003 /* SystemInfo.swift */,
+				F020AIM /* AIWorkload.swift */,
+				F023AII /* AIIndexStore.swift */,
+				F025LFIM /* LLMFitModels.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		G_SERVICES /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				F004 /* SystemMonitor.swift */,
+				F012PT /* ProcessTreeService.swift */,
+				F014SM /* SMCService.swift */,
+				F016CS /* CleanerService.swift */,
+				F019DS /* DesktopService.swift */,
+				F021AIS /* AIWorkloadService.swift */,
+				F024AIIS /* AIIndexStoreService.swift */,
+				F026LFIS /* LLMFitService.swift */,
+				F027PDS /* ProcessDetailService.swift */,
+				F028US /* UninstallerService.swift */,
+				F029SAS /* StorageAnalyzerService.swift */,
+				F034MS /* MaintenanceService.swift */,
+				F034KDS /* KeyboardDiagnosticService.swift */,
+				F038HDS /* HardwareDiagnosticServices.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		G_VIEWS /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				F002 /* ContentView.swift */,
+				F035LIV /* LaunchIntroView.swift */,
+				F011DS /* DesignSystem.swift */,
+				F005 /* OverviewView.swift */,
+				F006 /* MemoryDetailView.swift */,
+				F007 /* CPUDetailView.swift */,
+				F008 /* DiskDetailView.swift */,
+				F009 /* ProcessesView.swift */,
+				F013WV /* WindowsView.swift */,
+				F015FV /* FansView.swift */,
+				F017CV /* CleanerView.swift */,
+				F018AV /* AboutView.swift */,
+				F019DV /* DesktopManagerView.swift */,
+				F019WA /* WebAppsView.swift */,
+				F022AIV /* AIWorkloadViews.swift */,
+				F028PDV /* ProcessDetailView.swift */,
+				F030SV /* StorageView.swift */,
+				F031LFV /* LargeFilesView.swift */,
+				F032UV /* UninstallerView.swift */,
+				F033DAV /* DiskAnalyzerView.swift */,
+				F034MV /* MaintenanceView.swift */,
+				F034KDV /* KeyboardDiagnosticView.swift */,
+				F039TDV /* ToolDiagnosticsView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		TARGET /* MacCleaner */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = CFGLIST_TARGET;
+			buildPhases = (
+				PHASE_SRC /* Sources */,
+				PHASE_RES /* Resources */,
+				PHASE_FWK /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = MacCleaner;
+			productName = MacCleaner;
+			productReference = PROD /* MacCleaner.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		PROJECT /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1500;
+				LastUpgradeCheck = 1500;
+				TargetAttributes = {
+					TARGET = {
+						CreatedOnToolsVersion = 15.0;
+					};
+				};
+			};
+			buildConfigurationList = CFGLIST_PROJECT;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = ROOT;
+			productRefGroup = G_PROD /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				TARGET /* MacCleaner */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		PHASE_RES /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A010 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		PHASE_SRC /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A004 /* SystemMonitor.swift in Sources */,
+				A005 /* OverviewView.swift in Sources */,
+				A001 /* MacCleanerApp.swift in Sources */,
+				A004_SM /* SettingsManager.swift in Sources */,
+				A005_SV /* SettingsView.swift in Sources */,
+				A002 /* ContentView.swift in Sources */,
+				A003 /* SystemInfo.swift in Sources */,
+				A006 /* MemoryDetailView.swift in Sources */,
+				A007 /* CPUDetailView.swift in Sources */,
+				A008 /* DiskDetailView.swift in Sources */,
+				A009 /* ProcessesView.swift in Sources */,
+				A011 /* DesignSystem.swift in Sources */,
+				A012 /* ProcessTreeService.swift in Sources */,
+				A013 /* WindowsView.swift in Sources */,
+				A014 /* SMCService.swift in Sources */,
+				A015 /* FansView.swift in Sources */,
+				A016 /* CleanerService.swift in Sources */,
+				A017 /* CleanerView.swift in Sources */,
+				A018 /* AboutView.swift in Sources */,
+				A019_DS /* DesktopService.swift in Sources */,
+				A019_DV /* DesktopManagerView.swift in Sources */,
+				A019_WA /* WebAppsView.swift in Sources */,
+				A020_AIM /* AIWorkload.swift in Sources */,
+				A021_AIS /* AIWorkloadService.swift in Sources */,
+				A022_AIV /* AIWorkloadViews.swift in Sources */,
+				A023_AII /* AIIndexStore.swift in Sources */,
+				A024_AIIS /* AIIndexStoreService.swift in Sources */,
+				A025_LFIM /* LLMFitModels.swift in Sources */,
+				A026_LFIS /* LLMFitService.swift in Sources */,
+				A027_PDS /* ProcessDetailService.swift in Sources */,
+				A028_PDV /* ProcessDetailView.swift in Sources */,
+				A028_US /* UninstallerService.swift in Sources */,
+				A029_SAS /* StorageAnalyzerService.swift in Sources */,
+				A030_SV /* StorageView.swift in Sources */,
+				A031_LFV /* LargeFilesView.swift in Sources */,
+				A032_UV /* UninstallerView.swift in Sources */,
+				A033_DAV /* DiskAnalyzerView.swift in Sources */,
+				A034_MS /* MaintenanceService.swift in Sources */,
+				A034_MV /* MaintenanceView.swift in Sources */,
+				A034_KDS /* KeyboardDiagnosticService.swift in Sources */,
+				A034_KDV /* KeyboardDiagnosticView.swift in Sources */,
+				A038_HDS /* HardwareDiagnosticServices.swift in Sources */,
+				A039_TDV /* ToolDiagnosticsView.swift in Sources */,
+				A035_LIV /* LaunchIntroView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		PHASE_FWK /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		CFG_PROJECT_DEBUG /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_CYCLE = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		CFG_PROJECT_RELEASE /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MTL_FAST_MATH = YES;
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+			};
+			name = Release;
+		};
+		CFG_TARGET_DEBUG /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = MacCleaner/MacCleaner.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_HARDENED_RUNTIME = NO;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = MacCleaner/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.maccleaner.app;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		CFG_TARGET_RELEASE /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = MacCleaner/MacCleaner.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = MacCleaner/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.maccleaner.app;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		CFGLIST_PROJECT /* Build configuration list for PBXProject "MacCleaner" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				CFG_PROJECT_DEBUG /* Debug */,
+				CFG_PROJECT_RELEASE /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		CFGLIST_TARGET /* Build configuration list for PBXNativeTarget "MacCleaner" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				CFG_TARGET_DEBUG /* Debug */,
+				CFG_TARGET_RELEASE /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+	};
+	rootObject = PROJECT /* Project object */;
+}

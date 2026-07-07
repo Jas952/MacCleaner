@@ -1,0 +1,12 @@
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.icns binary
+*.webp binary
+*.pdf binary
+*.dmg binary
+
+*.xcodeproj/** -text
+*.xcworkspace/** -text
