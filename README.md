@@ -78,3 +78,16 @@ release/                Ignored local release artifacts
 ## Distribution Notes
 
 GitHub source releases can use the ignored `release/MacCleaner.dmg` as a manually uploaded release asset. Public distribution outside local testing should use a Developer ID certificate and Apple notarization.
+
+
+<img src="./docs/assets-github/telegram-titlebar.svg" alt="Telegram Workflow title bar" />
+
+<p>
+  <img src="./docs/assets-github/n1.gif" alt="Project Demo" width="92" height="92" align="left"/>
+</p>
+<pre hspace="12">
+  <img src="./docs/assets-github/contacts/tg.jpg" alt="Telegram" height="14" /> Telegram ······ <a href="https://t.me/Jas953/">t.me/Jas953</a>
+  <img src="./docs/assets-github/contacts/lnk.jpg" alt="LinkedIn" height="14" /> LinkedIn ······ <a href="https://www.linkedin.com/in/jas952/">linkedin.com/in/jas952</a>
+  <img src="./docs/assets-github/contacts/x.jpg" alt="X" height="14" /> X        ······ <a href="https://x.com/not__jas">x.com/not__jas</a>
+</pre>
+<br clear="left" />
