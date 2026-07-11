@@ -32,6 +32,7 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           cp docs/release-notes.md "release/MacCleaner.md"
           APPCAST_TOOL="$(find "$RUNNER_TEMP/SourcePackages/artifacts" -type f -name generate_appcast -print -quit)"
+          rm -f appcast.xml
           printf '%s' "$SPARKLE_PRIVATE_KEY" | "$APPCAST_TOOL" \
             --ed-key-file - \
             --download-url-prefix "https://github.com/Jas952/MacCleaner/releases/download/$GITHUB_REF_NAME/" \
