@@ -34,6 +34,7 @@ struct ProcessDetailView: View {
     @State private var hoverTerminate = false
     @State private var hoverForceQuit = false
     @State private var hoverClose = false
+    @State private var terminationError: String?
 
     private var isProtected: Bool { ProcessTreeService.isProtected(node) }
 
@@ -59,6 +60,17 @@ struct ProcessDetailView: View {
         )
         .shadow(color: Color.black.opacity(0.18), radius: 24, x: 0, y: 8)
         .onAppear { loadDetail() }
+        .alert(
+            "Could Not Terminate Process",
+            isPresented: Binding(
+                get: { terminationError != nil },
+                set: { if !$0 { terminationError = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) { terminationError = nil }
+        } message: {
+            Text(terminationError ?? "The process could not be terminated.")
+        }
     }
 
     // MARK: - Loading
@@ -358,9 +370,7 @@ struct ProcessDetailView: View {
                     color: Color.textSecondaryLight,
                     bgColor: Color.borderLight.opacity(0.5)
                 ) {
-                    Darwin.kill(node.id, SIGTERM)
-                    onKill?(node)
-                    onDismiss()
+                    finishTermination(ProcessTreeService.killProcess(node))
                 }
 
                 // Force Quit
@@ -371,14 +381,22 @@ struct ProcessDetailView: View {
                     color: Color.accentRed,
                     bgColor: Color.accentRed.opacity(0.08)
                 ) {
-                    Darwin.kill(node.id, SIGKILL)
-                    onKill?(node)
-                    onDismiss()
+                    finishTermination(ProcessTreeService.forceKillProcess(node))
                 }
             }
         }
         .padding(.horizontal, 24)
         .padding(.vertical, 12)
+    }
+
+    private func finishTermination(_ result: KillResult) {
+        switch result {
+        case .success:
+            onKill?(node)
+            onDismiss()
+        case .protected(let reason), .failed(let reason):
+            terminationError = reason
+        }
     }
 
     private func actionButton(

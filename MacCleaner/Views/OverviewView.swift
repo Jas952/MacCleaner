@@ -17,7 +17,7 @@ struct DashboardView: View {
                         Text("Dashboard")
                             .font(.system(size: 22, weight: .semibold))
                             .foregroundStyle(Color.textPrimaryLight)
-                        Text("Live metrics · Updated every 8s")
+                        Text("Live metrics · Light data every 15s · deep data adapts to the visible screen")
                             .font(.system(size: 11))
                             .foregroundStyle(Color.textTertiaryLight)
                     }
@@ -172,6 +172,12 @@ struct DashboardView: View {
         }
         .background(Color.surfaceLight)
         .processDetailOverlay(selectedProcess: $detailProcess)
+        .onAppear {
+            monitor.setConsumer(.dashboard, active: true)
+        }
+        .onDisappear {
+            monitor.setConsumer(.dashboard, active: false)
+        }
     }
 
     private var divider: some View {

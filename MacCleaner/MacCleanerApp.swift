@@ -24,6 +24,12 @@ struct MacCleanerApp: App {
         .windowResizability(.contentSize)
         .commands {
             CommandGroup(replacing: .newItem) {}
+            CommandGroup(after: .appInfo) {
+                Button("Check for Updates…") {
+                    UpdateService.shared.checkForUpdates()
+                }
+                .disabled(!UpdateService.shared.canCheckForUpdates)
+            }
             CommandGroup(replacing: .appTermination) {
                 Button("Quit MacCleaner") {
                     let maintenance = MaintenanceService.shared
@@ -43,7 +49,7 @@ struct MacCleanerApp: App {
 
         MenuBarExtra {
             MenuBarPopover(monitor: sharedMonitor)
-                .frame(width: 382)
+                .frame(width: 420)
         } label: {
             MenuBarLabel(monitor: sharedMonitor)
         }
@@ -145,8 +151,8 @@ struct MenuBarLabel: View {
         return String(format: "%.1fG", Double(monitor.memory.used) / 1_073_741_824)
     }
 
-    private var currentCPUTempStr: String? {
-        keyTemp > 0 ? String(format: "%.0f°", keyTemp) : nil
+    private var currentCPUValue: String {
+        String(format: "%.0f%%", monitor.cpu.totalUsage * 100)
     }
 
     private var ramColor: Color {
@@ -158,7 +164,21 @@ struct MenuBarLabel: View {
     }
 
     var body: some View {
-        menuBarStatusText
+        HStack(spacing: 7) {
+            metric(
+                icon: "memorychip.fill",
+                value: currentRamStr,
+                color: ramColor,
+                statusDot: statusDot(for: severity(forLoad: monitor.memory.usedPercent))
+            )
+
+            metric(
+                icon: "cpu",
+                value: currentCPUValue,
+                color: loadColor,
+                statusDot: statusDot(for: severity(forLoad: monitor.cpu.totalUsage))
+            )
+        }
             .font(.system(size: 12, weight: .semibold, design: .rounded))
             .monospacedDigit()
             .lineLimit(1)
@@ -167,17 +187,22 @@ struct MenuBarLabel: View {
             .accessibilityLabel(accessibilitySummary)
     }
 
-    private var menuBarStatusText: Text {
-        let ram = Text("RAM ").foregroundColor(ramColor)
-            + Text(currentRamStr).foregroundColor(.primary)
+    private var loadColor: Color {
+        color(for: severity(forLoad: monitor.cpu.totalUsage))
+    }
 
-        if let temp = currentCPUTempStr {
-            return ram
-                + Text("  CPU ").foregroundColor(tempColor)
-                + Text(temp).foregroundColor(.primary)
+    private func metric(icon: String, value: String, color: Color, statusDot: String) -> some View {
+        HStack(spacing: 2) {
+            Image(systemName: icon)
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(color)
+
+            Text(value)
+                .foregroundStyle(.primary)
+
+            Text(statusDot)
+                .font(.system(size: 6))
         }
-
-        return ram
     }
 
     private var accessibilitySummary: String {
@@ -185,8 +210,10 @@ struct MenuBarLabel: View {
             "Memory \(currentRamStr)"
         ]
 
-        if let temp = currentCPUTempStr {
-            parts.append("CPU temperature \(temp)")
+        parts.append("CPU load \(currentCPUValue)")
+
+        if keyTemp > 0 {
+            parts.append(String(format: "CPU temperature %.0f degrees", keyTemp))
         }
 
         return parts.joined(separator: ", ")
@@ -212,6 +239,14 @@ struct MenuBarLabel: View {
         }
     }
 
+    private func statusDot(for severity: MenuBarMetricSeverity) -> String {
+        switch severity {
+        case .normal: return "🟢"
+        case .warning: return "🟠"
+        case .critical: return "🔴"
+        }
+    }
+
 }
 
 private enum MenuBarMetricSeverity: Int {
@@ -224,11 +259,32 @@ private enum MenuBarMetricSeverity: Int {
 
 struct MenuBarPopover: View {
     @ObservedObject var monitor: SystemMonitor
+    @State private var selectedTab: PopoverTab = .overview
 
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
             header
 
+            tabContent
+                .frame(height: 378, alignment: .top)
+        }
+        .padding(12)
+        .background(.regularMaterial)
+        .animation(.easeInOut(duration: 0.16), value: selectedTab)
+    }
+
+    @ViewBuilder
+    private var tabContent: some View {
+        switch selectedTab {
+        case .overview:
+            overviewTab
+        case .details:
+            detailsTab
+        }
+    }
+
+    private var overviewTab: some View {
+        VStack(alignment: .leading, spacing: 9) {
             PopoverHealthCard(
                 score: healthScore,
                 title: healthTitle,
@@ -259,7 +315,11 @@ struct MenuBarPopover: View {
             }
 
             PopoverBatteryStatusCard(battery: monitor.battery)
+        }
+    }
 
+    private var detailsTab: some View {
+        VStack(alignment: .leading, spacing: 9) {
             HStack(spacing: 8) {
                 if let disk = rootDisk {
                     PopoverInfoCard(
@@ -270,26 +330,26 @@ struct MenuBarPopover: View {
                         color: loadColor(disk.usedPercent),
                         progress: disk.usedPercent
                     )
+                    .frame(width: 166)
+                    .frame(maxHeight: .infinity)
                 }
 
                 PopoverNetworkView(monitor: monitor)
+                    .frame(maxWidth: .infinity)
+                    .frame(maxHeight: .infinity)
             }
+            .frame(height: 120)
 
             PopoverTemperatureView(monitor: monitor)
-
-            if !monitor.fans.isEmpty {
-                PopoverFansView(monitor: monitor)
-            }
+                .frame(height: 86)
 
             PopoverTopProcessesView(monitor: monitor)
+                .frame(height: 154)
         }
-        .padding(12)
-        .background(Color.surfaceLight)
-        .preferredColorScheme(.light)
     }
 
     private var header: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 8) {
             ZStack {
                 RoundedRectangle(cornerRadius: 7, style: .continuous)
                     .fill(Color.accentBlue.opacity(0.12))
@@ -302,13 +362,24 @@ struct MenuBarPopover: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("MacCleaner Monitor")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Color.textPrimaryLight)
+.foregroundStyle(Color.primary)
                 Text("Live device telemetry")
                     .font(.system(size: 10))
-                    .foregroundStyle(Color.textTertiaryLight)
+                    .foregroundStyle(Color.secondary.opacity(0.72))
             }
 
-            Spacer()
+            Spacer(minLength: 12)
+
+            Picker("Section", selection: $selectedTab) {
+                ForEach(PopoverTab.allCases) { tab in
+                    Text(tab.title).tag(tab)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(width: 126)
+
+            Spacer(minLength: 12)
 
             Text(healthTitle)
                 .font(.system(size: 10, weight: .semibold))
@@ -364,6 +435,20 @@ struct MenuBarPopover: View {
     }
 }
 
+private enum PopoverTab: String, CaseIterable, Identifiable {
+    case overview
+    case details
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .overview: return "Overview"
+        case .details: return "Details"
+        }
+    }
+}
+
 struct PopoverHealthCard: View {
     let score: Double
     let title: String
@@ -386,10 +471,10 @@ struct PopoverHealthCard: View {
                 VStack(spacing: 0) {
                     Text("\(Int(score))")
                         .font(.system(size: 20, weight: .bold, design: .rounded))
-                        .foregroundStyle(Color.textPrimaryLight)
+.foregroundStyle(Color.primary)
                     Text("score")
                         .font(.system(size: 8, weight: .medium))
-                        .foregroundStyle(Color.textTertiaryLight)
+                        .foregroundStyle(Color.secondary.opacity(0.72))
                 }
             }
             .frame(width: 68, height: 68)
@@ -398,7 +483,7 @@ struct PopoverHealthCard: View {
                 HStack(spacing: 6) {
                     Text(title)
                         .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(Color.textPrimaryLight)
+.foregroundStyle(Color.primary)
                     Circle()
                         .fill(color)
                         .frame(width: 6, height: 6)
@@ -406,7 +491,7 @@ struct PopoverHealthCard: View {
 
                 Text(subtitle)
                     .font(.system(size: 11))
-                    .foregroundStyle(Color.textSecondaryLight)
+                    .foregroundStyle(Color.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
@@ -415,11 +500,11 @@ struct PopoverHealthCard: View {
         .padding(14)
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color.surfaceCardLight)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .strokeBorder(Color.borderLight, lineWidth: 1)
+                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.78))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(Color(nsColor: .separatorColor).opacity(0.72), lineWidth: 0.75)
+                )
         )
     }
 }
@@ -442,43 +527,45 @@ struct PopoverMetricTile: View {
                     .frame(width: 18)
                 Text(label)
                     .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(Color.textSecondaryLight)
+                    .foregroundStyle(Color.secondary)
                 Spacer()
             }
 
             HStack(alignment: .firstTextBaseline, spacing: 5) {
                 Text(value)
                     .font(.system(size: 22, weight: .bold, design: .rounded))
-                    .foregroundStyle(Color.textPrimaryLight)
+.foregroundStyle(Color.primary)
                 Spacer()
             }
 
             Text(subtitle)
                 .font(.system(size: 10))
-                .foregroundStyle(Color.textTertiaryLight)
+                .foregroundStyle(Color.secondary.opacity(0.72))
                 .lineLimit(1)
 
-            ZStack(alignment: .leading) {
-                RoundedRectangle(cornerRadius: 3)
-                    .fill(Color.borderLight)
-                    .frame(height: 5)
-                RoundedRectangle(cornerRadius: 3)
-                    .fill(color)
-                    .frame(width: max(4, 132 * max(0, min(progress, 1))), height: 5)
+            GeometryReader { geometry in
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(Color(nsColor: .separatorColor))
+                    Capsule()
+                        .fill(color)
+                        .frame(width: max(4, geometry.size.width * max(0, min(progress, 1))))
+                }
             }
+            .frame(height: 5)
 
             MiniSparkline(values: history, color: color)
                 .frame(height: 34)
         }
         .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color.surfaceCardLight)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .strokeBorder(Color.borderLight, lineWidth: 1)
+                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.78))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(Color(nsColor: .separatorColor).opacity(0.72), lineWidth: 0.75)
+                )
         )
     }
 }
@@ -500,38 +587,41 @@ struct PopoverInfoCard: View {
                     .frame(width: 16)
                 Text(label)
                     .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(Color.textSecondaryLight)
+                    .foregroundStyle(Color.secondary)
                 Spacer()
             }
 
             Text(value)
                 .font(.system(size: 18, weight: .bold, design: .rounded))
-                .foregroundStyle(Color.textPrimaryLight)
+                .foregroundStyle(Color.primary)
                 .lineLimit(1)
+                .minimumScaleFactor(0.75)
 
             Text(detail)
                 .font(.system(size: 10))
-                .foregroundStyle(Color.textTertiaryLight)
+                .foregroundStyle(Color.secondary.opacity(0.72))
                 .lineLimit(1)
 
-            ZStack(alignment: .leading) {
-                RoundedRectangle(cornerRadius: 3)
-                    .fill(Color.borderLight)
-                    .frame(height: 5)
-                RoundedRectangle(cornerRadius: 3)
-                    .fill(color)
-                    .frame(width: max(4, 132 * max(0, min(progress, 1))), height: 5)
+            GeometryReader { geometry in
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(Color(nsColor: .separatorColor))
+                    Capsule()
+                        .fill(color)
+                        .frame(width: max(4, geometry.size.width * max(0, min(progress, 1))))
+                }
             }
+            .frame(height: 5)
         }
         .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color.surfaceCardLight)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .strokeBorder(Color.borderLight, lineWidth: 1)
+                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.78))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(Color(nsColor: .separatorColor).opacity(0.72), lineWidth: 0.75)
+                )
         )
     }
 }
@@ -587,45 +677,45 @@ struct PopoverBatteryStatusCard: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Battery")
                             .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(Color.textSecondaryLight)
+                            .foregroundStyle(Color.secondary)
                         Text(statusText)
                             .font(.system(size: 10))
-                            .foregroundStyle(Color.textTertiaryLight)
+                            .foregroundStyle(Color.secondary.opacity(0.72))
                     }
 
                     Spacer()
 
                     Text(battery.chargePercent > 0 ? "\(battery.chargePercent)%" : "N/A")
                         .font(.system(size: 22, weight: .bold, design: .rounded))
-                        .foregroundStyle(Color.textPrimaryLight)
+                        .foregroundStyle(Color.primary)
                         .monospacedDigit()
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                 }
 
-                ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 3)
-                        .fill(Color.borderLight)
-                        .frame(height: 5)
-                    RoundedRectangle(cornerRadius: 3)
-                        .fill(batteryColor)
-                        .frame(width: max(4, 238 * chargeProgress), height: 5)
+                GeometryReader { geometry in
+                    ZStack(alignment: .leading) {
+                        Capsule()
+                            .fill(Color(nsColor: .separatorColor))
+                        Capsule()
+                            .fill(batteryColor)
+                            .frame(width: max(4, geometry.size.width * chargeProgress))
+                    }
                 }
+                .frame(height: 5)
 
                 HStack(spacing: 6) {
                     batteryChip("Health", healthText, batteryColor)
                     batteryChip("Cycles", battery.cycleCount > 0 ? "\(battery.cycleCount)" : "N/A", Color.accentBlue)
                     batteryChip("Power", battery.wattage > 0 ? String(format: "%.1f W", battery.wattage) : "N/A", Color.accentAmber)
-                    batteryChip("Temp", battery.temperature > 0 ? String(format: "%.0f°C", battery.temperature) : "N/A", Color.textTertiaryLight)
+                    batteryChip("Temp", battery.temperature > 0 ? String(format: "%.0f°C", battery.temperature) : "N/A", Color.secondary)
                 }
             }
         }
         .padding(12)
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color.surfaceCardLight)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .strokeBorder(Color.borderLight, lineWidth: 1)
+                .fill(.thinMaterial)
         )
     }
 
@@ -633,7 +723,7 @@ struct PopoverBatteryStatusCard: View {
         VStack(alignment: .leading, spacing: 1) {
             Text(label)
                 .font(.system(size: 8, weight: .medium))
-                .foregroundStyle(Color.textTertiaryLight)
+                .foregroundStyle(Color.secondary.opacity(0.72))
             Text(value)
                 .font(.system(size: 9, weight: .semibold))
                 .foregroundStyle(color)
@@ -645,7 +735,7 @@ struct PopoverBatteryStatusCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 5, style: .continuous)
-                .fill(Color.surfaceLight)
+                .fill(Color(nsColor: .windowBackgroundColor).opacity(0.58))
         )
     }
 }
@@ -653,23 +743,16 @@ struct PopoverBatteryStatusCard: View {
 struct PopoverNetworkView: View {
     @ObservedObject var monitor: SystemMonitor
 
-    private var history: [Double] {
-        let maxDown = monitor.networkHistory.map(\.down).max() ?? 0
-        let maxUp = monitor.networkHistory.map(\.up).max() ?? 0
-        let maxValue = max(maxDown + maxUp, 1)
-        return monitor.networkHistory.map { min(($0.down + $0.up) / maxValue, 1) }
-    }
-
     private var networkColor: Color {
         monitor.network.isActive ? .accentBlue : .textTertiaryLight
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Label("Network", systemImage: "network")
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(Color.textSecondaryLight)
+                    .foregroundStyle(Color.secondary)
                 Spacer()
                 Text(monitor.network.interfaceName)
                     .font(.system(size: 9, weight: .medium))
@@ -684,17 +767,16 @@ struct PopoverNetworkView: View {
                 networkRate(icon: "arrow.up", title: "Up", value: NetworkInfo.formattedRate(monitor.network.uploadBytesPerSecond))
             }
 
-            MiniSparkline(values: history, color: networkColor)
-                .frame(height: 38)
         }
-        .padding(12)
+        .padding(10)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color.surfaceCardLight)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .strokeBorder(Color.borderLight, lineWidth: 1)
+                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.78))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(Color(nsColor: .separatorColor).opacity(0.72), lineWidth: 0.75)
+                )
         )
     }
 
@@ -707,18 +789,22 @@ struct PopoverNetworkView: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text(title)
                     .font(.system(size: 9))
-                    .foregroundStyle(Color.textTertiaryLight)
+                    .foregroundStyle(Color.secondary.opacity(0.72))
                 Text(value)
-                    .font(.system(size: 12, weight: .semibold).monospacedDigit())
-                    .foregroundStyle(Color.textPrimaryLight)
+                    .font(.system(size: 11, weight: .semibold).monospacedDigit())
+                    .foregroundStyle(Color.primary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.68)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 0)
         }
-        .padding(9)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 8)
         .frame(maxWidth: .infinity)
         .background(
             RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(Color.surfaceLight)
+                .fill(Color(nsColor: .windowBackgroundColor).opacity(0.58))
         )
     }
 }
@@ -760,21 +846,21 @@ struct PopoverTopProcessesView: View {
     @ObservedObject var monitor: SystemMonitor
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Label("Top Activity", systemImage: "list.bullet.rectangle")
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(Color.textSecondaryLight)
+                    .foregroundStyle(Color.secondary)
                 Spacer()
                 Text("CPU & RAM")
                     .font(.system(size: 9))
-                    .foregroundStyle(Color.textTertiaryLight)
+                    .foregroundStyle(Color.secondary.opacity(0.72))
             }
 
             if monitor.topProcesses.isEmpty {
                 Text("Collecting foreground process activity")
                     .font(.system(size: 11))
-                    .foregroundStyle(Color.textTertiaryLight)
+                    .foregroundStyle(Color.secondary.opacity(0.72))
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.vertical, 4)
             } else {
@@ -787,7 +873,7 @@ struct PopoverTopProcessesView: View {
 
                             Text(proc.name)
                                 .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(Color.textPrimaryLight)
+.foregroundStyle(Color.primary)
                                 .lineLimit(1)
                                 .truncationMode(.tail)
 
@@ -800,27 +886,28 @@ struct PopoverTopProcessesView: View {
 
                             Text(MemoryInfo.formatted(proc.memoryBytes))
                                 .font(.system(size: 10).monospacedDigit())
-                                .foregroundStyle(Color.textSecondaryLight)
+                                .foregroundStyle(Color.secondary)
                                 .frame(width: 56, alignment: .trailing)
                         }
                         .padding(.horizontal, 9)
-                        .padding(.vertical, 7)
+                                .padding(.vertical, 5)
                         .background(
                             RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                .fill(Color.surfaceLight)
+                                .fill(Color(nsColor: .windowBackgroundColor).opacity(0.58))
                         )
                     }
                 }
             }
         }
-        .padding(12)
+        .padding(10)
+        .frame(maxHeight: .infinity, alignment: .top)
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color.surfaceCardLight)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .strokeBorder(Color.borderLight, lineWidth: 1)
+                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.78))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(Color(nsColor: .separatorColor).opacity(0.72), lineWidth: 0.75)
+                )
         )
     }
 
@@ -841,11 +928,11 @@ struct PopoverFansView: View {
             HStack {
                 Label("Cooling", systemImage: "fanblades")
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(Color.textSecondaryLight)
+                    .foregroundStyle(Color.secondary)
                 Spacer()
                 Text("\(monitor.fans.count) fans")
                     .font(.system(size: 9))
-                    .foregroundStyle(Color.textTertiaryLight)
+                    .foregroundStyle(Color.secondary.opacity(0.72))
             }
             
             HStack(spacing: 8) {
@@ -858,7 +945,7 @@ struct PopoverFansView: View {
                             
                             Text(fan.label)
                                 .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(Color.textPrimaryLight)
+.foregroundStyle(Color.primary)
                         }
                         
                         if fan.actualRPM > 0 {
@@ -867,19 +954,19 @@ struct PopoverFansView: View {
                                 .foregroundStyle(rpmColor(fan))
                             Text("RPM")
                                 .font(.system(size: 9))
-                                .foregroundStyle(Color.textSecondaryLight)
+                                .foregroundStyle(Color.secondary)
                         } else {
                             Text("Auto")
                                 .font(.system(size: 14, weight: .medium))
-                                .foregroundStyle(Color.textSecondaryLight)
+                                .foregroundStyle(Color.secondary)
                             Text("MODE")
                                 .font(.system(size: 9))
-                                .foregroundStyle(Color.textSecondaryLight)
+                                .foregroundStyle(Color.secondary)
                         }
                         
                         ZStack(alignment: .leading) {
                             RoundedRectangle(cornerRadius: 2)
-                                .fill(Color.borderLight)
+                                .fill(Color(nsColor: .separatorColor))
                                 .frame(width: 60, height: 3)
                             RoundedRectangle(cornerRadius: 2)
                                 .fill(rpmColor(fan))
@@ -890,7 +977,7 @@ struct PopoverFansView: View {
                     .frame(maxWidth: .infinity)
                     .background(
                         RoundedRectangle(cornerRadius: 6, style: .continuous)
-                            .fill(Color.surfaceLight)
+                            .fill(Color(nsColor: .windowBackgroundColor).opacity(0.58))
                     )
                 }
             }
@@ -898,11 +985,7 @@ struct PopoverFansView: View {
         .padding(12)
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color.surfaceCardLight)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .strokeBorder(Color.borderLight, lineWidth: 1)
+                .fill(.thinMaterial)
         )
     }
     
@@ -918,17 +1001,7 @@ struct PopoverTemperatureView: View {
     @ObservedObject var monitor: SystemMonitor
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Label("Thermal Profile", systemImage: "thermometer.medium")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(Color.textSecondaryLight)
-                Spacer()
-                Text("live")
-                    .font(.system(size: 9))
-                    .foregroundStyle(Color.textTertiaryLight)
-            }
-            
+        VStack(alignment: .leading, spacing: 8) {
             let cpuHist = monitor.thermalHistory.map { $0.cpu }
             let socHist = monitor.thermalHistory.map { $0.soc }
             let battHist = monitor.thermalHistory.map { $0.battery }
@@ -939,14 +1012,15 @@ struct PopoverTemperatureView: View {
                 tempColumn(label: "BATT", temp: monitor.thermal.batteryTemp, history: battHist, color: .accentAmber)
             }
         }
-        .padding(12)
+        .padding(10)
+        .frame(maxHeight: .infinity, alignment: .top)
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color.surfaceCardLight)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .strokeBorder(Color.borderLight, lineWidth: 1)
+                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.78))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(Color(nsColor: .separatorColor).opacity(0.72), lineWidth: 0.75)
+                )
         )
     }
     
@@ -954,16 +1028,23 @@ struct PopoverTemperatureView: View {
     private func tempColumn(label: String, temp: Double, history: [Double], color: Color) -> some View {
         VStack(spacing: 4) {
             HStack(spacing: 2) {
-                Text(label).font(.system(size: 9, weight: .medium)).foregroundStyle(Color.textSecondaryLight)
+                Text(label).font(.system(size: 9, weight: .medium)).foregroundStyle(Color.secondary)
                 Spacer()
-                Text(temp > 0 ? String(format: "%.0f°", temp) : "--")
+                Text(temp > 0 ? String(format: "%.0f°", temp) : "N/A")
                     .font(.system(size: 11, weight: .bold, design: .monospaced))
-                    .foregroundStyle(color)
+                    .foregroundStyle(temp > 0 ? color : Color.secondary.opacity(0.65))
             }
             ZStack {
-                RoundedRectangle(cornerRadius: 5).fill(Color.surfaceLight)
-                MiniSparkline(values: history.filter { $0 > 0 }, color: color)
-                    .padding(3)
+                RoundedRectangle(cornerRadius: 5).fill(Color(nsColor: .windowBackgroundColor).opacity(0.58))
+                let validHistory = history.filter { $0 > 0 }
+                if validHistory.count > 1 {
+                    MiniSparkline(values: validHistory, color: color)
+                        .padding(3)
+                } else {
+                    Text("No data")
+                        .font(.system(size: 8, weight: .medium))
+                        .foregroundStyle(Color.secondary.opacity(0.55))
+                }
             }
             .frame(height: 28)
         }

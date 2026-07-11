@@ -134,6 +134,9 @@ class DesktopService: ObservableObject {
     @Published var desktopTotalSize: UInt64 = 0
     @Published var desktopCategorySummary: [(DesktopFileCategory, Int, UInt64)] = []
     @Published var desktopRecursiveFiles: [DesktopFile] = []
+    @Published var desktopSummaryWasLimited = false
+    @Published var desktopSummaryScannedEntries = 0
+    @Published private(set) var isScanningDesktopSummary = false
     // Screen resolution used when positions were captured
     @Published var screenSize: CGSize = NSScreen.main.map { $0.frame.size } ?? CGSize(width: 1440, height: 900)
 
@@ -167,25 +170,43 @@ class DesktopService: ObservableObject {
     // MARK: - Рекурсивный подсчёт всего Desktop
 
     func scanDesktopSummary() {
+        guard !isScanningDesktopSummary else { return }
+        isScanningDesktopSummary = true
         let root = desktopURL
         Task.detached(priority: .utility) {
             let fm = FileManager.default
-            let keys: [URLResourceKey] = [.fileSizeKey, .isDirectoryKey, .isHiddenKey, .addedToDirectoryDateKey, .contentModificationDateKey]
+            let protectionPolicy = SafeDeletionService.currentProtectionPolicy()
+            let keys: Set<URLResourceKey> = [
+                .fileSizeKey, .fileAllocatedSizeKey, .totalFileAllocatedSizeKey,
+                .isDirectoryKey, .isHiddenKey, .addedToDirectoryDateKey, .contentModificationDateKey
+            ]
             guard let enumerator = fm.enumerator(
                 at: root,
-                includingPropertiesForKeys: keys,
+                includingPropertiesForKeys: Array(keys),
                 options: [.skipsHiddenFiles, .skipsPackageDescendants]
-            ) else { return }
+            ) else {
+                await MainActor.run { self.isScanningDesktopSummary = false }
+                return
+            }
 
             var totalCount = 0
             var totalSize: UInt64 = 0
             var byCat: [DesktopFileCategory: (Int, UInt64)] = [:]
             var recursiveFiles: [DesktopFile] = []
+            var budget = ScanResourceBudget(maximumEntries: 50_000, maximumDuration: 4)
 
             while let url = enumerator.nextObject() as? URL {
-                let res = try? url.resourceValues(forKeys: Set(keys))
+                guard !Task.isCancelled, budget.consumeEntry() else { break }
+                let res = try? url.resourceValues(forKeys: keys)
+                if SafeDeletionService.isApplicationOwnedPath(url, policy: protectionPolicy) {
+                    if res?.isDirectory == true { enumerator.skipDescendants() }
+                    continue
+                }
                 guard res?.isDirectory != true else { continue }  // только файлы
-                let size = UInt64(res?.fileSize ?? 0)
+                let size = UInt64(max(
+                    res?.totalFileAllocatedSize ?? res?.fileAllocatedSize ?? res?.fileSize ?? 0,
+                    0
+                ))
                 let cat = DesktopFileCategory.classify(url)
                 let added = res?.addedToDirectoryDate ?? Date()
                 let modified = res?.contentModificationDate ?? Date()
@@ -214,12 +235,17 @@ class DesktopService: ObservableObject {
             let finalTotalSize = totalSize
             let finalSummary = summary
             let finalRecursiveFiles = recursiveFiles
+            let finalLimited = budget.wasLimited
+            let finalScannedEntries = budget.consumedEntries
 
             await MainActor.run {
                 self.desktopTotalCount = finalTotalCount
                 self.desktopTotalSize = finalTotalSize
                 self.desktopCategorySummary = finalSummary
                 self.desktopRecursiveFiles = finalRecursiveFiles
+                self.desktopSummaryWasLimited = finalLimited
+                self.desktopSummaryScannedEntries = finalScannedEntries
+                self.isScanningDesktopSummary = false
             }
         }
     }
@@ -349,6 +375,7 @@ class DesktopService: ObservableObject {
         let screenSz = NSScreen.main?.frame.size ?? CGSize(width: 1440, height: 900)
         Task.detached(priority: .utility) {
             let fm = FileManager.default
+            let protectionPolicy = SafeDeletionService.currentProtectionPolicy()
             let keys: [URLResourceKey] = [.fileSizeKey, .addedToDirectoryDateKey, .contentModificationDateKey, .isDirectoryKey, .isHiddenKey]
 
             guard let contents = try? fm.contentsOfDirectory(
@@ -367,6 +394,7 @@ class DesktopService: ObservableObject {
             let iconsPerCol = max(1, Int(screenSz.height / 90))
 
             for url in contents {
+                guard !SafeDeletionService.isApplicationOwnedPath(url, policy: protectionPolicy) else { continue }
                 let res = try? url.resourceValues(forKeys: Set(keys))
                 let isDir = res?.isDirectory ?? false
                 let size = UInt64(res?.fileSize ?? 0)
@@ -529,15 +557,17 @@ class DesktopService: ObservableObject {
     func trash(files toDelete: [DesktopFile], completion: @escaping (Int) -> Void) {
         Task.detached(priority: .utility) {
             var count = 0
+            var deletedIDs: Set<UUID> = []
             for f in toDelete {
-                if (try? FileManager.default.trashItem(at: f.url, resultingItemURL: nil)) != nil {
+                if (try? SafeDeletionService.moveToTrash(f.url)) != nil {
                     count += 1
+                    deletedIDs.insert(f.id)
                 }
             }
-            let deleted = toDelete.map { $0.id }
             let finalCount = count
+            let successfulIDs = deletedIDs
             await MainActor.run {
-                self.files.removeAll { deleted.contains($0.id) }
+                self.files.removeAll { successfulIDs.contains($0.id) }
                 self.totalSize = self.files.reduce(0) { $0 + $1.size }
                 completion(finalCount)
                 self.scanDesktopSummary()

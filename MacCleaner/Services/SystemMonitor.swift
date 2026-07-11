@@ -5,6 +5,9 @@ import IOKit.ps
 import SystemConfiguration
 
 final class SystemMonitor: ObservableObject {
+    enum Consumer: Hashable {
+        case dashboard, processes, windows, fans, ai
+    }
     @Published var memory: MemoryInfo = .init(total: 0, used: 0, free: 0, wired: 0, compressed: 0, cached: 0)
     @Published var cpu: CPUInfo = .init(totalUsage: 0, coreUsages: [], processorCount: 0)
     @Published var disks: [DiskInfo] = []
@@ -29,22 +32,25 @@ final class SystemMonitor: ObservableObject {
     private var cachedPrimaryNetworkInterface: (name: String, refreshedAt: Date)?
     private var cachedExternalBatteryDevices: (devices: [BatteryDeviceInfo], refreshedAt: Date)?
     private var isRefreshInFlight = false
+    private var activeConsumers: Set<Consumer> = []
 
     /// Tick counter: expensive tasks run less often than CPU/RAM sampling.
     private var refreshTick: Int = 0
-    private static let refreshInterval: TimeInterval = 15.0
-    private static let sensorInterval = 4       // every 60 seconds
-    private static let processInterval = 7      // every 105 seconds; force refresh in process-heavy screens
-    private static let batteryInterval = 20     // every 5 minutes
-    private static let externalBatteryInterval = 120 // every 30 minutes; system_profiler is expensive
+    private static let activeRefreshInterval: TimeInterval = 15.0
+    private static let idleRefreshInterval: TimeInterval = 30.0
+    private static let activeSensorInterval = 4       // every 60 seconds
+    private static let idleSensorInterval = 8         // every 2 minutes
+    private static let liveProcessInterval = 2        // every 30 seconds in Processes / Windows
+    private static let summaryProcessInterval = 4     // every 60 seconds on Dashboard / AI summaries
+    private static let idleProcessInterval = 120      // every 30 minutes in the background
+    private static let batteryInterval = 40           // every 10 minutes
+    private static let externalBatteryInterval = 1_440 // every 6 hours; system_profiler is expensive
     private static let networkInterfaceCacheTTL: TimeInterval = 60
     private static let externalBatteryCacheTTL: TimeInterval = 30 * 60
 
     init() {
         refresh()
-        timer = Timer.scheduledTimer(withTimeInterval: Self.refreshInterval, repeats: true) { [weak self] _ in
-            self?.refresh()
-        }
+        scheduleMonitoringTimer()
     }
 
     deinit {
@@ -52,6 +58,31 @@ final class SystemMonitor: ObservableObject {
         if let prev = prevCPUInfo {
             vm_deallocate(mach_task_self_, vm_address_t(bitPattern: prev), vm_size_t(prevCPUCount) * vm_size_t(MemoryLayout<integer_t>.stride))
         }
+    }
+
+    func setConsumer(_ consumer: Consumer, active: Bool) {
+        let hadActiveConsumers = !activeConsumers.isEmpty
+        if active {
+            activeConsumers.insert(consumer)
+        } else {
+            activeConsumers.remove(consumer)
+        }
+        if hadActiveConsumers != !activeConsumers.isEmpty {
+            scheduleMonitoringTimer()
+        }
+    }
+
+    static func recommendedRefreshInterval(hasActiveConsumers: Bool) -> TimeInterval {
+        hasActiveConsumers ? activeRefreshInterval : idleRefreshInterval
+    }
+
+    private func scheduleMonitoringTimer() {
+        let interval = Self.recommendedRefreshInterval(hasActiveConsumers: !activeConsumers.isEmpty)
+        timer?.invalidate()
+        timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+            self?.refresh()
+        }
+        timer?.tolerance = min(3, interval * 0.15)
     }
 
     func refresh(forceProcesses: Bool = false, forceSensors: Bool = false) {
@@ -65,8 +96,15 @@ final class SystemMonitor: ObservableObject {
         let networkInfo = fetchNetwork()
 
         // ── Determine what else to fetch ──
-        let runSensors = forceSensors || (refreshTick > 1 && refreshTick % Self.sensorInterval == 0)
-        let runProcesses = forceProcesses || refreshTick == 1 || (refreshTick > 1 && refreshTick % Self.processInterval == 0)
+        let wantsLiveProcesses = !activeConsumers.isDisjoint(with: [.processes, .windows])
+        let wantsSummaryProcesses = !activeConsumers.isDisjoint(with: [.dashboard, .ai])
+        let wantsFrequentSensors = !activeConsumers.isDisjoint(with: [.dashboard, .fans, .ai])
+        let processInterval = wantsLiveProcesses
+            ? Self.liveProcessInterval
+            : (wantsSummaryProcesses ? Self.summaryProcessInterval : Self.idleProcessInterval)
+        let sensorInterval = wantsFrequentSensors ? Self.activeSensorInterval : Self.idleSensorInterval
+        let runSensors = forceSensors || (refreshTick > 1 && refreshTick % sensorInterval == 0)
+        let runProcesses = forceProcesses || refreshTick == 1 || (refreshTick > 1 && refreshTick % processInterval == 0)
         let runDisks = refreshTick == 1 || runProcesses
         let runBattery = refreshTick == 1 || refreshTick % Self.batteryInterval == 0
         let runExternalBattery = refreshTick > 1 && refreshTick % Self.externalBatteryInterval == 0
@@ -722,7 +760,11 @@ final class SystemMonitor: ObservableObject {
     }
 }
 
-// MARK: - Root Daemon Management
+// MARK: - Retired root daemon implementation
+
+// Kept temporarily for source-history context only. It is not compiled and must not
+// be re-enabled: the legacy daemon accepted unauthenticated HTTP commands as root.
+#if false
 
 final class HelperManager: ObservableObject {
     static let shared = HelperManager()
@@ -1018,6 +1060,77 @@ final class HelperManager: ObservableObject {
             } catch {
                 DispatchQueue.main.async {
                     self.isInstalling = false
+                    completion(false, error.localizedDescription)
+                }
+            }
+        }
+    }
+}
+#endif
+
+// MARK: - Legacy helper cleanup
+
+/// Detects and removes the helper installed by older MacCleaner builds.
+/// New builds never install or communicate with a privileged daemon.
+@MainActor
+final class HelperManager: ObservableObject {
+    static let shared = HelperManager()
+
+    @Published private(set) var isInstalled = false
+    @Published private(set) var isInstalling = false
+
+    private static let binaryPath = "/Library/PrivilegedHelperTools/com.maccleaner.daemon"
+    private static let plistPath = "/Library/LaunchDaemons/com.maccleaner.daemon.plist"
+
+    private init() {
+        checkStatus()
+    }
+
+    func checkStatus() {
+        let fm = FileManager.default
+        isInstalled = fm.fileExists(atPath: Self.binaryPath) || fm.fileExists(atPath: Self.plistPath)
+    }
+
+    func installHelper(completion: @escaping (Bool, String?) -> Void) {
+        completion(false, "The legacy root helper has been retired for security. MacCleaner now uses user-scoped system APIs.")
+    }
+
+    func removeLegacyHelper(completion: @escaping (Bool, String?) -> Void) {
+        guard isInstalled, !isInstalling else {
+            completion(!isInstalled, nil)
+            return
+        }
+
+        isInstalling = true
+        let command = "launchctl bootout system/com.maccleaner.daemon 2>/dev/null || launchctl unload '\(Self.plistPath)' 2>/dev/null || true; rm -f '\(Self.binaryPath)' '\(Self.plistPath)'"
+        let escaped = command
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        let script = "do shell script \"\(escaped)\" with administrator privileges"
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            let task = Process()
+            task.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+            task.arguments = ["-e", script]
+            let errorPipe = Pipe()
+            task.standardError = errorPipe
+
+            do {
+                try task.run()
+                task.waitUntilExit()
+                let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
+                let errorText = String(data: errorData, encoding: .utf8)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                DispatchQueue.main.async {
+                    self.isInstalling = false
+                    self.checkStatus()
+                    let success = task.terminationStatus == 0 && !self.isInstalled
+                    completion(success, success ? nil : (errorText?.isEmpty == false ? errorText : "Could not remove the legacy helper."))
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.isInstalling = false
+                    self.checkStatus()
                     completion(false, error.localizedDescription)
                 }
             }

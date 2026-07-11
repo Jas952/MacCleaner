@@ -259,14 +259,32 @@ struct SectionLabel: View {
 
 struct AppFooter: View {
     let version: String
+    @ObservedObject var updateService: UpdateService
+    @State private var showsUpdatePopover = false
     
     var body: some View {
-        HStack {
-            // Version
+        HStack(spacing: 8) {
             Text("MacCleaner v\(version)")
                 .font(.system(size: 11))
                 .foregroundStyle(Color.textTertiaryLight)
-            
+
+            Button {
+                showsUpdatePopover.toggle()
+            } label: {
+                Image(systemName: "info.circle")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Color.textSecondaryLight)
+            }
+            .buttonStyle(.plain)
+            .help("About and Updates")
+            .popover(isPresented: $showsUpdatePopover, arrowEdge: .bottom) {
+                UpdatePopoverView(updateService: updateService)
+            }
+
+            Text(updateService.status.footerText)
+                .font(.system(size: 11, weight: updateService.status == .upToDate ? .regular : .medium))
+                .foregroundStyle(footerStatusColor)
+
             Spacer()
         }
         .padding(.horizontal, 20)
@@ -278,6 +296,14 @@ struct AppFooter: View {
                 .frame(height: 1),
             alignment: .top
         )
+    }
+
+    private var footerStatusColor: Color {
+        switch updateService.status {
+        case .available: return .accentBlue
+        case .failed: return .accentAmber
+        default: return .textTertiaryLight
+        }
     }
 }
 

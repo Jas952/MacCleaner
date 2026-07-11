@@ -673,6 +673,7 @@ private struct ThermalPowerPanel: View {
 
 struct NetworkTestPanel: View {
     @ObservedObject private var service: NetworkDiagnosticService
+    @State private var testMode: NetworkDiagnosticService.TestMode = .quick
     private let minimumContentHeight: CGFloat
 
     init(service: NetworkDiagnosticService, minimumContentHeight: CGFloat = 400) {
@@ -715,6 +716,14 @@ struct NetworkTestPanel: View {
 
                 Spacer()
                 HStack(spacing: 7) {
+                    Picker("Mode", selection: $testMode) {
+                        ForEach(NetworkDiagnosticService.TestMode.allCases) { mode in
+                            Text(mode.rawValue).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .frame(width: 138)
+                    .disabled(service.isRunning)
                     lastUsedBadge(service.lastUsedAt)
                     qualityBadge
                 }
@@ -757,7 +766,7 @@ struct NetworkTestPanel: View {
 
     private var startDial: some View {
         Button {
-            service.runQuickTest()
+            service.runTest(mode: testMode)
         } label: {
             ZStack {
                 Circle()
@@ -788,7 +797,7 @@ struct NetworkTestPanel: View {
         }
         .buttonStyle(.plain)
         .disabled(service.isRunning)
-        .help("Run network speed test")
+        .help("Run \(testMode.rawValue.lowercased()) network test")
     }
 
     private func speedReadout(title: String, value: Double?, icon: String, color: Color, info: String) -> some View {

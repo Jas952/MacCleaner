@@ -92,10 +92,10 @@ enum JunkType: CaseIterable, Hashable {
 
     var isSelectedByDefault: Bool {
         switch self {
-        case .xcodeJunk, .downloads:
-            return false
-        default:
+        case .userCache, .browserCache:
             return true
+        case .systemCache, .xcodeJunk, .systemLogs, .userLogs, .unusedDMG, .trash, .downloads, .screenCaptures:
+            return false
         }
     }
 }
@@ -122,6 +122,9 @@ enum CleanupStatsCategory: String, Codable, CaseIterable, Hashable {
     case trash = "Trash"
     case downloads = "Downloads"
     case largeFiles = "Large Files"
+    case duplicates = "Duplicates"
+    case similarPhotos = "Similar Photos"
+    case cloud = "Cloud Reclaim"
     case uninstall = "Uninstall"
     case other = "Other"
 
@@ -136,6 +139,9 @@ enum CleanupStatsCategory: String, Codable, CaseIterable, Hashable {
         case .trash: return "Trash"
         case .downloads: return "Downloads"
         case .largeFiles: return "Large"
+        case .duplicates: return "Duplicates"
+        case .similarPhotos: return "Photos"
+        case .cloud: return "Cloud"
         case .uninstall: return "Apps"
         case .other: return "Other"
         }
@@ -148,6 +154,9 @@ enum CleanupStatsCategory: String, Codable, CaseIterable, Hashable {
         case .developerCache: return .accentPurple
         case .logs, .appSupport: return .textTertiary
         case .trash, .downloads, .largeFiles: return .accentGreen
+        case .duplicates: return .accentPurple
+        case .similarPhotos: return .pink
+        case .cloud: return .accentBlue
         case .uninstall: return .accentRed
         case .other: return .textSecondary
         }
@@ -157,7 +166,7 @@ enum CleanupStatsCategory: String, Codable, CaseIterable, Hashable {
         switch self {
         case .systemCache, .userCache, .browserCache, .developerCache, .logs:
             return true
-        case .appSupport, .trash, .downloads, .largeFiles, .uninstall, .other:
+        case .appSupport, .trash, .downloads, .largeFiles, .duplicates, .similarPhotos, .cloud, .uninstall, .other:
             return false
         }
     }
@@ -204,6 +213,17 @@ struct CleanupStatsRecordInput {
     let source: String
 }
 
+private struct CleanupStatsDerivedState {
+    var stableBytes: UInt64 = 0
+    var rebuildableBytes: UInt64 = 0
+    var stableCleanCount = 0
+    var systemOrCacheCleanCount = 0
+    var rebuildableCleanCount = 0
+    var cleanedLast30DaysBytes: UInt64 = 0
+    var categoryTotals: [(category: CleanupStatsCategory, bytes: UInt64, count: Int)] = []
+    var topRecurringEntries: [CleanupStatsEntry] = []
+}
+
 @MainActor
 final class CleanupStatsStore: ObservableObject {
     static let shared = CleanupStatsStore()
@@ -214,6 +234,7 @@ final class CleanupStatsStore: ObservableObject {
 
     private let maxEntries = 800
     private let maxEvents = 600
+    private var derived = CleanupStatsDerivedState()
     private let encoder: JSONEncoder = {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
@@ -231,11 +252,11 @@ final class CleanupStatsStore: ObservableObject {
     }
 
     var totalBytes: UInt64 {
-        stableEntries.reduce(0) { $0 + $1.lastBytes }
+        derived.stableBytes
     }
 
     var rebuildableBytes: UInt64 {
-        rebuildableEntries.reduce(0) { $0 + $1.lastBytes }
+        derived.rebuildableBytes
     }
 
     var lifetimeThroughputBytes: UInt64 {
@@ -243,51 +264,31 @@ final class CleanupStatsStore: ObservableObject {
     }
 
     var totalCleanCount: Int {
-        stableEntries.reduce(0) { $0 + $1.cleanCount }
+        derived.stableCleanCount
     }
 
     var cleanedLast30DaysBytes: UInt64 {
-        uniqueBytesSince(days: 30, includeRebuildable: false)
+        derived.cleanedLast30DaysBytes
     }
 
     var systemOrCacheCleanCount: Int {
-        stableEntries.filter(\.isSystemOrCache).reduce(0) { $0 + $1.cleanCount }
+        derived.systemOrCacheCleanCount
     }
 
     var rebuildableCleanCount: Int {
-        rebuildableEntries.reduce(0) { $0 + $1.cleanCount }
+        derived.rebuildableCleanCount
     }
 
     var trackedTargetCount: Int {
         entries.count
     }
 
-    private var stableEntries: [CleanupStatsEntry] {
-        entries.filter { !$0.isRebuildable }
-    }
-
-    private var rebuildableEntries: [CleanupStatsEntry] {
-        entries.filter(\.isRebuildable)
-    }
-
     var topRecurringEntries: [CleanupStatsEntry] {
-        entries
-            .sorted {
-                if $0.cleanCount == $1.cleanCount { return $0.lastBytes > $1.lastBytes }
-                return $0.cleanCount > $1.cleanCount
-            }
-            .prefix(5)
-            .map { $0 }
+        derived.topRecurringEntries
     }
 
     var categoryTotals: [(category: CleanupStatsCategory, bytes: UInt64, count: Int)] {
-        CleanupStatsCategory.allCases.compactMap { category in
-            let matching = stableEntries.filter { $0.category == category }
-            let bytes = matching.reduce(0) { $0 + $1.lastBytes }
-            let count = matching.reduce(0) { $0 + $1.cleanCount }
-            return bytes > 0 || count > 0 ? (category, bytes, count) : nil
-        }
-        .sorted { $0.bytes > $1.bytes }
+        derived.categoryTotals
     }
 
     func uniqueBytesSince(days: Int, includeRebuildable: Bool = true) -> UInt64 {
@@ -353,6 +354,7 @@ final class CleanupStatsStore: ObservableObject {
         if events.count > maxEvents {
             events = Array(events.suffix(maxEvents))
         }
+        rebuildDerivedState()
         saveAsync()
     }
 
@@ -456,6 +458,7 @@ final class CleanupStatsStore: ObservableObject {
             await MainActor.run {
                 self.entries = compactEntries
                 self.events = Array(compactEvents)
+                self.rebuildDerivedState()
                 self.isLoaded = true
                 self.saveAsync()
             }
@@ -482,6 +485,38 @@ final class CleanupStatsStore: ObservableObject {
                 print("Failed to save cleanup stats: \(error)")
             }
         }
+    }
+
+    private func rebuildDerivedState() {
+        var next = CleanupStatsDerivedState()
+        var categories: [CleanupStatsCategory: (bytes: UInt64, count: Int)] = [:]
+
+        for entry in entries {
+            if entry.isRebuildable {
+                next.rebuildableBytes &+= entry.lastBytes
+                next.rebuildableCleanCount += entry.cleanCount
+            } else {
+                next.stableBytes &+= entry.lastBytes
+                next.stableCleanCount += entry.cleanCount
+                if entry.isSystemOrCache { next.systemOrCacheCleanCount += entry.cleanCount }
+                let previous = categories[entry.category] ?? (0, 0)
+                categories[entry.category] = (
+                    previous.bytes &+ entry.lastBytes,
+                    previous.count + entry.cleanCount
+                )
+            }
+        }
+
+        next.categoryTotals = categories.map { category, totals in
+            (category: category, bytes: totals.bytes, count: totals.count)
+        }
+        .sorted { $0.bytes > $1.bytes }
+        next.topRecurringEntries = Array(entries.sorted {
+            if $0.cleanCount == $1.cleanCount { return $0.lastBytes > $1.lastBytes }
+            return $0.cleanCount > $1.cleanCount
+        }.prefix(5))
+        next.cleanedLast30DaysBytes = uniqueBytesSince(days: 30, includeRebuildable: false)
+        derived = next
     }
 
     nonisolated private static func compactEntries(_ entries: [CleanupStatsEntry], limit: Int) -> [CleanupStatsEntry] {
@@ -593,9 +628,9 @@ private let lockedPrefixes: [String] = [
 ]
 
 func isDeletablePath(_ path: String) -> Bool {
-    if safeDeletablePrefixes.contains(where: { path.hasPrefix($0) }) { return true }
-    if lockedPrefixes.contains(where: { path.hasPrefix($0) }) { return false }
-    return path.hasPrefix(NSHomeDirectory())
+    if safeDeletablePrefixes.contains(where: { SafeDeletionService.isPath(path, inside: $0) }) { return true }
+    if lockedPrefixes.contains(where: { SafeDeletionService.isPath(path, inside: $0) }) { return false }
+    return SafeDeletionService.isPath(path, inside: NSHomeDirectory())
 }
 
 func relativePath(_ url: URL) -> String {
@@ -612,13 +647,24 @@ func relativePath(_ url: URL) -> String {
 // MARK: - InternalStorageTool
 
 enum InternalStorageTool: String, CaseIterable {
-    case uninstaller = "Uninstaller"
-    case analyzer    = "Disk Map"
-    case largeFiles  = "Large Files"
     case junkFiles   = "Junk Files"
+    case uninstaller = "Uninstaller"
+    case largeFiles  = "Large Files"
+    case analyzer    = "Disk Map"
+    case advisor     = "Cleanup Advisor"
+    case duplicates  = "Exact Duplicates"
+    case similarPhotos = "Similar Photos"
+    case cloud       = "Cloud Reclaim"
+
+    static let coreTools: [InternalStorageTool] = [.junkFiles, .uninstaller, .largeFiles, .analyzer]
+    static let smartTools: [InternalStorageTool] = [.advisor, .duplicates, .similarPhotos, .cloud]
 
     var icon: String {
         switch self {
+        case .advisor:     return "sparkle.magnifyingglass"
+        case .duplicates:  return "doc.on.doc.fill"
+        case .similarPhotos: return "photo.stack.fill"
+        case .cloud:       return "icloud.and.arrow.down.fill"
         case .uninstaller: return "trash.fill"
         case .analyzer:    return "network"
         case .largeFiles:  return "doc.text.magnifyingglass"
@@ -628,6 +674,10 @@ enum InternalStorageTool: String, CaseIterable {
 
     var description: String {
         switch self {
+        case .advisor: return "Rank reclaim opportunities by size, safety, age, and rebuild cost."
+        case .duplicates: return "Verify byte-for-byte copies and safely keep at least one."
+        case .similarPhotos: return "Find visually similar exported photos privately on this Mac."
+        case .cloud: return "Free local iCloud space while preserving cloud originals."
         case .uninstaller: return "Completely remove apps and their hidden library files."
         case .analyzer:    return "Visualize your disk usage with an interactive network graph."
         case .largeFiles:  return "Find and delete the largest files taking up space."
@@ -637,6 +687,10 @@ enum InternalStorageTool: String, CaseIterable {
 
     var color: Color {
         switch self {
+        case .advisor:     return .green
+        case .duplicates:  return .purple
+        case .similarPhotos: return .pink
+        case .cloud:       return .cyan
         case .uninstaller: return .pink
         case .analyzer:    return .indigo
         case .largeFiles:  return .orange
@@ -646,12 +700,35 @@ enum InternalStorageTool: String, CaseIterable {
 
     var shortName: String {
         switch self {
+        case .advisor: return "Advisor"
+        case .duplicates: return "Duplicates"
+        case .similarPhotos: return "Photos"
+        case .cloud: return "Cloud"
         case .uninstaller: return "Remove"
         case .analyzer:    return "Disk Map"
         case .largeFiles:  return "Large"
         case .junkFiles:   return "Junk"
         }
     }
+}
+
+enum JunkScanMode: String, Sendable {
+    case efficient = "Efficient"
+    case thorough = "Thorough"
+
+    var maximumEntries: Int { self == .efficient ? 100_000 : 500_000 }
+    var maximumDuration: TimeInterval { self == .efficient ? 8 : 45 }
+    var maximumEntriesPerRoot: Int { self == .efficient ? 20_000 : 100_000 }
+    var maximumDurationPerRoot: TimeInterval { self == .efficient ? 1.2 : 6 }
+    var maximumCollectedFiles: Int { self == .efficient ? 2_000 : 10_000 }
+}
+
+enum LargeFileScanMode: String, Sendable {
+    case efficient = "Efficient"
+    case thorough = "Thorough"
+
+    var maximumEntries: Int { self == .efficient ? 200_000 : 1_000_000 }
+    var maximumDuration: TimeInterval { self == .efficient ? 12 : 90 }
 }
 
 // MARK: - StorageAnalyzerService
@@ -668,6 +745,14 @@ class StorageAnalyzerService: ObservableObject {
     @Published var isScanningJunk = false
     @Published var scanProgress: Double = 0.0
     @Published var currentPath: String = ""
+    @Published var scanWasLimited = false
+    @Published var scannedEntryCount = 0
+    @Published var largeFileScanWasLimited = false
+    @Published var largeFileScannedEntryCount = 0
+    @Published var largeFileScanMode: LargeFileScanMode = .efficient
+    @Published var junkScanWasLimited = false
+    @Published var junkScannedEntryCount = 0
+    @Published var junkScanMode: JunkScanMode = .efficient
 
     @Published var selectedDiskNodes: Set<FSNode> = []
 
@@ -681,18 +766,28 @@ class StorageAnalyzerService: ObservableObject {
     private var diskMapScanStartedAt = Date.distantPast
     private var diskMapScannedEntries = 0
     private var diskMapLimitReached = false
+    private let scanStateLock = NSLock()
 
-    func cancel() { isCancelled = true }
+    func cancel() {
+        scanStateLock.lock()
+        isCancelled = true
+        scanStateLock.unlock()
+    }
 
-    func scan(url: URL = URL(fileURLWithPath: "/")) {
+    func scan(url: URL = FileManager.default.homeDirectoryForCurrentUser) {
         guard !isScanning else { return }
+        let requestedRoot = url.standardizedFileURL
+        scanStateLock.lock()
         isCancelled = false
         diskMapScanStartedAt = Date()
         diskMapScannedEntries = 0
         diskMapLimitReached = false
+        scanStateLock.unlock()
         DispatchQueue.main.async {
             self.isScanning = true
             self.scanProgress = 0.0
+            self.scanWasLimited = false
+            self.scannedEntryCount = 0
             self.packedCircles = []
             self.largeFiles = []
             self.rootNode = nil
@@ -703,36 +798,24 @@ class StorageAnalyzerService: ObservableObject {
 
         DispatchQueue.global(qos: .utility).async {
             var allFiles: [FSNode] = []
-            let fm = FileManager.default
-            let home = fm.homeDirectoryForCurrentUser
             var lastPathUpdate = Date.distantPast
             func reportPath(_ value: String) {
                 let now = Date()
                 guard now.timeIntervalSince(lastPathUpdate) > 0.25 else { return }
                 lastPathUpdate = now
-                DispatchQueue.main.async { self.currentPath = value }
-            }
-
-            reportPath(home.lastPathComponent)
-            var root = self.scanDirectory(url: home, allFiles: &allFiles, depth: 0, progress: reportPath)
-
-            let libraryURL = home.appendingPathComponent("Library")
-            if fm.fileExists(atPath: libraryURL.path),
-               !(root.children?.contains(where: { $0.url == libraryURL }) ?? false) {
-                reportPath("Library")
-                let libNode = self.scanDirectory(url: libraryURL, allFiles: &allFiles, depth: 1, progress: reportPath)
-                if libNode.size > 0 {
-                    var children = root.children ?? []
-                    children.append(libNode)
-                    children.sort { $0.size > $1.size }
-                    root = FSNode(url: root.url, name: root.name, isDirectory: true,
-                                 size: root.size + libNode.size,
-                                 creationDate: root.creationDate, lastAccessDate: root.lastAccessDate,
-                                 category: root.category, isDeletable: root.isDeletable, children: children)
+                let progress = self.diskMapProgressSnapshot()
+                DispatchQueue.main.async {
+                    self.currentPath = value
+                    self.scanProgress = progress.progress
+                    self.scannedEntryCount = progress.entries
                 }
             }
 
-            if self.isCancelled && !self.diskMapLimitReached {
+            reportPath(requestedRoot.lastPathComponent)
+            let root = self.scanDirectory(url: requestedRoot, allFiles: &allFiles, depth: 0, progress: reportPath)
+
+            let finalState = self.diskMapProgressSnapshot()
+            if finalState.cancelled && !finalState.limited {
                 DispatchQueue.main.async { self.isScanning = false }
                 return
             }
@@ -744,7 +827,115 @@ class StorageAnalyzerService: ObservableObject {
                 self.rootNode = root
                 self.largeFiles = topLarge
                 self.isScanning = false
+                self.scanProgress = 1.0
+                self.scanWasLimited = finalState.limited
+                self.scannedEntryCount = finalState.entries
                 self.navigateTo(node: root)
+            }
+        }
+    }
+
+    func scanLargeFiles(
+        url: URL = FileManager.default.homeDirectoryForCurrentUser,
+        mode: LargeFileScanMode = .efficient
+    ) {
+        guard !isScanning else { return }
+        let root = url.standardizedFileURL
+        scanStateLock.lock()
+        isCancelled = false
+        scanStateLock.unlock()
+
+        DispatchQueue.main.async {
+            self.isScanning = true
+            self.scanProgress = 0
+            self.currentPath = root.path
+            self.largeFiles = []
+            self.largeFileScanWasLimited = false
+            self.largeFileScannedEntryCount = 0
+            self.largeFileScanMode = mode
+        }
+
+        DispatchQueue.global(qos: .utility).async {
+            let fm = FileManager.default
+            let keys: Set<URLResourceKey> = [
+                .isRegularFileKey, .isDirectoryKey, .isSymbolicLinkKey,
+                .fileSizeKey, .fileAllocatedSizeKey, .totalFileAllocatedSizeKey,
+                .creationDateKey, .contentAccessDateKey, .isPackageKey
+            ]
+            var budget = ScanResourceBudget(
+                maximumEntries: mode.maximumEntries,
+                maximumDuration: mode.maximumDuration
+            )
+            let protectionPolicy = SafeDeletionService.currentProtectionPolicy()
+            var candidates: [FSNode] = []
+            var lastProgressAt = Date.distantPast
+
+            guard let enumerator = fm.enumerator(
+                at: root,
+                includingPropertiesForKeys: Array(keys),
+                options: [.skipsHiddenFiles, .skipsPackageDescendants],
+                errorHandler: { _, _ in true }
+            ) else {
+                DispatchQueue.main.async { self.isScanning = false }
+                return
+            }
+
+            while let fileURL = enumerator.nextObject() as? URL {
+                if budget.consumedEntries.isMultiple(of: 64), self.diskScanIsCancelled() {
+                    budget.markLimited()
+                    break
+                }
+                guard budget.consumeEntry() else { break }
+                guard let values = try? fileURL.resourceValues(forKeys: keys) else { continue }
+                if SafeDeletionService.isApplicationOwnedPath(fileURL, policy: protectionPolicy) {
+                    if values.isDirectory == true { enumerator.skipDescendants() }
+                    continue
+                }
+                guard values.isRegularFile == true, values.isSymbolicLink != true else { continue }
+
+                let size = UInt64(max(
+                    values.totalFileAllocatedSize ?? values.fileAllocatedSize ?? values.fileSize ?? 0,
+                    0
+                ))
+                guard size >= 10 * 1_048_576 else { continue }
+                candidates.append(FSNode(
+                    url: fileURL,
+                    name: fileURL.lastPathComponent,
+                    isDirectory: false,
+                    size: size,
+                    creationDate: values.creationDate,
+                    lastAccessDate: values.contentAccessDate,
+                    category: self.determineCategory(url: fileURL, isDir: false, isPackage: false),
+                    isDeletable: isDeletablePath(fileURL.path),
+                    children: nil
+                ))
+
+                if candidates.count > 300 {
+                    candidates = Array(candidates.sorted { $0.size > $1.size }.prefix(150))
+                }
+
+                let now = Date()
+                if now.timeIntervalSince(lastProgressAt) >= 0.25 {
+                    lastProgressAt = now
+                    let entries = budget.consumedEntries
+                    let progress = min(0.99, Double(entries) / Double(mode.maximumEntries))
+                    DispatchQueue.main.async {
+                        self.currentPath = fileURL.path
+                        self.largeFileScannedEntryCount = entries
+                        self.scanProgress = progress
+                    }
+                }
+            }
+
+            let result = Array(candidates.sorted { $0.size > $1.size }.prefix(150))
+            let wasLimited = budget.wasLimited
+            let entries = budget.consumedEntries
+            DispatchQueue.main.async {
+                self.largeFiles = result
+                self.largeFileScanWasLimited = wasLimited
+                self.largeFileScannedEntryCount = entries
+                self.scanProgress = 1
+                self.isScanning = false
             }
         }
     }
@@ -865,6 +1056,8 @@ class StorageAnalyzerService: ObservableObject {
     }
 
     private func shouldStopDiskMapScan() -> Bool {
+        scanStateLock.lock()
+        defer { scanStateLock.unlock() }
         if isCancelled { return true }
 
         diskMapScannedEntries += 1
@@ -877,6 +1070,25 @@ class StorageAnalyzerService: ObservableObject {
         }
 
         return false
+    }
+
+    private func diskScanIsCancelled() -> Bool {
+        scanStateLock.lock()
+        defer { scanStateLock.unlock() }
+        return isCancelled
+    }
+
+    private func diskMapProgressSnapshot() -> (progress: Double, entries: Int, cancelled: Bool, limited: Bool) {
+        scanStateLock.lock()
+        defer { scanStateLock.unlock() }
+        let entryProgress = Double(diskMapScannedEntries) / Double(maxDiskMapEntries)
+        let timeProgress = Date().timeIntervalSince(diskMapScanStartedAt) / maxDiskMapDuration
+        return (
+            min(0.99, max(entryProgress, timeProgress)),
+            diskMapScannedEntries,
+            isCancelled,
+            diskMapLimitReached
+        )
     }
 
     // MARK: - Organic Radial Layout
@@ -911,37 +1123,151 @@ class StorageAnalyzerService: ObservableObject {
         return packed
     }
 
-    func scanJunk() {
+    func scanJunk(mode: JunkScanMode = .efficient) {
         guard !isScanningJunk else { return }
         DispatchQueue.main.async {
             self.isScanningJunk = true
+            self.junkScanMode = mode
             self.junkCategories = []
+            self.junkScanWasLimited = false
+            self.junkScannedEntryCount = 0
         }
         DispatchQueue.global(qos: .utility).async {
             let fm = FileManager.default
             let home = fm.homeDirectoryForCurrentUser
             var categories: [JunkCategory] = []
+            var budget = ScanResourceBudget(
+                maximumEntries: mode.maximumEntries,
+                maximumDuration: mode.maximumDuration
+            )
+            let protectionPolicy = SafeDeletionService.currentProtectionPolicy(home: home)
+            let userCacheRoot = home.appendingPathComponent("Library/Caches", isDirectory: true)
+            let browserRoots = [
+                home.appendingPathComponent("Library/Caches/Google/Chrome"),
+                home.appendingPathComponent("Library/Caches/com.apple.Safari"),
+                home.appendingPathComponent("Library/Caches/com.mozilla.firefox"),
+                home.appendingPathComponent("Library/Caches/com.microsoft.edgemac"),
+                home.appendingPathComponent("Library/Caches/com.brave.Browser")
+            ]
+            let userCacheExclusions: [URL] = browserRoots.compactMap { root in
+                let relative = root.path.dropFirst(userCacheRoot.path.count)
+                    .split(separator: "/", omittingEmptySubsequences: true)
+                guard let first = relative.first else { return nil }
+                return userCacheRoot.appendingPathComponent(String(first), isDirectory: true)
+            }
 
-            func scanPath(_ url: URL, collectFiles: Bool = true) -> (UInt64, [URL], Int) {
+            func scanPath(
+                _ url: URL,
+                collectFiles: Bool = true,
+                excludedRoots: [URL] = [],
+                minimumCollectedBytes: UInt64 = 0
+            ) -> (UInt64, [URL], Int) {
+                guard budget.beginRoot() else { return (0, [], 0) }
                 var size: UInt64 = 0
                 var files: [URL] = []
                 var fileCount = 0
-                let enumerator = fm.enumerator(at: url, includingPropertiesForKeys: [.fileSizeKey, .isDirectoryKey],
-                                               options: [.skipsHiddenFiles])
-                while let fileUrl = enumerator?.nextObject() as? URL {
-                    let rv = try? fileUrl.resourceValues(forKeys: [.fileSizeKey, .isDirectoryKey])
-                    if rv?.isDirectory == false {
-                        size += UInt64(rv?.fileSize ?? 0)
-                        fileCount += 1
-                        if collectFiles { files.append(fileUrl) }
+                let keys: Set<URLResourceKey> = [
+                    .fileSizeKey, .fileAllocatedSizeKey, .totalFileAllocatedSizeKey,
+                    .isDirectoryKey, .isRegularFileKey, .isSymbolicLinkKey
+                ]
+                guard let enumerator = fm.enumerator(
+                    at: url,
+                    includingPropertiesForKeys: Array(keys),
+                    options: [.skipsHiddenFiles, .skipsPackageDescendants],
+                    errorHandler: { _, _ in true }
+                ) else { return (0, [], 0) }
+                let rootDeadline = Date().addingTimeInterval(mode.maximumDurationPerRoot)
+                var rootEntries = 0
+                while let fileURL = enumerator.nextObject() as? URL {
+                    if rootEntries >= mode.maximumEntriesPerRoot
+                        || (rootEntries.isMultiple(of: 64) && Date() >= rootDeadline) {
+                        budget.markLimited()
+                        break
                     }
+                    guard budget.consumeEntry() else { break }
+                    rootEntries += 1
+                    let values = try? fileURL.resourceValues(forKeys: keys)
+                    let isExcluded = excludedRoots.contains {
+                        SafeDeletionService.isPath(fileURL.path, inside: $0.path)
+                    }
+                    if isExcluded
+                        || SafeDeletionService.isApplicationOwnedPath(fileURL, policy: protectionPolicy) {
+                        if values?.isDirectory == true { enumerator.skipDescendants() }
+                        continue
+                    }
+                    guard values?.isRegularFile == true, values?.isSymbolicLink != true else { continue }
+                    let allocated = values?.totalFileAllocatedSize
+                        ?? values?.fileAllocatedSize
+                        ?? values?.fileSize
+                        ?? 0
+                    if collectFiles && UInt64(max(allocated, 0)) < minimumCollectedBytes { continue }
+                    if collectFiles && files.count >= mode.maximumCollectedFiles {
+                        budget.markLimited()
+                        break
+                    }
+                    size &+= UInt64(max(allocated, 0))
+                    fileCount += 1
+                    if collectFiles { files.append(fileURL) }
                 }
                 return (size, files, fileCount)
             }
 
-            let userCacheRoot = home.appendingPathComponent("Library/Caches")
-            let (userCacheSize, userCacheFiles, userCacheCount) = scanPath(userCacheRoot, collectFiles: false)
+            func scanMatchingFiles(_ roots: [URL], predicate: (URL) -> Bool) -> (UInt64, [URL], Int) {
+                var size: UInt64 = 0
+                var files: [URL] = []
+                for root in roots {
+                    guard budget.beginRoot() else { break }
+                    guard let contents = try? fm.contentsOfDirectory(
+                        at: root,
+                        includingPropertiesForKeys: [
+                            .fileSizeKey, .fileAllocatedSizeKey, .totalFileAllocatedSizeKey,
+                            .isRegularFileKey, .isSymbolicLinkKey
+                        ],
+                        options: [.skipsHiddenFiles]
+                    ) else { continue }
+                    for url in contents {
+                        guard budget.consumeEntry(), files.count < mode.maximumCollectedFiles else {
+                            budget.markLimited()
+                            break
+                        }
+                        guard predicate(url) else { continue }
+                        let values = try? url.resourceValues(forKeys: [
+                            .fileSizeKey, .fileAllocatedSizeKey, .totalFileAllocatedSizeKey,
+                            .isRegularFileKey, .isSymbolicLinkKey
+                        ])
+                        guard values?.isRegularFile == true,
+                              values?.isSymbolicLink != true,
+                              !SafeDeletionService.isApplicationOwnedPath(url, policy: protectionPolicy) else { continue }
+                        let allocated = values?.totalFileAllocatedSize
+                            ?? values?.fileAllocatedSize
+                            ?? values?.fileSize
+                            ?? 0
+                        size &+= UInt64(max(allocated, 0))
+                        files.append(url)
+                    }
+                }
+                return (size, files, files.count)
+            }
+
+            // Prioritize user-actionable roots. Browser containers are excluded
+            // from the broad cache walk and measured exactly once below.
+            let (userCacheSize, userCacheFiles, userCacheCount) = scanPath(
+                userCacheRoot,
+                collectFiles: false,
+                excludedRoots: Array(Set(userCacheExclusions))
+            )
             if userCacheSize > 0 { categories.append(JunkCategory(type: .userCache, size: userCacheSize, files: userCacheFiles, cleanupRoots: [userCacheRoot], fileCount: userCacheCount)) }
+
+            var browserSize: UInt64 = 0
+            var browserCount = 0
+            var existingBrowserRoots: [URL] = []
+            for root in browserRoots where fm.fileExists(atPath: root.path) {
+                let result = scanPath(root, collectFiles: false)
+                browserSize += result.0
+                browserCount += result.2
+                existingBrowserRoots.append(root)
+            }
+            if browserSize > 0 { categories.append(JunkCategory(type: .browserCache, size: browserSize, files: [], cleanupRoots: existingBrowserRoots, fileCount: browserCount)) }
 
             let xcodeRoot = home.appendingPathComponent("Library/Developer/Xcode/DerivedData")
             let (xcodeSize, xcodeFiles, xcodeCount) = scanPath(xcodeRoot, collectFiles: false)
@@ -955,75 +1281,114 @@ class StorageAnalyzerService: ObservableObject {
             let (trashSize, trashFiles, trashCount) = scanPath(trashRoot, collectFiles: false)
             if trashSize > 0 { categories.append(JunkCategory(type: .trash, size: trashSize, files: trashFiles, cleanupRoots: [trashRoot], fileCount: trashCount)) }
 
-            let (downloadsSize, downloadsFiles, _) = scanPath(home.appendingPathComponent("Downloads"))
-            if downloadsSize > 0 { categories.append(JunkCategory(type: .downloads, size: downloadsSize, files: downloadsFiles)) }
+            let downloadsRoot = home.appendingPathComponent("Downloads")
+            let (_, downloadsFiles, _) = scanPath(
+                downloadsRoot,
+                minimumCollectedBytes: 50 * 1_048_576
+            )
+
+            let (dmgSize, dmgFiles, dmgCount) = scanMatchingFiles(
+                [downloadsRoot],
+                predicate: { $0.pathExtension.lowercased() == "dmg" }
+            )
+            if dmgSize > 0 { categories.append(JunkCategory(type: .unusedDMG, size: dmgSize, files: dmgFiles, fileCount: dmgCount)) }
+
+            let screenshotNames = ["screenshot", "screen shot", "снимок экрана", "capture"]
+            let (captureSize, captureFiles, captureCount) = scanMatchingFiles(
+                [home.appendingPathComponent("Desktop"), home.appendingPathComponent("Downloads")],
+                predicate: { url in
+                    let name = url.deletingPathExtension().lastPathComponent.lowercased()
+                    return screenshotNames.contains { name.contains($0) }
+                }
+            )
+            if captureSize > 0 { categories.append(JunkCategory(type: .screenCaptures, size: captureSize, files: captureFiles, fileCount: captureCount)) }
+
+            let specializedPaths = Set((dmgFiles + captureFiles).map { $0.standardizedFileURL.path })
+            let largeDownloads = downloadsFiles.filter { url in
+                guard !specializedPaths.contains(url.standardizedFileURL.path) else { return false }
+                let values = try? url.resourceValues(forKeys: [
+                    .fileSizeKey, .fileAllocatedSizeKey, .totalFileAllocatedSizeKey
+                ])
+                let allocated = values?.totalFileAllocatedSize
+                    ?? values?.fileAllocatedSize
+                    ?? values?.fileSize
+                    ?? 0
+                return allocated >= 50 * 1_048_576
+            }
+            let largeDownloadSize = largeDownloads.reduce(UInt64(0)) { total, url in
+                let values = try? url.resourceValues(forKeys: [
+                    .fileSizeKey, .fileAllocatedSizeKey, .totalFileAllocatedSizeKey
+                ])
+                let allocated = values?.totalFileAllocatedSize
+                    ?? values?.fileAllocatedSize
+                    ?? values?.fileSize
+                    ?? 0
+                return total &+ UInt64(max(allocated, 0))
+            }
+            if largeDownloadSize > 0 {
+                categories.append(JunkCategory(
+                    type: .downloads,
+                    size: largeDownloadSize,
+                    files: largeDownloads,
+                    fileCount: largeDownloads.count
+                ))
+            }
+
+            // System-wide roots are review-only and scanned last so they cannot
+            // starve useful user-space results within the global budget.
+            let systemCacheRoot = URL(fileURLWithPath: "/Library/Caches")
+            let (systemCacheSize, systemCacheFiles, systemCacheCount) = scanPath(systemCacheRoot, collectFiles: false)
+            if systemCacheSize > 0 { categories.append(JunkCategory(type: .systemCache, size: systemCacheSize, files: systemCacheFiles, cleanupRoots: [systemCacheRoot], fileCount: systemCacheCount)) }
+
+            let systemLogsRoot = URL(fileURLWithPath: "/Library/Logs")
+            let (systemLogsSize, systemLogsFiles, systemLogsCount) = scanPath(systemLogsRoot, collectFiles: false)
+            if systemLogsSize > 0 { categories.append(JunkCategory(type: .systemLogs, size: systemLogsSize, files: systemLogsFiles, cleanupRoots: [systemLogsRoot], fileCount: systemLogsCount)) }
 
             DispatchQueue.main.async {
                 self.junkCategories = categories.sorted { $0.size > $1.size }
+                self.junkScanWasLimited = budget.wasLimited
+                self.junkScannedEntryCount = budget.consumedEntries
                 self.isScanningJunk = false
             }
         }
     }
 
     func trashItem(url: URL, completion: @escaping (Bool, String?) -> Void) {
-        let sizeBefore = itemSize(at: url)
-        let statsInput = CleanupStatsRecordInput(
-            path: url.path,
-            displayName: url.lastPathComponent,
-            category: CleanupStatsStore.inferCategory(path: url.path, fallback: .largeFiles),
-            bytes: sizeBefore,
-            source: "Storage"
-        )
-
-        func complete(_ success: Bool, _ errorMessage: String?) {
-            if success {
+        DispatchQueue.global(qos: .utility).async {
+            var measurementBudget = ScanResourceBudget(maximumEntries: 20_000, maximumDuration: 1)
+            let sizeBefore = self.itemSize(at: url, budget: &measurementBudget)
+            let statsInput = CleanupStatsRecordInput(
+                path: url.path,
+                displayName: url.lastPathComponent,
+                category: CleanupStatsStore.inferCategory(path: url.path, fallback: .largeFiles),
+                bytes: sizeBefore,
+                source: "Storage"
+            )
+            do {
+                _ = try SafeDeletionService.moveToTrash(url)
                 Task { @MainActor in
                     CleanupStatsStore.shared.record([statsInput])
                 }
-            }
-            DispatchQueue.main.async { completion(success, errorMessage) }
-        }
-
-        NSWorkspace.shared.recycle([url]) { _, error in
-            DispatchQueue.global(qos: .utility).async {
-                if let error = error {
-                    print("Failed to recycle via NSWorkspace: \(error)")
-                    _ = try? FileManager.default.contentsOfDirectory(atPath: url.deletingLastPathComponent().path)
-                    do {
-                        var outUrl: NSURL?
-                        try FileManager.default.trashItem(at: url, resultingItemURL: &outUrl)
-                        complete(true, nil)
-                    } catch {
-                        print("Failed to recycle via FileManager: \(error)")
-                        do {
-                            try FileManager.default.removeItem(at: url)
-                            complete(true, nil)
-                        } catch let hardError {
-                            print("Failed to hard delete: \(hardError)")
-                            let scriptSource = """
-                            tell application "Finder"
-                                delete POSIX file "\(url.path)"
-                            end tell
-                            """
-                            if let script = NSAppleScript(source: scriptSource) {
-                                var scriptError: NSDictionary?
-                                script.executeAndReturnError(&scriptError)
-                                if scriptError == nil {
-                                    complete(true, nil)
-                                    return
-                                }
-                            }
-                            complete(false, hardError.localizedDescription)
-                        }
-                    }
-                } else {
-                    complete(true, nil)
+                DispatchQueue.main.async { completion(true, nil) }
+            } catch {
+                DispatchQueue.main.async {
+                    completion(false, "Could not move the item to Trash: \(error.localizedDescription)")
                 }
             }
         }
     }
 
     func cleanJunkCategory(_ category: JunkCategory, completion: @escaping (JunkCleanResult) -> Void) {
+        if category.type == .trash {
+            completion(JunkCleanResult(
+                success: false,
+                removedCount: 0,
+                skippedCount: category.itemCount,
+                failedCount: 0,
+                message: "Use Finder's Empty Trash command to permanently remove Trash contents."
+            ))
+            return
+        }
         DispatchQueue.global(qos: .utility).async {
             let fm = FileManager.default
             var statsByPath: [String: CleanupStatsRecordInput] = [:]
@@ -1032,6 +1397,9 @@ class StorageAnalyzerService: ObservableObject {
             var skippedCount = 0
             var removedCount = 0
             let statsCategory = CleanupStatsStore.category(for: category.type)
+            let protectionPolicy = SafeDeletionService.currentProtectionPolicy()
+            let browserRoots = self.userBrowserCacheRoots()
+            var measurementBudget = ScanResourceBudget(maximumEntries: 50_000, maximumDuration: 5)
 
             if !category.cleanupRoots.isEmpty {
                 for root in category.cleanupRoots {
@@ -1043,13 +1411,18 @@ class StorageAnalyzerService: ObservableObject {
 	                            var removedChildren = 0
 	                            var removedBytes: UInt64 = 0
 	                            for child in children {
-	                                if self.shouldSkipJunkURL(child, category: category) {
+	                                if self.shouldSkipJunkURL(
+                                        child,
+                                        category: category,
+                                        protectionPolicy: protectionPolicy,
+                                        browserRoots: browserRoots
+                                    ) {
 	                                    skippedCount += 1
 	                                    continue
 	                                }
-	                                let childSize = self.itemSize(at: child)
+	                                let childSize = self.itemSize(at: child, budget: &measurementBudget)
 	                                do {
-	                                    try fm.removeItem(at: child)
+                                            _ = try SafeDeletionService.moveToTrash(child)
                                     removedChildren += 1
                                     removedBytes += childSize
 	                                } catch {
@@ -1070,7 +1443,7 @@ class StorageAnalyzerService: ObservableObject {
                                     displayName: root.lastPathComponent.isEmpty ? category.name : root.lastPathComponent,
                                     category: statsCategory,
                                     bytes: removedBytes,
-                                    source: "Junk Files"
+                                    source: "Junk Files · moved to Trash"
                                 )
                             }
                         } catch {
@@ -1085,14 +1458,19 @@ class StorageAnalyzerService: ObservableObject {
                 for url in category.files {
                     autoreleasepool {
 	                        guard fm.fileExists(atPath: url.path) else { return }
-	                        if self.shouldSkipJunkURL(url, category: category) {
+	                        if self.shouldSkipJunkURL(
+                                url,
+                                category: category,
+                                protectionPolicy: protectionPolicy,
+                                browserRoots: browserRoots
+                            ) {
 	                            skippedCount += 1
 	                            return
 	                        }
 
-	                        let sizeBefore = self.itemSize(at: url)
+	                        let sizeBefore = self.itemSize(at: url, budget: &measurementBudget)
                         do {
-                            try fm.removeItem(at: url)
+                            _ = try SafeDeletionService.moveToTrash(url)
                             removedCount += 1
                             let statsPath = self.statsPath(forJunkURL: url, category: category)
                             let displayName = URL(fileURLWithPath: statsPath).lastPathComponent
@@ -1167,9 +1545,16 @@ class StorageAnalyzerService: ObservableObject {
         }
     }
 
-    private func shouldSkipJunkURL(_ url: URL, category: JunkCategory) -> Bool {
+    private func shouldSkipJunkURL(
+        _ url: URL,
+        category: JunkCategory,
+        protectionPolicy: SafeDeletionService.ProtectionPolicy,
+        browserRoots: [URL]
+    ) -> Bool {
         let name = url.lastPathComponent.lowercased()
         let path = url.path.lowercased()
+
+        if SafeDeletionService.isProtectedApplicationPath(url, policy: protectionPolicy) { return true }
 
         switch category.type {
         case .userCache, .systemCache:
@@ -1186,6 +1571,14 @@ class StorageAnalyzerService: ObservableObject {
             if protectedNames.contains(where: { name == $0 || path.contains("/\($0)") }) {
                 return true
             }
+            if category.type == .userCache {
+                if browserRoots.contains(where: {
+                    SafeDeletionService.isPath($0.path, inside: url.path)
+                        || SafeDeletionService.isPath(url.path, inside: $0.path)
+                }) {
+                    return true
+                }
+            }
             return path.contains("/library/containers/com.apple.")
                 || path.contains("/library/group containers/group.com.apple.")
         case .xcodeJunk:
@@ -1194,6 +1587,17 @@ class StorageAnalyzerService: ObservableObject {
         default:
             return false
         }
+    }
+
+    private func userBrowserCacheRoots() -> [URL] {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        return [
+            home.appendingPathComponent("Library/Caches/Google/Chrome"),
+            home.appendingPathComponent("Library/Caches/com.apple.Safari"),
+            home.appendingPathComponent("Library/Caches/com.mozilla.firefox"),
+            home.appendingPathComponent("Library/Caches/com.microsoft.edgemac"),
+            home.appendingPathComponent("Library/Caches/com.brave.Browser")
+        ]
     }
 
     private func isPermissionDenied(_ error: Error) -> Bool {
@@ -1205,27 +1609,49 @@ class StorageAnalyzerService: ObservableObject {
         )
     }
 
-    private func itemSize(at url: URL) -> UInt64 {
+    private func itemSize(at url: URL, budget: inout ScanResourceBudget) -> UInt64 {
         let fm = FileManager.default
+        guard !SafeDeletionService.isProtectedApplicationPath(url) else { return 0 }
         var isDir: ObjCBool = false
         guard fm.fileExists(atPath: url.path, isDirectory: &isDir) else { return 0 }
 
         if !isDir.boolValue {
-            let values = try? url.resourceValues(forKeys: [.fileSizeKey])
-            return UInt64(values?.fileSize ?? 0)
+            guard budget.consumeEntry() else { return 0 }
+            let values = try? url.resourceValues(forKeys: [
+                .fileSizeKey, .fileAllocatedSizeKey, .totalFileAllocatedSizeKey
+            ])
+            let allocated = values?.totalFileAllocatedSize
+                ?? values?.fileAllocatedSize
+                ?? values?.fileSize
+                ?? 0
+            return UInt64(max(allocated, 0))
         }
 
+        let keys: Set<URLResourceKey> = [
+            .fileSizeKey, .fileAllocatedSizeKey, .totalFileAllocatedSizeKey, .isDirectoryKey
+        ]
         guard let enumerator = fm.enumerator(
             at: url,
-            includingPropertiesForKeys: [.fileSizeKey, .isDirectoryKey],
-            options: [.skipsHiddenFiles]
+            includingPropertiesForKeys: Array(keys),
+            options: [.skipsHiddenFiles, .skipsPackageDescendants],
+            errorHandler: { _, _ in true }
         ) else { return 0 }
 
+        let protectionPolicy = SafeDeletionService.currentProtectionPolicy()
         var total: UInt64 = 0
-        for case let fileURL as URL in enumerator {
-            let values = try? fileURL.resourceValues(forKeys: [.fileSizeKey, .isDirectoryKey])
+        while let fileURL = enumerator.nextObject() as? URL {
+            guard budget.consumeEntry() else { break }
+            let values = try? fileURL.resourceValues(forKeys: keys)
+            if SafeDeletionService.isApplicationOwnedPath(fileURL, policy: protectionPolicy) {
+                if values?.isDirectory == true { enumerator.skipDescendants() }
+                continue
+            }
             if values?.isDirectory == false {
-                total += UInt64(values?.fileSize ?? 0)
+                let allocated = values?.totalFileAllocatedSize
+                    ?? values?.fileAllocatedSize
+                    ?? values?.fileSize
+                    ?? 0
+                total &+= UInt64(max(allocated, 0))
             }
         }
         return total

@@ -1,0 +1,92 @@
+name: Release MacCleaner
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Import Developer ID certificate
+        env:
+          CERTIFICATE_P12: ${{ secrets.DEVELOPER_ID_APPLICATION_P12_BASE64 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.DEVELOPER_ID_APPLICATION_P12_PASSWORD }}
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/release.keychain-db"
+          echo "$CERTIFICATE_P12" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security create-keychain -p actions "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p actions "$KEYCHAIN"
+          security import "$RUNNER_TEMP/certificate.p12" -P "$CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN" login.keychain-db
+          security set-key-partition-list -S apple-tool:,apple: -s -k actions "$KEYCHAIN"
+
+      - name: Configure Apple notarization
+        env:
+          API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
+          API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+        run: |
+          echo "$API_KEY_P8" | base64 --decode > "$RUNNER_TEMP/AuthKey.p8"
+          xcrun notarytool store-credentials MacCleanerNotary \
+            --key "$RUNNER_TEMP/AuthKey.p8" \
+            --key-id "$API_KEY_ID" \
+            --issuer "$API_ISSUER_ID"
+
+      - name: Build, sign and notarize DMG
+        env:
+          DEVELOPER_ID_APPLICATION: ${{ secrets.DEVELOPER_ID_APPLICATION }}
+          NOTARY_KEYCHAIN_PROFILE: MacCleanerNotary
+        run: ./scripts/build_dmg.sh
+
+      - name: Resolve Sparkle publishing tools
+        run: |
+          xcodebuild -resolvePackageDependencies \
+            -project MacCleaner.xcodeproj \
+            -scheme MacCleaner \
+            -clonedSourcePackagesDirPath "$RUNNER_TEMP/SourcePackages"
+
+      - name: Generate signed appcast
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          cp docs/release-notes.md "release/MacCleaner.md"
+          APPCAST_TOOL="$(find "$RUNNER_TEMP/SourcePackages/artifacts" -type f -name generate_appcast -print -quit)"
+          printf '%s' "$SPARKLE_PRIVATE_KEY" | "$APPCAST_TOOL" \
+            --ed-key-file - \
+            --download-url-prefix "https://github.com/Jas952/MacCleaner/releases/download/$GITHUB_REF_NAME/" \
+            --link "https://github.com/Jas952/MacCleaner" \
+            --embed-release-notes \
+            -o appcast.xml \
+            release
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            release/MacCleaner.dmg \
+            --title "MacCleaner ${GITHUB_REF_NAME#v}" \
+            --notes-file docs/release-notes.md \
+            --verify-tag
+
+      - name: Publish appcast on main
+        run: |
+          cp release/appcast.xml "$RUNNER_TEMP/appcast.xml"
+          git fetch origin main
+          git checkout main
+          cp "$RUNNER_TEMP/appcast.xml" appcast.xml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add appcast.xml
+          git diff --cached --quiet || git commit -m "Update appcast for $GITHUB_REF_NAME"
+          git push origin main

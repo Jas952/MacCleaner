@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import Darwin
 
 struct WebAppsView: View {
     @ObservedObject var packager: PakePackager
@@ -516,6 +517,15 @@ struct PakeStatusPanel: View {
                         .clipShape(RoundedRectangle(cornerRadius: 7))
                     }
 
+                    if packager.isPackaging {
+                        Button("Cancel") {
+                            packager.cancelPackaging()
+                        }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Color.accentRed)
+                    }
+
                     Button {
                         packager.dismissStatus()
                     } label: {
@@ -652,6 +662,13 @@ final class PakePackager: ObservableObject {
         statusDismissed = true
     }
 
+    func cancelPackaging() {
+        guard isPackaging else { return }
+        Self.processRegistry.cancelCurrent()
+        statusTitle = "Cancelling packaging"
+        statusMessage = "Stopping Pake and its child processes…"
+    }
+
     func openInstalledApp(_ url: URL) {
         NSWorkspace.shared.open(url)
     }
@@ -667,7 +684,7 @@ final class PakePackager: ObservableObject {
     private func deleteInstalledAppBundle(_ app: InstalledWebApp) async {
         do {
             await terminateRunningApp(for: app)
-            try FileManager.default.trashItem(at: app.url, resultingItemURL: nil)
+            _ = try SafeDeletionService.moveToTrash(app.url)
             storedApps.removeValue(forKey: Self.normalizedName(app.name))
             if let presetName = app.presetName {
                 storedApps.removeValue(forKey: Self.normalizedName(presetName))
@@ -802,33 +819,30 @@ final class PakePackager: ObservableObject {
             .lowercased()
     }
 
+    nonisolated private static let processRegistry = PakeProcessRegistry()
+
     nonisolated private static func runPake(url: URL, appName: String, outputDirectory: URL) -> PakeRunResult {
-        let firstAttempt = runPakeAttempt(url: url, appName: appName, outputDirectory: outputDirectory, useCnMirror: false)
-        guard !firstAttempt.success, firstAttempt.shouldRetryWithCnMirror else {
-            return firstAttempt
-        }
-
-        let retry = runPakeAttempt(url: url, appName: appName, outputDirectory: outputDirectory, useCnMirror: true)
-        if retry.success {
-            return retry
-        }
-
+        let result = runPakeAttempt(url: url, appName: appName, outputDirectory: outputDirectory, timeout: 300)
+        guard !result.success, result.shouldRetryWithCnMirror else { return result }
         return PakeRunResult(
             success: false,
-            userMessage: "Pake failed after retrying with CN mirrors. \(retry.userMessage)",
+            userMessage: "\(result.userMessage) Automatic third-party mirror retry is disabled; review your network or Pake configuration before retrying.",
             shouldRetryWithCnMirror: false
         )
     }
 
-    nonisolated private static func runPakeAttempt(url: URL, appName: String, outputDirectory: URL, useCnMirror: Bool) -> PakeRunResult {
+    nonisolated private static func runPakeAttempt(url: URL, appName: String, outputDirectory: URL, timeout: TimeInterval) -> PakeRunResult {
         do {
             try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
 
             let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            guard let pakeExecutable = findPakeExecutable() else {
+                return PakeRunResult(success: false, userMessage: "Pake CLI is not installed in a known location.", shouldRetryWithCnMirror: false)
+            }
+            process.executableURL = pakeExecutable
             process.currentDirectoryURL = outputDirectory
-            process.arguments = ["pake", url.absoluteString, "--name", appName]
-            process.environment = processEnvironment(useCnMirror: useCnMirror)
+            process.arguments = [url.absoluteString, "--name", appName]
+            process.environment = processEnvironment()
 
             let pipe = Pipe()
             process.standardOutput = pipe
@@ -844,13 +858,16 @@ final class PakePackager: ObservableObject {
             let semaphore = DispatchSemaphore(value: 0)
             process.terminationHandler = { _ in semaphore.signal() }
             try process.run()
-            if semaphore.wait(timeout: .now() + 300) == .timedOut {
-                process.terminate()
+            _ = setpgid(process.processIdentifier, process.processIdentifier)
+            processRegistry.set(process)
+            defer { processRegistry.clear(process) }
+            if semaphore.wait(timeout: .now() + timeout) == .timedOut {
+                processRegistry.terminate(process)
                 pipe.fileHandleForReading.readabilityHandler = nil
                 return PakeRunResult(
                     success: false,
-                    userMessage: "Pake timed out while installing dependencies.",
-                    shouldRetryWithCnMirror: !useCnMirror
+                    userMessage: "Pake timed out after \(Int(timeout)) seconds.",
+                    shouldRetryWithCnMirror: false
                 )
             }
 
@@ -865,7 +882,7 @@ final class PakePackager: ObservableObject {
                 return PakeRunResult(success: true, userMessage: "Pake finished.", shouldRetryWithCnMirror: false)
             }
 
-            let shouldRetryWithCnMirror = !useCnMirror && Self.shouldRetryPakeWithCnMirror(log)
+            let shouldRetryWithCnMirror = Self.shouldRetryPakeWithCnMirror(log)
             let message: String
             if process.terminationStatus == 127 || log.localizedCaseInsensitiveContains("not found") {
                 message = "Pake CLI is not installed or not available in PATH."
@@ -876,9 +893,7 @@ final class PakePackager: ObservableObject {
             } else if log.localizedCaseInsensitiveContains("network") || log.localizedCaseInsensitiveContains("timed out") {
                 message = "Pake failed while downloading dependencies or website assets."
             } else if log.localizedCaseInsensitiveContains("installing package") || log.localizedCaseInsensitiveContains("npm install") {
-                message = useCnMirror
-                    ? "Pake failed while installing its dependencies with CN mirrors. \(Self.shortLogSummary(log))"
-                    : "Pake failed while installing its dependencies. Retrying with CN mirrors..."
+                message = "Pake failed while installing its dependencies. \(Self.shortLogSummary(log))"
             } else {
                 let summary = Self.shortLogSummary(log)
                 message = summary.isEmpty
@@ -892,19 +907,25 @@ final class PakePackager: ObservableObject {
         }
     }
 
-    nonisolated private static func processEnvironment(useCnMirror: Bool) -> [String: String] {
+    nonisolated private static func processEnvironment() -> [String: String] {
         var environment = ProcessInfo.processInfo.environment
         environment["PAKE_CREATE_APP"] = "1"
-        if useCnMirror {
-            environment["PAKE_USE_CN_MIRROR"] = "1"
-        }
-
-        let existingPath = environment["PATH"] ?? ""
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         let commonPaths = "\(home)/Library/pnpm:\(home)/.npm-global/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
-        environment["PATH"] = existingPath.isEmpty ? commonPaths : "\(commonPaths):\(existingPath)"
+        environment["PATH"] = commonPaths
 
         return environment
+    }
+
+    nonisolated private static func findPakeExecutable() -> URL? {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let candidates = [
+            home.appendingPathComponent("Library/pnpm/pake"),
+            home.appendingPathComponent(".npm-global/bin/pake"),
+            URL(fileURLWithPath: "/opt/homebrew/bin/pake"),
+            URL(fileURLWithPath: "/usr/local/bin/pake")
+        ]
+        return candidates.first { FileManager.default.isExecutableFile(atPath: $0.path) }
     }
 
     nonisolated private static func shouldRetryPakeWithCnMirror(_ log: String) -> Bool {
@@ -1007,12 +1028,16 @@ private struct PakeRunResult {
 }
 
 private final class ProcessOutputBuffer: @unchecked Sendable {
+    private let maximumBytes = 1_048_576
     private var value = Data()
     private let lock = NSLock()
 
     func append(_ data: Data) {
         lock.lock()
         value.append(data)
+        if value.count > maximumBytes {
+            value.removeFirst(value.count - maximumBytes)
+        }
         lock.unlock()
     }
 
@@ -1021,6 +1046,42 @@ private final class ProcessOutputBuffer: @unchecked Sendable {
         let copy = value
         lock.unlock()
         return copy
+    }
+}
+
+private final class PakeProcessRegistry: @unchecked Sendable {
+    private let lock = NSLock()
+    private weak var process: Process?
+
+    func set(_ process: Process) {
+        lock.lock()
+        self.process = process
+        lock.unlock()
+    }
+
+    func clear(_ process: Process) {
+        lock.lock()
+        if self.process === process { self.process = nil }
+        lock.unlock()
+    }
+
+    func cancelCurrent() {
+        lock.lock()
+        let current = process
+        lock.unlock()
+        if let current { terminate(current) }
+    }
+
+    func terminate(_ process: Process) {
+        let pid = process.processIdentifier
+        guard pid > 0 else { return }
+        _ = Darwin.kill(-pid, SIGTERM)
+        process.terminate()
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 2) {
+            if process.isRunning {
+                _ = Darwin.kill(-pid, SIGKILL)
+            }
+        }
     }
 }
 

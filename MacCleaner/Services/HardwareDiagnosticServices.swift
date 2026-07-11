@@ -1221,6 +1221,13 @@ struct NetworkDiagnosticSnapshot: Codable {
 
 @MainActor
 final class NetworkDiagnosticService: ObservableObject {
+    enum TestMode: String, CaseIterable, Identifiable {
+        case quick = "Quick · ~0.8 MB"
+        case full = "Full · ~19.5 MB"
+
+        var id: Self { self }
+    }
+
     @Published private(set) var isRunning = false
     @Published private(set) var snapshot: NetworkDiagnosticSnapshot?
     @Published private(set) var status = "Ready"
@@ -1236,14 +1243,14 @@ final class NetworkDiagnosticService: ObservableObject {
         status = stored.value?.statusLabel ?? "Offline"
     }
 
-    func runQuickTest() {
+    func runTest(mode: TestMode = .quick) {
         guard !isRunning else { return }
         isRunning = true
         status = "Resolving IP"
 
         checkTask?.cancel()
         checkTask = Task {
-            let result = await Self.collectSnapshot { [weak self] phase in
+            let result = await Self.collectSnapshot(mode: mode) { [weak self] phase in
                 Task { @MainActor in
                     self?.status = phase
                 }
@@ -1266,7 +1273,7 @@ final class NetworkDiagnosticService: ObservableObject {
         }
     }
 
-    nonisolated private static func collectSnapshot(_ progress: @escaping @Sendable (String) -> Void) async -> NetworkDiagnosticSnapshot {
+    nonisolated private static func collectSnapshot(mode: TestMode, _ progress: @escaping @Sendable (String) -> Void) async -> NetworkDiagnosticSnapshot {
         progress("Resolving IP")
         async let traceTask = fetchCloudflareTrace()
         async let ipInfoTask = fetchIPInfo()
@@ -1275,10 +1282,10 @@ final class NetworkDiagnosticService: ObservableObject {
         let latency = await measureLatency()
 
         progress("Testing download")
-        let download = await measureDownload()
+        let download = await measureDownload(mode: mode)
 
         progress("Testing upload")
-        let upload = await measureUpload()
+        let upload = await measureUpload(mode: mode)
 
         let trace = await traceTask
         let ipInfo = await ipInfoTask
@@ -1346,8 +1353,8 @@ final class NetworkDiagnosticService: ObservableObject {
         return (average, jitter, loss)
     }
 
-    nonisolated private static func measureDownload() async -> Double? {
-        let sizes = [1_000_000, 5_000_000, 10_000_000]
+    nonisolated private static func measureDownload(mode: TestMode) async -> Double? {
+        let sizes = mode == .quick ? [500_000] : [1_000_000, 5_000_000, 10_000_000]
         var results: [Double] = []
         for size in sizes {
             guard let url = URL(string: "https://speed.cloudflare.com/__down?bytes=\(size)&r=\(UUID().uuidString)") else { continue }
@@ -1362,8 +1369,8 @@ final class NetworkDiagnosticService: ObservableObject {
         return representativeMbps(results)
     }
 
-    nonisolated private static func measureUpload() async -> Double? {
-        let sizes = [500_000, 1_000_000, 2_000_000]
+    nonisolated private static func measureUpload(mode: TestMode) async -> Double? {
+        let sizes = mode == .quick ? [250_000] : [500_000, 1_000_000, 2_000_000]
         var results: [Double] = []
         for size in sizes {
             let body = Data(repeating: 0xA5, count: size)

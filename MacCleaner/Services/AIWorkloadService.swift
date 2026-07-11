@@ -556,9 +556,26 @@ final class AIWorkloadService {
 
     private static func skillFiles(in roots: [String]) -> [AIAgentComponent] {
         var items: [AIAgentComponent] = []
+        var budget = ScanResourceBudget(maximumEntries: 20_000, maximumDuration: 2)
         for root in roots {
-            guard let enumerator = FileManager.default.enumerator(atPath: root) else { continue }
-            for case let relative as String in enumerator where relative.hasSuffix("/SKILL.md") || relative == "SKILL.md" {
+            guard budget.beginRoot(),
+                  let enumerator = FileManager.default.enumerator(
+                    at: URL(fileURLWithPath: root),
+                    includingPropertiesForKeys: [.isDirectoryKey],
+                    options: [.skipsHiddenFiles, .skipsPackageDescendants]
+                  ) else { continue }
+            let rootDepth = URL(fileURLWithPath: root).pathComponents.count
+            while let url = enumerator.nextObject() as? URL {
+                guard budget.consumeEntry(), items.count < 500 else {
+                    budget.markLimited()
+                    break
+                }
+                if url.pathComponents.count - rootDepth > 8 {
+                    enumerator.skipDescendants()
+                    continue
+                }
+                guard url.lastPathComponent == "SKILL.md" else { continue }
+                let relative = String(url.path.dropFirst(root.count)).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
                 let path = "\(root)/\(relative)"
                 let title = relative
                     .replacingOccurrences(of: "/SKILL.md", with: "")
@@ -659,9 +676,22 @@ final class AIWorkloadService {
 
     private static func claudePluginManifests() -> [AIAgentComponent] {
         let root = "\(FileManager.default.homeDirectoryForCurrentUser.path)/.claude/plugins"
-        guard let enumerator = FileManager.default.enumerator(atPath: root) else { return [] }
+        guard let enumerator = FileManager.default.enumerator(
+            at: URL(fileURLWithPath: root),
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles, .skipsPackageDescendants]
+        ) else { return [] }
         var items: [AIAgentComponent] = []
-        for case let relative as String in enumerator where relative.hasSuffix("plugin.json") || relative.hasSuffix("PLUGIN.md") {
+        var budget = ScanResourceBudget(maximumEntries: 10_000, maximumDuration: 1)
+        let rootDepth = URL(fileURLWithPath: root).pathComponents.count
+        while let url = enumerator.nextObject() as? URL {
+            guard budget.consumeEntry(), items.count < 250 else { break }
+            if url.pathComponents.count - rootDepth > 8 {
+                enumerator.skipDescendants()
+                continue
+            }
+            guard url.lastPathComponent == "plugin.json" || url.lastPathComponent == "PLUGIN.md" else { continue }
+            let relative = String(url.path.dropFirst(root.count)).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
             let path = "\(root)/\(relative)"
             let title = relative
                 .replacingOccurrences(of: "/plugin.json", with: "")

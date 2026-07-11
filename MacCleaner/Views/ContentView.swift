@@ -45,17 +45,21 @@ struct ContentView: View {
     @State private var ramCleaningFlow: RAMCleaningFlow = .idle
     @State private var cleanerOperationActive = false
     @State private var storageOperationActive = false
+    @State private var storageAnalysisOperationActive = false
     @State private var desktopOperationActive = false
     @State private var cleanerSelectedTool: CleanerTool? = nil
     @State private var storageSelectedTool: InternalStorageTool? = nil
     @State private var showingLaunchIntro = true
+    @State private var storageViewPrepared = false
     
     // Global state for Storage and Uninstaller tools
     @StateObject private var uninstallerService = UninstallerService()
     @StateObject private var analyzerService = StorageAnalyzerService()
+    @StateObject private var storageWorkspace = StorageWorkspaceService()
     @StateObject private var desktopService = DesktopService()
     @StateObject private var cleanerViewState = CleanerViewState()
     @StateObject private var webAppsPackager = PakePackager()
+    @StateObject private var updateService = UpdateService.shared
 
     @StateObject private var themeManager = ThemeManager.shared
 
@@ -64,11 +68,12 @@ struct ContentView: View {
     }
 
     private var isStorageWorking: Bool {
-        storageOperationActive || uninstallerService.isScanning || analyzerService.isScanning || analyzerService.isScanningJunk
+        storageOperationActive || storageAnalysisOperationActive || storageWorkspace.isWorking
+            || uninstallerService.isScanning || analyzerService.isScanning || analyzerService.isScanningJunk
     }
 
     private var isDesktopWorking: Bool {
-        desktopOperationActive || desktopService.isScanning
+        desktopOperationActive || desktopService.isScanning || desktopService.isScanningDesktopSummary
     }
     
     private var isWebAppsOverlayActive: Bool {
@@ -126,7 +131,7 @@ struct ContentView: View {
                 .frame(width: 1)
 
             VStack(spacing: 0) {
-                Group {
+                ZStack {
                     switch selectedTab {
                     case .dashboard: DashboardView(monitor: monitor)
                     case .about:     AboutView(monitor: monitor)
@@ -143,12 +148,7 @@ struct ContentView: View {
                     case .windows:   WindowsView(monitor: monitor)
                     case .disk:      DiskDetailView(monitor: monitor)
                     case .storage:
-                        StorageView(
-                            selectedTool: $storageSelectedTool,
-                            uninstallerService: uninstallerService,
-                            analyzerService: analyzerService,
-                            operationActive: $storageOperationActive
-                        )
+                        Color.clear
                     case .desktop:
                         DesktopManagerView(service: desktopService, operationActive: $desktopOperationActive)
                     case .webApps:
@@ -158,12 +158,30 @@ struct ContentView: View {
                     case .aiLibrary: AILibraryView()
                     case .maintenance: MaintenanceView()
                     }
+
+                    if storageViewPrepared {
+                        StorageView(
+                            selectedTool: $storageSelectedTool,
+                            uninstallerService: uninstallerService,
+                            analyzerService: analyzerService,
+                            storageWorkspace: storageWorkspace,
+                            operationActive: $storageOperationActive,
+                            analysisOperationActive: $storageAnalysisOperationActive
+                        )
+                        .opacity(selectedTab == .storage ? 1 : 0)
+                        .allowsHitTesting(selectedTab == .storage)
+                        .accessibilityHidden(selectedTab != .storage)
+                        .zIndex(selectedTab == .storage ? 1 : -1)
+                    }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color.surfaceLight)
                 
                 // Footer with version and theme toggle
-                AppFooter(version: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "")
+                AppFooter(
+                    version: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "",
+                    updateService: updateService
+                )
             }
             .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .top)
             .clipped()
@@ -172,6 +190,18 @@ struct ContentView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .clipped()
         .background(Color.surfaceLight)
+        .onChange(of: storageWorkspace.isWorking) { isWorking in
+            storageAnalysisOperationActive = isWorking
+        }
+        .onAppear {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                updateService.checkInBackground()
+            }
+            guard !storageViewPrepared else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                storageViewPrepared = true
+            }
+        }
     }
 }
 
@@ -639,41 +669,15 @@ struct ToolSplashScreen: View {
     let action: () -> Void
 
     var body: some View {
-        VStack(spacing: 24) {
-            Spacer()
-            ZStack {
-                Circle()
-                    .fill(color.opacity(0.12))
-                    .frame(width: 110, height: 110)
-                Circle()
-                    .fill(color.opacity(0.07))
-                    .frame(width: 140, height: 140)
-                Image(systemName: icon)
-                    .font(.system(size: 52, weight: .semibold))
-                    .foregroundStyle(color)
-            }
-            Text(title)
-                .font(.system(size: 24, weight: .bold))
-                .foregroundStyle(Color.textPrimary)
-            Text(subtitle)
-                .font(.system(size: 14))
-                .foregroundStyle(Color.textSecondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 320)
-            Button(action: action) {
-                Text(buttonTitle)
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 40)
-                    .padding(.vertical, 13)
-                    .background(color)
-                    .clipShape(Capsule())
-                    .shadow(color: color.opacity(0.35), radius: 10, y: 4)
-            }
-            .buttonStyle(.plain)
-            Spacer()
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        StorageFeatureEmptyState(
+            icon: icon,
+            color: color,
+            title: title,
+            subtitle: subtitle,
+            actionTitle: buttonTitle,
+            actionIcon: icon,
+            action: action
+        )
     }
 }
 
@@ -791,6 +795,20 @@ struct UninstallerView: View {
                 }
                 .padding(16)
                 .background(Color.surfaceCardLight)
+
+                if service.scanWasLimited, !service.isScanning {
+                    HStack(spacing: 5) {
+                        Image(systemName: "leaf.fill")
+                        Text("All apps listed · some size estimates are partial after \(service.scannedEntryCount.formatted()) measured entries")
+                            .lineLimit(2)
+                    }
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(.accentAmber)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(Color.surfaceCardLight)
+                }
 
                 Rectangle().fill(Color.borderLight).frame(height: 1)
 
@@ -1142,7 +1160,7 @@ struct DiskAnalyzerView: View {
                     }
                     .buttonStyle(.plain)
                 } else {
-                    Text(service.isScanning ? service.currentPath : (service.currentNode?.name ?? ""))
+                    Text(diskMapStatusText)
                         .font(.system(size: 12))
                         .foregroundStyle(Color.textTertiaryLight)
                         .lineLimit(1)
@@ -1198,7 +1216,7 @@ struct DiskAnalyzerView: View {
                         icon: "network",
                         color: .indigo,
                         title: "Disk Map Analysis",
-                        subtitle: "Visualize your entire file system as an interactive graph to quickly spot space-hogging directories.",
+                        subtitle: "Run a bounded fast scan of your home folder. Results are labelled partial if a time or entry limit is reached.",
                         buttonTitle: "Start Scan",
                         action: { service.scan() }
                     )
@@ -1339,6 +1357,20 @@ struct DiskAnalyzerView: View {
                 }
             }
         }
+    }
+
+    private var diskMapStatusText: String {
+        if service.isScanning {
+            let percent = Int((service.scanProgress * 100).rounded())
+            return "\(service.currentPath) · \(service.scannedEntryCount) items · \(percent)%"
+        }
+        if service.scanWasLimited {
+            return "Partial fast scan · \(service.scannedEntryCount) items"
+        }
+        if let current = service.currentNode {
+            return "Fast scan · depth 3 · \(current.name)"
+        }
+        return ""
     }
 }
 
@@ -1560,7 +1592,7 @@ struct LargeFilesView: View {
                         .clipShape(Capsule())
                     }.buttonStyle(.plain).disabled(isDeleting)
                 } else if !service.largeFiles.isEmpty {
-                    Button(action: { service.scan() }) {
+                    Button(action: { service.scanLargeFiles() }) {
                         Image(systemName: "arrow.clockwise").font(.system(size: 12))
                     }.buttonStyle(.plain).foregroundStyle(Color.accentBlue)
                 }
@@ -1581,7 +1613,7 @@ struct LargeFilesView: View {
                         title: "Large Files Finder",
                         subtitle: "Locate and remove the biggest files on your disk to free up space quickly.",
                         buttonTitle: "Scan Now",
-                        action: { service.scan() }
+                        action: { service.scanLargeFiles() }
                     )
                 }
             } else {
@@ -1614,6 +1646,28 @@ struct LargeFilesView: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
                 .background(Color.surfaceLight)
+
+                if service.largeFileScanWasLimited {
+                    HStack(spacing: 7) {
+                        Image(systemName: "gauge.with.dots.needle.67percent")
+                            .foregroundStyle(Color.accentAmber)
+                        Text("Partial result · \(service.largeFileScannedEntryCount.formatted()) entries checked")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(Color.textSecondary)
+                        Spacer()
+                        if service.largeFileScanMode == .efficient {
+                            Button("Run Thorough Scan") {
+                                selectedFileIds.removeAll()
+                                service.scanLargeFiles(mode: .thorough)
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 7)
+                    .background(Color.accentAmber.opacity(0.08))
+                }
                 
                 Rectangle().fill(Color.borderLight).frame(height: 1)
                 
@@ -1856,7 +1910,9 @@ struct JunkFilesView: View {
             .padding(.horizontal, 64)
             .padding(.bottom, 16)
 
-            Text("Scanning only safe user-space locations")
+            Text(service.junkScanMode == .efficient
+                 ? "Utility-priority scan · up to 8 seconds or 100,000 entries"
+                 : "Thorough utility-priority scan · up to 45 seconds or 500,000 entries")
                 .font(.system(size: 11))
                 .foregroundStyle(Color.textTertiary.opacity(0.6))
 
@@ -1900,6 +1956,29 @@ struct JunkFilesView: View {
             .padding(.horizontal, 24)
             .padding(.top, 20)
             .padding(.bottom, 16)
+
+            if service.junkScanWasLimited {
+                HStack(spacing: 7) {
+                    Image(systemName: "gauge.with.dots.needle.67percent")
+                        .foregroundStyle(Color.accentAmber)
+                    Text("Partial low-load result · \(service.junkScannedEntryCount.formatted()) entries checked. Listed sizes are valid; additional junk may exist.")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(Color.textSecondary)
+                    Spacer()
+                    if service.junkScanMode == .efficient {
+                        Button("Run Thorough Scan") {
+                            service.scanJunk(mode: .thorough)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
+                }
+                .padding(9)
+                .background(Color.accentAmber.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .padding(.horizontal, 24)
+                .padding(.bottom, 10)
+            }
 
             // Select all / Rescan row
             HStack {
@@ -2053,7 +2132,7 @@ struct JunkFilesView: View {
                             Text(MemoryInfo.formatted(selectedSize))
                                 .font(.system(size: 15, weight: .semibold))
                                 .foregroundStyle(Color.textPrimary)
-                            Text("will be freed")
+                            Text("will be moved to Trash")
                                 .font(.system(size: 13))
                                 .foregroundStyle(Color.textTertiary)
                         }

@@ -91,9 +91,12 @@ final class LLMFitService {
     }
 
     private static func run(_ args: [String]) throws -> Data {
+        guard let executable = llmfitExecutable() else {
+            throw LLMFitServiceError.commandFailed("llmfit is not installed in /opt/homebrew/bin or /usr/local/bin.")
+        }
         let task = Process()
-        task.launchPath = "/usr/bin/env"
-        task.arguments = ["llmfit"] + args
+        task.executableURL = executable
+        task.arguments = args
         var environment = ProcessInfo.processInfo.environment
         environment["PATH"] = "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
         environment["LC_ALL"] = "C"
@@ -143,5 +146,13 @@ final class LLMFitService {
 
         guard !data.isEmpty else { throw LLMFitServiceError.invalidOutput }
         return data
+    }
+
+    private static func llmfitExecutable() -> URL? {
+        let candidates = [
+            URL(fileURLWithPath: "/opt/homebrew/bin/llmfit"),
+            URL(fileURLWithPath: "/usr/local/bin/llmfit")
+        ]
+        return candidates.first { FileManager.default.isExecutableFile(atPath: $0.path) }
     }
 }

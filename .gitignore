@@ -10,6 +10,7 @@ DerivedData/
 .derivedData/
 DerivedDataLocal/
 build/
+.build/
 release/
 dist/
 *.dSYM

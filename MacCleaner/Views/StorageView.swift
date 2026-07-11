@@ -6,12 +6,16 @@ struct StorageView: View {
     @Binding var selectedTool: InternalStorageTool?
     @ObservedObject var uninstallerService: UninstallerService
     @ObservedObject var analyzerService: StorageAnalyzerService
+    @ObservedObject var storageWorkspace: StorageWorkspaceService
     @Binding var operationActive: Bool
+    @Binding var analysisOperationActive: Bool
     @StateObject private var cleanupStatsStore = CleanupStatsStore.shared
+    @State private var showingCleanupReport = false
     private let homeMaxWidth: CGFloat = 1180
 
     private var isWorking: Bool {
-        operationActive || uninstallerService.isScanning || analyzerService.isScanning || analyzerService.isScanningJunk
+        operationActive || analysisOperationActive || storageWorkspace.isWorking
+            || uninstallerService.isScanning || analyzerService.isScanning || analyzerService.isScanningJunk
     }
 
     var body: some View {
@@ -19,9 +23,7 @@ struct StorageView: View {
             // Header
             HStack {
                 if selectedTool != nil {
-                    Button(action: {
-                        selectedTool = nil
-                    }) {
+                    Button(action: returnToHome) {
                         Image(systemName: "chevron.left")
                             .font(.system(size: 14, weight: .bold))
                             .foregroundStyle(Color.textPrimary)
@@ -48,45 +50,85 @@ struct StorageView: View {
                         .font(.system(size: 13))
                         .foregroundStyle(Color.textTertiary)
                 }
+
+                if selectedTool == nil {
+                    Button(action: { showingCleanupReport = true }) {
+                        HStack(spacing: 7) {
+                            Image(systemName: "chart.bar.xaxis")
+                                .font(.system(size: 12, weight: .semibold))
+                            Text("Cleanup Report")
+                                .font(.system(size: 12, weight: .semibold))
+                        }
+                        .foregroundStyle(Color.accentBlue)
+                        .padding(.horizontal, 11)
+                        .frame(height: 32)
+                        .background(Color.accentBlue.opacity(0.10))
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .strokeBorder(Color.accentBlue.opacity(0.20))
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.leading, 14)
+                }
                 Spacer()
 
-                // Tab Bar — icon only to fit
                 if let currentTool = selectedTool {
-                    HStack(spacing: 2) {
-                        ForEach(InternalStorageTool.allCases, id: \.self) { tool in
-                            Button(action: { selectedTool = tool }) {
-                                VStack(spacing: 3) {
-                                    Image(systemName: tool.icon)
-                                        .font(.system(size: 13, weight: .semibold))
-                                        .frame(width: 18, height: 14)
-                                    Text(tool.shortName)
-                                        .font(.system(size: 10, weight: .medium))
-                                        .fixedSize()
+                    Menu {
+                        Section("Core cleanup") {
+                            ForEach(InternalStorageTool.coreTools, id: \.self) { tool in
+                                Button(action: { selectedTool = tool }) {
+                                    Label(tool.rawValue, systemImage: tool.icon)
                                 }
-                                .frame(width: 62, height: 40)
-                                .background(currentTool == tool ? tool.color.opacity(0.18) : Color.clear)
-                                .foregroundStyle(currentTool == tool ? tool.color : Color.textSecondary)
-                                .clipShape(RoundedRectangle(cornerRadius: 8))
-                                .contentShape(Rectangle())
                             }
-                            .buttonStyle(.plain)
                         }
+                        Section("Specialized analysis") {
+                            ForEach(InternalStorageTool.smartTools, id: \.self) { tool in
+                                Button(action: { selectedTool = tool }) {
+                                    Label(tool.rawValue, systemImage: tool.icon)
+                                }
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 7) {
+                            Image(systemName: currentTool.icon)
+                                .foregroundStyle(currentTool.color)
+                            Text("Switch tool")
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: 9, weight: .semibold))
+                                .foregroundStyle(Color.textTertiary)
+                        }
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Color.textSecondary)
+                        .padding(.horizontal, 11)
+                        .frame(height: 32)
+                        .background(Color.surfacePrimary)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
                     }
-                    .padding(4)
-                    .background(Color.surfacePrimary)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
+                    .disabled(isWorking)
                 }
             }
-            .padding(20)
+            .padding(.horizontal, 20)
+            .frame(height: 76)
             .background(Color.surfaceSecondary)
 
             Divider().background(Color.borderSubtle)
 
             // Content
-            ZStack {
-	                if let tool = selectedTool {
-	                    Group {
-                        switch tool {
+            Group {
+                if let tool = selectedTool {
+                    switch tool {
+                        case .advisor:
+                            CleanupAdvisorView(service: storageWorkspace.cleanupAdvisor, operationActive: $analysisOperationActive)
+                        case .duplicates:
+                            DuplicateFinderView(service: storageWorkspace.duplicateFinder, operationActive: $analysisOperationActive)
+                        case .similarPhotos:
+                            SimilarPhotoView(service: storageWorkspace.similarPhotos, operationActive: $analysisOperationActive)
+                        case .cloud:
+                            CloudReclaimView(service: storageWorkspace.cloudReclaim, operationActive: $analysisOperationActive)
                         case .uninstaller:
                             UninstallerView(service: uninstallerService, operationActive: $operationActive)
                         case .analyzer:
@@ -95,52 +137,223 @@ struct StorageView: View {
                             LargeFilesView(service: analyzerService, operationActive: $operationActive)
                         case .junkFiles:
                             JunkFilesView(service: analyzerService, operationActive: $operationActive)
-	                        }
-	                    }
-	                } else {
-	                    storageHome
-	                }
-	            }
+                    }
+                } else {
+                    storageHome
+                }
+            }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color.surfacePrimary)
 	        }
         .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .top)
         .clipped()
+	    .sheet(isPresented: $showingCleanupReport) {
+            StorageCleanupReportSheet(
+                store: cleanupStatsStore,
+                dismiss: { showingCleanupReport = false }
+            )
+        }
 	    }
 
     private var storageHome: some View {
-        VStack(spacing: 0) {
-            LazyVGrid(
-                columns: [
-                    GridItem(.flexible(), spacing: 14),
-                    GridItem(.flexible(), spacing: 14)
-                ],
-                spacing: 14
-            ) {
-                ForEach(InternalStorageTool.allCases, id: \.self) { tool in
-                    Button(action: {
-                        selectedTool = tool
-                    }) {
-                        StorageToolCard(tool: tool)
-                            .frame(maxWidth: .infinity)
+        ScrollView(.vertical, showsIndicators: true) {
+            LazyVStack(alignment: .leading, spacing: 22) {
+                StorageHomeSectionHeader(
+                    title: "Core cleanup",
+                    subtitle: "The fastest paths to meaningful disk space"
+                )
+
+                LazyVGrid(
+                    columns: [
+                        GridItem(.flexible(), spacing: 14),
+                        GridItem(.flexible(), spacing: 14)
+                    ],
+                    spacing: 14
+                ) {
+                    ForEach(InternalStorageTool.coreTools, id: \.self) { tool in
+                        Button(action: { selectedTool = tool }) {
+                            StorageToolCard(tool: tool)
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
+                }
+
+                Divider().background(Color.borderSubtle)
+
+                StorageHomeSectionHeader(
+                    title: "Specialized analysis",
+                    subtitle: "Use when you need a more specific reclaim strategy"
+                )
+
+                LazyVGrid(
+                    columns: [
+                        GridItem(.flexible(), spacing: 14),
+                        GridItem(.flexible(), spacing: 14)
+                    ],
+                    spacing: 14
+                ) {
+                    ForEach(InternalStorageTool.smartTools, id: \.self) { tool in
+                        Button(action: { selectedTool = tool }) {
+                            StorageToolCard(tool: tool)
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
             }
-            .frame(maxWidth: homeMaxWidth)
+            .frame(maxWidth: homeMaxWidth, alignment: .topLeading)
             .padding(.horizontal, 24)
-            .padding(.top, 28)
-            .padding(.bottom, 22)
-
-            ScrollView(.vertical, showsIndicators: true) {
-                StorageCleanupStatsPanel(store: cleanupStatsStore)
-                    .frame(maxWidth: homeMaxWidth, alignment: .top)
-                    .padding(.horizontal, 24)
-                    .padding(.bottom, 24)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(.top, 20)
+            .padding(.bottom, 28)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    private func returnToHome() {
+        DispatchQueue.main.async {
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                selectedTool = nil
+            }
+        }
+    }
+}
+
+private struct StorageCleanupReportSheet: View {
+    @ObservedObject var store: CleanupStatsStore
+    let dismiss: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(Color.accentBlue.opacity(0.12))
+                        .frame(width: 40, height: 40)
+                    Image(systemName: "chart.bar.xaxis")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(Color.accentBlue)
+                }
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Cleanup Intelligence")
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundStyle(Color.textPrimary)
+                    Text("Reclaimed space, recurring paths, and rebuildable cache history")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Color.textTertiary)
+                }
+                Spacer()
+                Button("Close", action: dismiss)
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.cancelAction)
+            }
+            .padding(.horizontal, 22)
+            .frame(height: 68)
+            .background(Color.surfaceSecondary)
+
+            Divider().background(Color.borderSubtle)
+
+            ScrollView(.vertical, showsIndicators: true) {
+                StorageCleanupStatsPanel(store: store)
+                    .padding(22)
+            }
+            .background(Color.surfacePrimary)
+        }
+        .frame(minWidth: 820, idealWidth: 940, minHeight: 540, idealHeight: 620)
+    }
+}
+
+private struct StorageHomeSectionHeader: View {
+    let title: String
+    let subtitle: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title)
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(Color.textPrimary)
+            Text(subtitle)
+                .font(.system(size: 11))
+                .foregroundStyle(Color.textTertiary)
+        }
+    }
+}
+
+struct StorageFeatureEmptyState: View {
+    let icon: String
+    let color: Color
+    let title: String
+    let subtitle: String
+    let actionTitle: String
+    let actionIcon: String
+    var details: [String] = []
+    var footer: String? = nil
+    let action: () -> Void
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Spacer(minLength: 20)
+            ZStack {
+                Circle().fill(color.opacity(0.07)).frame(width: 124, height: 124)
+                Circle().fill(color.opacity(0.12)).frame(width: 100, height: 100)
+                Image(systemName: icon)
+                    .font(.system(size: 42, weight: .semibold))
+                    .foregroundStyle(color)
+            }
+            Text(title)
+                .font(.system(size: 21, weight: .bold))
+                .foregroundStyle(Color.textPrimary)
+            Text(subtitle)
+                .font(.system(size: 13))
+                .foregroundStyle(Color.textSecondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 580)
+
+            if !details.isEmpty {
+                VStack(alignment: .leading, spacing: 5) {
+                    ForEach(Array(details.enumerated()), id: \.offset) { index, detail in
+                        Label(detail, systemImage: "\(index + 1).circle.fill")
+                    }
+                }
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Color.textSecondary)
+            }
+
+            Button(action: action) {
+                Label(actionTitle, systemImage: actionIcon)
+                    .font(.system(size: 13, weight: .semibold))
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .tint(color)
+
+            if let footer {
+                Text(footer)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Color.textSecondary)
+                    .multilineTextAlignment(.center)
+            }
+            Spacer(minLength: 20)
+        }
+        .padding(.horizontal, 20)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+private struct StorageFeatureToolbarModifier: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .padding(.horizontal, 20)
+            .frame(height: 48)
+            .background(Color.surfaceSecondary)
+    }
+}
+
+extension View {
+    func storageFeatureToolbar() -> some View {
+        modifier(StorageFeatureToolbarModifier())
     }
 }
 
@@ -178,9 +391,9 @@ struct StorageCleanupStatsPanel: View {
                     CleanupMetricTile(
                         title: "Stable Reclaim",
                         value: formatBytes(store.totalBytes),
-                        subtitle: "not auto-restored",
+                        subtitle: "Trash or cloud-local",
                         color: .accentBlue,
-                        info: "This excludes caches that developer tools or browsers usually recreate. It is the cleaner estimate of space that should remain freed."
+                        info: "Tracks non-rebuildable cleanup. Trashed items reclaim disk space after Trash is emptied; Cloud Reclaim removes only local iCloud downloads while preserving cloud originals."
                     )
                     CleanupMetricTile(
                         title: "Rebuildable Cache",
@@ -190,18 +403,18 @@ struct StorageCleanupStatsPanel: View {
                         info: "Examples: Xcode DerivedData, build indexes, module caches, V8 data, GPU/code caches. They are safe to remove, but tools recreate them during normal work, so they are tracked separately and not mixed into stable reclaim."
                     )
                     CleanupMetricTile(
-                        title: "30-day Stable",
+                        title: "30-day Reclaim",
                         value: formatBytes(store.cleanedLast30DaysBytes),
                         subtitle: "deduped paths",
                         color: .accentGreen,
-                        info: "Counts the latest cleaned size for each path in the last 30 days, excluding rebuildable cache so repeated Xcode/browser rebuilds do not inflate the report."
+                        info: "Counts the latest stable cleanup size for each path in the last 30 days, excluding rebuildable cache so repeated Xcode/browser rebuilds do not inflate the report."
                     )
                     CleanupMetricTile(
                         title: "Tracked Targets",
                         value: "\(store.trackedTargetCount)",
                         subtitle: "\(store.rebuildableCleanCount) rebuildable runs",
                         color: .textSecondary,
-                        info: "Number of unique cleanup targets being tracked. Rebuildable runs are shown as behavior signals, not summed as permanent savings."
+                        info: "Number of unique cleanup targets being tracked. Rebuildable runs are shown as behavior signals, not summed as permanent disk savings."
                     )
                 }
             } else {
@@ -359,6 +572,8 @@ private struct CleanupCategoryBreakdown: View {
     @ObservedObject var store: CleanupStatsStore
 
     var body: some View {
+        let totals = store.categoryTotals
+        let maximumBytes = max(totals.first?.bytes ?? 1, 1)
         VStack(alignment: .leading, spacing: 10) {
             Text("Categories")
                 .font(.system(size: 12, weight: .bold))
@@ -368,13 +583,13 @@ private struct CleanupCategoryBreakdown: View {
                 .foregroundStyle(Color.textTertiary)
 
             VStack(spacing: 9) {
-                ForEach(Array(store.categoryTotals.prefix(5)), id: \.category) { item in
+                ForEach(Array(totals.prefix(5)), id: \.category) { item in
                     CleanupCategoryRow(
                         name: item.category.shortName,
                         bytes: item.bytes,
                         count: item.count,
                         color: item.category.color,
-                        maxBytes: max(store.categoryTotals.first?.bytes ?? 1, 1)
+                        maxBytes: maximumBytes
                     )
                 }
             }

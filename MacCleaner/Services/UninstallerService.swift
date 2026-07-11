@@ -37,23 +37,38 @@ struct InstalledApp: Identifiable {
 // MARK: - UninstallerService
 
 class UninstallerService: ObservableObject {
+    private struct ScanIndex {
+        var volatileCandidates: [(name: String, url: URL)] = []
+        var receiptCandidates: [(name: String, url: URL)] = []
+    }
+
     @Published var apps: [InstalledApp] = []
     @Published var isScanning = false
+    @Published var scanWasLimited = false
+    @Published var scannedEntryCount = 0
 
     func scan() {
         guard !isScanning else { return }
-        DispatchQueue.main.async { self.isScanning = true }
+        DispatchQueue.main.async {
+            self.isScanning = true
+            self.scanWasLimited = false
+            self.scannedEntryCount = 0
+        }
         DispatchQueue.global(qos: .utility).async {
             let appURLs = self.findApplications()
+            let scanIndex = self.buildScanIndex()
+            var resourceBudget = ScanResourceBudget(maximumEntries: 100_000, maximumDuration: 8)
             var results: [InstalledApp] = []
             for url in appURLs {
-                if let app = self.analyzeApp(at: url) {
+                if let app = self.analyzeApp(at: url, scanIndex: scanIndex, budget: &resourceBudget) {
                     results.append(app)
                 }
             }
             results.sort { $0.totalSize > $1.totalSize }
             DispatchQueue.main.async {
                 self.apps = results
+                self.scanWasLimited = resourceBudget.wasLimited
+                self.scannedEntryCount = resourceBudget.consumedEntries
                 self.isScanning = false
             }
         }
@@ -62,15 +77,23 @@ class UninstallerService: ObservableObject {
     private func findApplications() -> [URL] {
         let fm = FileManager.default
         var urls: [URL] = []
+        var seenPaths = Set<String>()
         let searchPaths = [
             URL(fileURLWithPath: "/Applications"),
             fm.urls(for: .applicationDirectory, in: .userDomainMask).first
         ].compactMap { $0 }
         for path in searchPaths {
             guard let enumerator = fm.enumerator(at: path, includingPropertiesForKeys: [.isApplicationKey], options: [.skipsPackageDescendants, .skipsHiddenFiles]) else { continue }
+            let rootDepth = path.standardizedFileURL.pathComponents.count
             for case let fileURL as URL in enumerator {
+                if fileURL.standardizedFileURL.pathComponents.count - rootDepth > 4 {
+                    enumerator.skipDescendants()
+                    continue
+                }
                 if let isApp = try? fileURL.resourceValues(forKeys: [.isApplicationKey]).isApplication, isApp {
-                    if !fileURL.path.hasPrefix("/System") && !fileURL.path.hasPrefix("/Applications/Utilities") {
+                    if !fileURL.path.hasPrefix("/System"),
+                       !fileURL.path.hasPrefix("/Applications/Utilities"),
+                       seenPaths.insert(fileURL.standardizedFileURL.path).inserted {
                         urls.append(fileURL)
                     }
                 }
@@ -79,14 +102,18 @@ class UninstallerService: ObservableObject {
         return urls
     }
 
-    private func analyzeApp(at url: URL) -> InstalledApp? {
+    private func analyzeApp(
+        at url: URL,
+        scanIndex: ScanIndex,
+        budget: inout ScanResourceBudget
+    ) -> InstalledApp? {
         let name = url.deletingPathExtension().lastPathComponent
         guard let bundle = Bundle(url: url),
               let bundleId = bundle.bundleIdentifier,
               !bundleId.hasPrefix("com.apple."),
               !Self.isProtectedApp(bundleId: bundleId, name: name) else { return nil }
 
-        let appSize = folderSize(at: url)
+        let appSize = folderSize(at: url, budget: &budget)
         let icon = NSWorkspace.shared.icon(forFile: url.path)
         let fm = FileManager.default
         let libraryURL = fm.urls(for: .libraryDirectory, in: .userDomainMask).first!
@@ -240,38 +267,11 @@ class UninstallerService: ObservableObject {
             reviewFiles.append(AppRelatedFile(url: appSupportByName, label: "App Support", size: relatedFileSize(at: appSupportByName), isSelected: false))
         }
 
-        let varFolders = "/private/var/folders"
-        if let topDirs = try? fm.contentsOfDirectory(atPath: varFolders) {
-            for top in topDirs {
-                let topPath = (varFolders as NSString).appendingPathComponent(top)
-                guard let subDirs = try? fm.contentsOfDirectory(atPath: topPath) else { continue }
-                for sub in subDirs {
-                    let cDir = (topPath as NSString).appendingPathComponent(sub + "/C")
-                    guard fm.fileExists(atPath: cDir) else { continue }
-                    guard let cContents = try? fm.contentsOfDirectory(atPath: cDir) else { continue }
-                    for item in cContents where item.lowercased().contains(lowBundleId) {
-                        let itemPath = URL(fileURLWithPath: (cDir as NSString).appendingPathComponent(item))
-                        reviewFiles.append(AppRelatedFile(url: itemPath, label: "Temporary Cache", size: relatedFileSize(at: itemPath), isSelected: false))
-                    }
-                    let tDir = (topPath as NSString).appendingPathComponent(sub + "/T")
-                    if fm.fileExists(atPath: tDir),
-                       let tContents = try? fm.contentsOfDirectory(atPath: tDir) {
-                        for item in tContents where item.lowercased().contains(lowBundleId) {
-                            let itemPath = URL(fileURLWithPath: (tDir as NSString).appendingPathComponent(item))
-                            reviewFiles.append(AppRelatedFile(url: itemPath, label: "Temporary Cache", size: relatedFileSize(at: itemPath), isSelected: false))
-                        }
-                    }
-                }
-            }
+        for candidate in scanIndex.volatileCandidates where candidate.name.contains(lowBundleId) {
+            reviewFiles.append(AppRelatedFile(url: candidate.url, label: "Temporary Cache", size: relatedFileSize(at: candidate.url), isSelected: false))
         }
-
-        let receiptsDir = "/private/var/db/receipts"
-        if fm.fileExists(atPath: receiptsDir),
-           let receipts = try? fm.contentsOfDirectory(atPath: receiptsDir) {
-            for receipt in receipts where receipt.lowercased().contains(lowBundleId) {
-                let receiptPath = URL(fileURLWithPath: receiptsDir).appendingPathComponent(receipt)
-                reviewFiles.append(AppRelatedFile(url: receiptPath, label: "Receipt", size: relatedFileSize(at: receiptPath), isSelected: false))
-            }
+        for candidate in scanIndex.receiptCandidates where candidate.name.contains(lowBundleId) {
+            reviewFiles.append(AppRelatedFile(url: candidate.url, label: "Receipt", size: relatedFileSize(at: candidate.url), isSelected: false))
         }
 
         var seenURLs = Set<String>()
@@ -318,12 +318,38 @@ class UninstallerService: ObservableObject {
         return (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? UInt64) ?? 0
     }
 
-    // MARK: - Async parallel folder size
+    private func buildScanIndex() -> ScanIndex {
+        let fm = FileManager.default
+        var index = ScanIndex()
+        let varFolders = URL(fileURLWithPath: "/private/var/folders")
 
-    func folderSize(
+        if let topDirectories = try? fm.contentsOfDirectory(at: varFolders, includingPropertiesForKeys: [.isDirectoryKey]) {
+            for top in topDirectories {
+                guard let subDirectories = try? fm.contentsOfDirectory(at: top, includingPropertiesForKeys: [.isDirectoryKey]) else { continue }
+                for sub in subDirectories {
+                    for leaf in ["C", "T"] {
+                        let directory = sub.appendingPathComponent(leaf, isDirectory: true)
+                        guard let contents = try? fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) else { continue }
+                        index.volatileCandidates.append(contentsOf: contents.map { ($0.lastPathComponent.lowercased(), $0) })
+                    }
+                }
+            }
+        }
+
+        let receiptsDirectory = URL(fileURLWithPath: "/private/var/db/receipts")
+        if let receipts = try? fm.contentsOfDirectory(at: receiptsDirectory, includingPropertiesForKeys: nil) {
+            index.receiptCandidates = receipts.map { ($0.lastPathComponent.lowercased(), $0) }
+        }
+        return index
+    }
+
+    // MARK: - Bounded folder size
+
+    private func folderSize(
         at url: URL,
-        maxEntries: Int = 25_000,
-        maxDuration: TimeInterval = 1.5
+        budget: inout ScanResourceBudget,
+        maximumEntriesPerRoot: Int = 5_000,
+        maximumDurationPerRoot: TimeInterval = 0.35
     ) -> UInt64 {
         let fm = FileManager.default
         var isDir: ObjCBool = false
@@ -345,7 +371,10 @@ class UninstallerService: ObservableObject {
         var entries = 0
         for case let fileURL as URL in enumerator {
             entries += 1
-            if entries > maxEntries || (entries % 32 == 0 && Date().timeIntervalSince(started) > maxDuration) {
+            guard budget.consumeEntry() else { break }
+            if entries > maximumEntriesPerRoot
+                || (entries % 32 == 0 && Date().timeIntervalSince(started) > maximumDurationPerRoot) {
+                budget.markLimited()
                 break
             }
             if let values = try? fileURL.resourceValues(forKeys: Set(keys)) {
@@ -396,7 +425,7 @@ class UninstallerService: ObservableObject {
             var trashedPaths: Set<String> = []
             for url in pathsToTrash {
                 do {
-                    try fm.trashItem(at: url, resultingItemURL: nil)
+                    _ = try SafeDeletionService.moveToTrash(url)
                     trashedPaths.insert(url.path)
                 } catch {
                     print("Failed to trash \(url.path): \(error)")

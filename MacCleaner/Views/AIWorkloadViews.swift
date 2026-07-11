@@ -39,10 +39,14 @@ struct AILoadView: View {
         }
         .background(Color.surfaceLight)
         .onAppear {
+            monitor.setConsumer(.ai, active: true)
             monitor.refresh(
                 forceProcesses: monitor.processNodes.isEmpty,
                 forceSensors: monitor.thermal.cpuTemp == 0
             )
+        }
+        .onDisappear {
+            monitor.setConsumer(.ai, active: false)
         }
     }
 }
@@ -120,6 +124,7 @@ struct AIAgentsView: View {
         }
         .background(Color.surfaceLight)
         .onAppear {
+            monitor.setConsumer(.ai, active: true)
             if monitor.processNodes.isEmpty {
                 monitor.refresh(forceProcesses: true)
             }
@@ -127,6 +132,7 @@ struct AIAgentsView: View {
             loadStores()
         }
         .onDisappear {
+            monitor.setConsumer(.ai, active: false)
             snapshotTask?.cancel()
             storesTask?.cancel()
         }
@@ -260,6 +266,12 @@ struct AIAdvisorView: View {
             .padding(24)
         }
         .background(Color.surfaceLight)
+        .onAppear {
+            monitor.setConsumer(.ai, active: true)
+        }
+        .onDisappear {
+            monitor.setConsumer(.ai, active: false)
+        }
     }
 
     private func advisorSummary(_ snapshot: AIWorkloadSnapshot) -> String {
@@ -546,12 +558,14 @@ struct AIIndexesView: View {
         }
         .background(Color.surfaceLight)
         .onAppear {
+            monitor.setConsumer(.ai, active: true)
             if monitor.processNodes.isEmpty {
                 monitor.refresh(forceProcesses: true)
             }
             loadStores()
         }
         .onDisappear {
+            monitor.setConsumer(.ai, active: false)
             storesTask?.cancel()
         }
         .onReceive(monitor.$processNodes) { _ in
@@ -2125,8 +2139,8 @@ private struct AgentInspectorWindow: View {
         guard agent != nil else { return "" }
         switch kind {
         case .processes: return "Active process snapshot"
-        case .mcp: return "/Users/dmitriy/.codex/config.toml"
-        case .skills: return "/Users/dmitriy/.codex/skills, /Users/dmitriy/.codex/plugins/cache"
+        case .mcp: return "~/.codex/config.toml"
+        case .skills: return "~/.codex/skills, ~/.codex/plugins/cache"
         }
     }
 

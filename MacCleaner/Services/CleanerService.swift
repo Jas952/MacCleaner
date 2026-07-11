@@ -25,8 +25,18 @@ struct RAMSource: Identifiable {
     let bytes: UInt64
     let safety: RAMSafety
     let detail: String
-    var isSelected: Bool = true
+    var isSelected: Bool = false
     var pid: Int32? = nil
+}
+
+struct RAMCleanResult {
+    let requestedCount: Int
+    let closedCount: Int
+    let refusedCount: Int
+    let estimatedReleasedBytes: UInt64
+
+    var closedAny: Bool { closedCount > 0 }
+    var allClosed: Bool { requestedCount > 0 && refusedCount == 0 && closedCount == requestedCount }
 }
 
 struct RAMAnalysisResult {
@@ -41,15 +51,18 @@ struct RAMAnalysisResult {
 // MARK: - RAM Cleaner
 
 final class RAMCleaner {
+    static let allowsForceTermination = false
 
     // Analyse current RAM layout, returns sources grouped by reclaim-ability
-    static func analyze(memory: MemoryInfo, processes: [AppProcessInfo],
+    static func analyze(memory: MemoryInfo, processes: [ProcessNode],
                         progress: @escaping (String) -> Void = { _ in },
                         completion: @escaping (RAMAnalysisResult) -> Void) {
+        let userApplications = aggregateUserApplications(processes: processes)
         DispatchQueue.global(qos: .utility).async {
             var sources: [RAMSource] = []
 
-            // 1. Inactive cache (always safe to purge — macOS reclaims automatically under pressure)
+            // 1. Inactive cache is informational. macOS already reclaims it under
+            // pressure, so MacCleaner does not install a root helper just to call purge.
             let inactive = memory.cached  // inactive + speculative pages
             if inactive > 50 * 1024 * 1024 {
                 progress("Scanning inactive page cache")
@@ -57,9 +70,9 @@ final class RAMCleaner {
                     name: "Inactive Page Cache",
                     kind: .inactiveCache,
                     bytes: inactive,
-                    safety: .safe,
-                    detail: "Memory held by recently closed apps. Safe to free.",
-                    isSelected: true
+                    safety: .locked,
+                    detail: "Managed automatically by macOS and reclaimed under pressure.",
+                    isSelected: false
                 ))
             }
 
@@ -70,25 +83,26 @@ final class RAMCleaner {
                     name: "Compressed Memory",
                     kind: .compressed,
                     bytes: memory.compressed,
-                    safety: .review,
-                    detail: "Memory macOS compressed to save space. Frees on purge.",
+                    safety: .locked,
+                    detail: "Managed by macOS. Closing a source app releases it safely.",
                     isSelected: false
                 ))
             }
 
-            // 3. Top memory-consuming processes (show info only — can't forcibly free)
-            let topProcs = processes
-                .filter { $0.memoryBytes > 100 * 1024 * 1024 }
-                .prefix(5)
+            // 3. User-facing applications ranked by their complete process-tree
+            // footprint. Selection is always explicit and quitting remains graceful.
+            let adaptiveThreshold = max(100 * 1_048_576, memory.total / 100)
+            let topProcs = userApplications
+                .filter { $0.memoryBytes >= adaptiveThreshold }
+                .prefix(10)
             for proc in topProcs {
                 progress("Scanning process \(proc.name)")
-                let isSystem = isSystemProcess(proc.name)
                 sources.append(RAMSource(
                     name: proc.name,
                     kind: .topProcess,
                     bytes: proc.memoryBytes,
-                    safety: isSystem ? .locked : .review,
-                    detail: isSystem ? "System process — cannot terminate safely." : "App using significant RAM. Can be quit if not needed.",
+                    safety: .review,
+                    detail: "User app · graceful Quit only · review unsaved work.",
                     isSelected: false,
                     pid: proc.id
                 ))
@@ -107,7 +121,9 @@ final class RAMCleaner {
                 ))
             }
 
-            let freeable = inactive
+            let freeable = sources
+                .filter { $0.kind == .topProcess && $0.safety == .review }
+                .reduce(UInt64(0)) { $0 + $1.bytes }
             let pressure: String
             let pct = memory.usedPercent
             if pct > 0.9      { pressure = "Critical" }
@@ -127,114 +143,51 @@ final class RAMCleaner {
         }
     }
 
-    static func purge(items: [RAMSource], completion: @escaping (Bool, UInt64) -> Void) {
+    static func closeSelectedApplications(
+        items: [RAMSource],
+        completion: @escaping (RAMCleanResult) -> Void
+    ) {
         DispatchQueue.global(qos: .utility).async {
-            let cachedBefore = inactiveBytes()
-            var appsKilledBytes: UInt64 = 0
-            var purgeRequested = false
+            let selected = items.filter {
+                $0.isSelected && $0.kind == .topProcess && $0.safety == .review && $0.pid != nil
+            }
+            var pending: [(source: RAMSource, application: NSRunningApplication)] = []
+            var refusedCount = 0
 
-            for item in items where item.isSelected {
-                if item.kind == .inactiveCache || item.kind == .compressed {
-                    purgeRequested = true
-                } else if item.kind == .topProcess, let pid = item.pid {
-                    if let app = NSRunningApplication(processIdentifier: pid) {
-                        if !app.terminate() {
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                                if !app.isTerminated {
-                                    app.forceTerminate()
-                                }
-                            }
-                        }
-                        appsKilledBytes += item.bytes
-                    } else {
-                        if HelperManager.shared.isInstalled {
-                            if let url = URL(string: "http://127.0.0.1:9099/kill?pid=\(pid)") {
-                                var request = URLRequest(url: url)
-                                request.httpMethod = "POST"
-                                request.timeoutInterval = 3
-                                let semaphore = DispatchSemaphore(value: 0)
-                                URLSession.shared.dataTask(with: request) { _, _, _ in
-                                    semaphore.signal()
-                                }.resume()
-                                _ = semaphore.wait(timeout: .now() + 3)
-                            }
-                        } else {
-                            let termTask = Process()
-                            termTask.executableURL = URL(fileURLWithPath: "/bin/kill")
-                            termTask.arguments = ["-TERM", "\(pid)"]
-                            let semaphore = DispatchSemaphore(value: 0)
-                            termTask.terminationHandler = { _ in semaphore.signal() }
-                            try? termTask.run()
-                            let termFinished = semaphore.wait(timeout: .now() + 2) != .timedOut
-                            if !termFinished {
-                                termTask.terminate()
-                            }
-                            if !termFinished || termTask.terminationStatus != 0 {
-                                let killTask = Process()
-                                killTask.executableURL = URL(fileURLWithPath: "/bin/kill")
-                                killTask.arguments = ["-KILL", "\(pid)"]
-                                try? killTask.run()
-                            }
-                        }
-                        appsKilledBytes += item.bytes
-                    }
+            for item in selected {
+                guard let pid = item.pid,
+                      let application = NSRunningApplication(processIdentifier: pid),
+                      isSafeUserApplication(application, fallbackName: item.name),
+                      application.terminate() else {
+                    refusedCount += 1
+                    continue
                 }
+                pending.append((item, application))
             }
 
-            var purgeSuccess = true
-            if purgeRequested {
-                purgeSuccess = RAMCleaner.runPurgeWithAuth()
+            let deadline = Date().addingTimeInterval(5)
+            while Date() < deadline, pending.contains(where: { !$0.application.isTerminated }) {
+                Thread.sleep(forTimeInterval: 0.1)
             }
 
-            if purgeRequested && !purgeSuccess {
-                DispatchQueue.main.async { completion(false, 0) }
-                return
-            }
-
-            Thread.sleep(forTimeInterval: 0.5)
-            let cachedAfter = inactiveBytes()
-            let cacheFreed = cachedBefore > cachedAfter ? cachedBefore - cachedAfter : 0
-            let totalFreed = cacheFreed + appsKilledBytes
-
-            DispatchQueue.main.async { completion(true, totalFreed) }
+            let closed = pending.filter { $0.application.isTerminated }
+            refusedCount += pending.count - closed.count
+            let result = RAMCleanResult(
+                requestedCount: selected.count,
+                closedCount: closed.count,
+                refusedCount: refusedCount,
+                estimatedReleasedBytes: closed.reduce(0) { $0 &+ $1.source.bytes }
+            )
+            DispatchQueue.main.async { completion(result) }
         }
     }
 
     // MARK: - Authorization-based purge
 
-    /// Uses the privileged helper for purge. The app does not collect administrator passwords.
+    /// Kept for call-site compatibility. macOS manages inactive/compressed memory;
+    /// MacCleaner deliberately performs no privileged purge operation.
     @discardableResult
     static func runPurgeWithAuth() -> Bool {
-        if HelperManager.shared.isInstalled {
-            if let url = URL(string: "http://127.0.0.1:9099/purge") {
-                var request = URLRequest(url: url)
-                request.httpMethod = "POST"
-                request.timeoutInterval = 3
-                let semaphore = DispatchSemaphore(value: 0)
-                var success = false
-                let task = URLSession.shared.dataTask(with: request) { data, _, _ in
-                    if let d = data, String(data: d, encoding: .utf8) == "OK" {
-                        success = true
-                    }
-                    semaphore.signal()
-                }
-                task.resume()
-                if semaphore.wait(timeout: .now() + 3) == .timedOut {
-                    task.cancel()
-                    return false
-                }
-                return success
-            }
-        }
-        
-        DispatchQueue.main.async {
-            let alert = NSAlert()
-            alert.messageText = "Root Helper Required"
-            alert.informativeText = "Install the privileged helper from the Processes screen to purge system caches. MacCleaner no longer collects administrator passwords directly."
-            alert.alertStyle = .informational
-            alert.addButton(withTitle: "OK")
-            alert.runModal()
-        }
         return false
     }
 
@@ -252,13 +205,65 @@ final class RAMCleaner {
         return (UInt64(stats.inactive_count) + UInt64(stats.speculative_count)) * page
     }
 
-    private static func isSystemProcess(_ name: String) -> Bool {
-        let systemNames: Set<String> = [
-            "kernel_task", "launchd", "WindowServer", "logd", "mds", "mds_stores",
-            "coreaudiod", "configd", "opendirectoryd", "diskarbitrationd",
-            "com.apple.WebKit", "useractivityd", "remindd", "locationd"
-        ]
-        return systemNames.contains(where: { name.lowercased().contains($0.lowercased()) })
+    static func isProtectedApplicationName(_ name: String) -> Bool {
+        protectedProcessNames.contains { protected in
+            name.localizedCaseInsensitiveCompare(protected) == .orderedSame
+        }
+    }
+
+    private static func isSafeUserApplication(
+        _ application: NSRunningApplication,
+        fallbackName: String
+    ) -> Bool {
+        guard application.processIdentifier != Foundation.ProcessInfo.processInfo.processIdentifier,
+              !application.isTerminated,
+              application.activationPolicy != .prohibited else {
+            return false
+        }
+        let name = application.localizedName ?? fallbackName
+        guard !isProtectedApplicationName(name) else { return false }
+        if application.bundleIdentifier == Bundle.main.bundleIdentifier { return false }
+        return true
+    }
+
+    private static func aggregateUserApplications(processes: [ProcessNode]) -> [AppProcessInfo] {
+        let running = NSWorkspace.shared.runningApplications.filter {
+            !$0.isTerminated
+                && $0.activationPolicy != .prohibited
+                && $0.processIdentifier != Foundation.ProcessInfo.processInfo.processIdentifier
+                && !isProtectedApplicationName($0.localizedName ?? "")
+                && $0.bundleIdentifier != Bundle.main.bundleIdentifier
+        }
+        let applicationsByPID = Dictionary(uniqueKeysWithValues: running.map { ($0.processIdentifier, $0) })
+        let applicationPIDs = Set(applicationsByPID.keys)
+        let parentByPID = Dictionary(uniqueKeysWithValues: processes.map { ($0.id, $0.parentPID) })
+
+        var memoryByApplication: [Int32: UInt64] = [:]
+        var cpuByApplication: [Int32: Double] = [:]
+        for process in processes {
+            var currentPID = process.id
+            var visited: Set<Int32> = []
+            while currentPID > 0, visited.insert(currentPID).inserted {
+                if applicationPIDs.contains(currentPID) {
+                    memoryByApplication[currentPID, default: 0] &+= process.memoryBytes
+                    cpuByApplication[currentPID, default: 0] += process.cpuUsage
+                    break
+                }
+                guard let parentPID = parentByPID[currentPID], parentPID != currentPID else { break }
+                currentPID = parentPID
+            }
+        }
+
+        return applicationsByPID.compactMap { pid, application in
+            guard let bytes = memoryByApplication[pid], bytes > 0 else { return nil }
+            return AppProcessInfo(
+                id: pid,
+                name: application.localizedName ?? "Application",
+                cpuUsage: cpuByApplication[pid] ?? 0,
+                memoryBytes: bytes
+            )
+        }
+        .sorted { $0.memoryBytes > $1.memoryBytes }
     }
 }
 
@@ -269,8 +274,32 @@ struct CleanableItem: Identifiable {
     let name: String
     let path: String
     let category: CleanCategory
-    var sizeBytes: Int64 = 0
-    var isSelected: Bool = true
+    var sizeBytes: Int64
+    var isSelected: Bool
+
+    init(name: String, path: String, category: CleanCategory, sizeBytes: Int64 = 0, isSelected: Bool? = nil) {
+        self.name = name
+        self.path = path
+        self.category = category
+        self.sizeBytes = sizeBytes
+        self.isSelected = isSelected ?? category.isSelectedByDefault
+    }
+}
+
+struct DiskCleanScanResult {
+    let items: [CleanableItem]
+    let wasLimited: Bool
+    let scannedEntryCount: Int
+}
+
+enum DiskCleanScanMode: String, Sendable {
+    case efficient = "Efficient"
+    case thorough = "Thorough"
+
+    var maximumEntries: Int { self == .efficient ? 80_000 : 500_000 }
+    var maximumDuration: TimeInterval { self == .efficient ? 12 : 60 }
+    var maximumEntriesPerRoot: Int { self == .efficient ? 5_000 : 50_000 }
+    var maximumDurationPerRoot: TimeInterval { self == .efficient ? 0.45 : 3 }
 }
 
 enum CleanCategory: String, CaseIterable {
@@ -284,6 +313,15 @@ enum CleanCategory: String, CaseIterable {
     case savedState    = "Saved App State"
     case trash         = "Trash"
     case downloads     = "Large Downloads"
+
+    var isSelectedByDefault: Bool {
+        switch self {
+        case .browserCache, .userCache, .miscCache:
+            return true
+        case .devCache, .aiTools, .systemCache, .logs, .savedState, .trash, .downloads:
+            return false
+        }
+    }
 
     var icon: String {
         switch self {
@@ -303,21 +341,21 @@ enum CleanCategory: String, CaseIterable {
     var safetyLabel: String {
         switch self {
         case .browserCache: return "Safe"
-        case .devCache:     return "Safe"
-        case .aiTools:      return "Safe"
+        case .devCache:     return "Review"
+        case .aiTools:      return "Review"
         case .userCache:    return "Safe"
         case .miscCache:    return "Safe"
         case .systemCache:  return "Review"
-        case .logs:         return "Safe"
-        case .savedState:   return "Safe"
-        case .trash:        return "Safe"
+        case .logs:         return "Review"
+        case .savedState:   return "Review"
+        case .trash:        return "Review"
         case .downloads:    return "Review"
         }
     }
 
     var safetyColor: String {
         switch self {
-        case .systemCache, .downloads: return "amber"
+        case .devCache, .aiTools, .systemCache, .logs, .savedState, .trash, .downloads: return "amber"
         default:         return "green"
         }
     }
@@ -340,12 +378,39 @@ enum CleanCategory: String, CaseIterable {
 
 final class DiskCleaner {
 
-    static func scan(progress: @escaping (String) -> Void = { _ in },
-                     completion: @escaping ([CleanableItem]) -> Void) {
+    static func scan(mode: DiskCleanScanMode = .efficient,
+                     progress: @escaping (String) -> Void = { _ in },
+                     completion: @escaping (DiskCleanScanResult) -> Void) {
         DispatchQueue.global(qos: .utility).async {
             var items: [CleanableItem] = []
             let fm = FileManager.default
             let home = NSHomeDirectory()
+            var resourceBudget = ScanResourceBudget(
+                maximumEntries: mode.maximumEntries,
+                maximumDuration: mode.maximumDuration
+            )
+            let protectionPolicy = SafeDeletionService.currentProtectionPolicy()
+            var lastProgressAt = Date.distantPast
+
+            func emitProgress(_ message: String) {
+                let now = Date()
+                guard now.timeIntervalSince(lastProgressAt) >= 0.08 else { return }
+                lastProgressAt = now
+                progress(message)
+            }
+
+            func estimateSize(_ path: String) -> Int64 {
+                let url = URL(fileURLWithPath: path)
+                guard resourceBudget.beginRoot(),
+                      !SafeDeletionService.isApplicationOwnedPath(url, policy: protectionPolicy) else { return 0 }
+                return dirSize(
+                    path: path,
+                    budget: &resourceBudget,
+                    protectionPolicy: protectionPolicy,
+                    maximumEntriesPerRoot: mode.maximumEntriesPerRoot,
+                    maximumDurationPerRoot: mode.maximumDurationPerRoot
+                )
+            }
 
             let targets: [(String, String, CleanCategory)] = [
                 // ── Browser caches (user-space, fully safe) ──
@@ -364,8 +429,6 @@ final class DiskCleaner {
                 ("\(home)/Library/Developer/Xcode/DerivedData", "Xcode DerivedData", .devCache),
                 ("\(home)/Library/Developer/CoreSimulator/Caches", "Simulator Caches", .devCache),
                 ("\(home)/Library/Caches/com.apple.dt.Xcode", "Xcode Index Cache", .devCache),
-                ("\(home)/Library/Developer/Xcode/Archives", "Xcode Archives", .devCache),
-                ("\(home)/Library/Application Support/Code/User/workspaceStorage", "VS Code Workspaces", .devCache),
                 ("\(home)/.npm/_cacache", "npm Cache", .devCache),
                 ("\(home)/.npm/_prebuilds", "npm Prebuilds", .devCache),
                 ("\(home)/.npm/_logs", "npm Logs", .devCache),
@@ -380,8 +443,7 @@ final class DiskCleaner {
                 ("\(home)/.gemini/antigravity-browser-profile/Default/Code Cache", "Gemini Code Cache", .aiTools),
                 ("\(home)/.gemini/antigravity-browser-profile/Default/GPUCache", "Gemini GPU Cache", .aiTools),
                 ("\(home)/.gemini/tmp", "Gemini Temp", .aiTools),
-                ("\(home)/.claude", "Claude Code Cache", .aiTools),
-                ("\(home)/.continue", "Continue Cache", .aiTools),
+                ("\(home)/.continue/cache", "Continue Cache", .aiTools),
                 ("\(home)/.aider/cache", "Aider Cache", .aiTools),
 
                 // ── App caches (user ~/Library/Caches subdirs, not the parent) ──
@@ -423,7 +485,7 @@ final class DiskCleaner {
                 for (i, version) in sorted.enumerated() {
                     guard i > 0 else { continue } // skip newest
                     let versionPath = (cursorVersionsDir as NSString).appendingPathComponent(version)
-                    let size = dirSize(path: versionPath)
+                    let size = estimateSize(versionPath)
                     guard size > 1024 * 1024 else { continue }
                     items.append(CleanableItem(name: "Cursor Agent Old Version \(version)", path: versionPath, category: .aiTools, sizeBytes: size))
                 }
@@ -438,7 +500,7 @@ final class DiskCleaner {
                    let contents = try? fm.contentsOfDirectory(atPath: dir) {
                     for ext in contents {
                         let extPath = (dir as NSString).appendingPathComponent(ext)
-                        let size = dirSize(path: extPath)
+                        let size = estimateSize(extPath)
                         guard size > 5 * 1024 * 1024 else { continue }
                         items.append(CleanableItem(name: "\(label) \(ext)", path: extPath, category: .devCache, sizeBytes: size, isSelected: false))
                     }
@@ -447,8 +509,8 @@ final class DiskCleaner {
 
             for (path, name, category) in targets {
                 guard fm.fileExists(atPath: path) else { continue }
-                progress("Scanning \(name)")
-                let size = dirSize(path: path)
+                emitProgress("Scanning \(name)")
+                let size = estimateSize(path)
                 guard size > 1024 * 1024 else { continue }
                 items.append(CleanableItem(name: name, path: path, category: category, sizeBytes: size))
             }
@@ -464,8 +526,8 @@ final class DiskCleaner {
                     guard !knownPaths.contains(fullPath) else { continue }
                     var isDir: ObjCBool = false
                     guard fm.fileExists(atPath: fullPath, isDirectory: &isDir), isDir.boolValue else { continue }
-                    progress("Scanning \(sub) cache")
-                    let size = dirSize(path: fullPath)
+                    emitProgress("Scanning \(sub) cache")
+                    let size = estimateSize(fullPath)
                     guard size > 512 * 1024 else { continue } // 512 KB min
                     items.append(CleanableItem(name: sub, path: fullPath, category: .userCache, sizeBytes: size))
                 }
@@ -475,7 +537,7 @@ final class DiskCleaner {
             let appSupportDir = "\(home)/Library/Application Support"
             let appSupportSubdirNames = ["CachedData", "GPUCache", "Cache", "Code Cache",
                                          "DawnGraphiteCache", "DawnWebGPUCache", "GraphiteDawnCache",
-                                         "DawnCache", "ShaderCache", "Service Worker", "WebStorage"]
+                                         "DawnCache", "ShaderCache", "Service Worker/CacheStorage", "Service Worker/ScriptCache"]
             if let apps = try? fm.contentsOfDirectory(atPath: appSupportDir) {
                 for app in apps {
                     let appDir = (appSupportDir as NSString).appendingPathComponent(app)
@@ -485,8 +547,8 @@ final class DiskCleaner {
                         let subPath = (appDir as NSString).appendingPathComponent(subName)
                         guard !knownPaths.contains(subPath) else { continue }
                         guard fm.fileExists(atPath: subPath) else { continue }
-                        progress("Scanning \(app) \(subName)")
-                        let size = dirSize(path: subPath)
+                        emitProgress("Scanning \(app) \(subName)")
+                        let size = estimateSize(subPath)
                         guard size > 512 * 1024 else { continue }
                         let label = "\(app) \(subName)"
                         items.append(CleanableItem(name: label, path: subPath, category: .userCache, sizeBytes: size))
@@ -513,8 +575,8 @@ final class DiskCleaner {
                         guard !knownPaths.contains(subPath) else { continue }
                         guard fm.fileExists(atPath: subPath) else { continue }
                         let label = "\(appName) \(profile) \(sub.replacingOccurrences(of: "/", with: " "))"
-                        progress("Scanning \(label)")
-                        let size = dirSize(path: subPath)
+                        emitProgress("Scanning \(label)")
+                        let size = estimateSize(subPath)
                         guard size > 512 * 1024 else { continue }
                         items.append(CleanableItem(name: label, path: subPath, category: .browserCache, sizeBytes: size))
                     }
@@ -533,10 +595,21 @@ final class DiskCleaner {
                 }
             }
             let parentSet = Set(parentPaths)
-            items = items.filter { parentSet.contains($0.path) }
+            items = items.filter {
+                parentSet.contains($0.path)
+                    && !SafeDeletionService.isApplicationOwnedPath(
+                        URL(fileURLWithPath: $0.path),
+                        policy: protectionPolicy
+                    )
+            }
 
             items.sort { $0.sizeBytes > $1.sizeBytes }
-            DispatchQueue.main.async { completion(items) }
+            let result = DiskCleanScanResult(
+                items: items,
+                wasLimited: resourceBudget.wasLimited,
+                scannedEntryCount: resourceBudget.consumedEntries
+            )
+            DispatchQueue.main.async { completion(result) }
         }
     }
 
@@ -546,6 +619,8 @@ final class DiskCleaner {
             var freed: Int64 = 0
             var errors: [String] = []
             var statsInputs: [CleanupStatsRecordInput] = []
+            var measurementBudget = ScanResourceBudget(maximumEntries: 50_000, maximumDuration: 5)
+            let protectionPolicy = SafeDeletionService.currentProtectionPolicy()
 
             for item in items where item.isSelected {
                 var isDir: ObjCBool = false
@@ -553,14 +628,26 @@ final class DiskCleaner {
                 let statsCategory = CleanupStatsStore.category(for: item.category)
 
                 do {
+                    if item.category == .trash {
+                        errors.append("\(item.name): use Finder's Empty Trash command for permanent deletion")
+                        continue
+                    }
                     if isDir.boolValue {
                         // Empty the directory but keep the folder itself so apps/OS
                         // are less likely to immediately refill the cache.
                         let contents = try fm.contentsOfDirectory(atPath: item.path)
                         for file in contents {
                             let full = (item.path as NSString).appendingPathComponent(file)
-                            let sizeBefore = dirSize(path: full)
-                            try fm.removeItem(atPath: full)
+                            let url = URL(fileURLWithPath: full)
+                            guard !SafeDeletionService.isProtectedApplicationPath(url, policy: protectionPolicy) else {
+                                continue
+                            }
+                            let sizeBefore = dirSize(
+                                path: full,
+                                budget: &measurementBudget,
+                                protectionPolicy: protectionPolicy
+                            )
+                            _ = try SafeDeletionService.moveToTrash(url, policy: protectionPolicy)
                             freed += sizeBefore
                             statsInputs.append(CleanupStatsRecordInput(
                                 path: full,
@@ -572,8 +659,16 @@ final class DiskCleaner {
                         }
                     } else {
                         // Single file (e.g. large download)
-                        let sizeBefore = dirSize(path: item.path)
-                        try fm.removeItem(atPath: item.path)
+                        let url = URL(fileURLWithPath: item.path)
+                        guard !SafeDeletionService.isProtectedApplicationPath(url, policy: protectionPolicy) else {
+                            continue
+                        }
+                        let sizeBefore = dirSize(
+                            path: item.path,
+                            budget: &measurementBudget,
+                            protectionPolicy: protectionPolicy
+                        )
+                        _ = try SafeDeletionService.moveToTrash(url, policy: protectionPolicy)
                         freed += sizeBefore
                         statsInputs.append(CleanupStatsRecordInput(
                             path: item.path,
@@ -600,40 +695,52 @@ final class DiskCleaner {
 
     private static func dirSize(
         path: String,
-        maxEntries: Int = 20_000,
-        maxDuration: TimeInterval = 1.5
+        budget: inout ScanResourceBudget,
+        protectionPolicy: SafeDeletionService.ProtectionPolicy,
+        maximumEntriesPerRoot: Int = 5_000,
+        maximumDurationPerRoot: TimeInterval = 0.45
     ) -> Int64 {
         let fm = FileManager.default
-        var isDir: ObjCBool = false
-        guard fm.fileExists(atPath: path, isDirectory: &isDir) else { return 0 }
-
-        if !isDir.boolValue {
-            let attrs = try? fm.attributesOfItem(atPath: path)
-            return attrs?[.size] as? Int64 ?? 0
+        var isDirectory: ObjCBool = false
+        guard fm.fileExists(atPath: path, isDirectory: &isDirectory) else { return 0 }
+        if !isDirectory.boolValue {
+            guard budget.consumeEntry() else { return 0 }
+            let attributes = try? fm.attributesOfItem(atPath: path)
+            return attributes?[.size] as? Int64 ?? 0
         }
 
         let url = URL(fileURLWithPath: path)
-        let keys: [URLResourceKey] = [.fileSizeKey, .fileAllocatedSizeKey, .totalFileAllocatedSizeKey]
+        let keys: Set<URLResourceKey> = [
+            .fileSizeKey, .fileAllocatedSizeKey, .totalFileAllocatedSizeKey, .isDirectoryKey
+        ]
         guard let enumerator = fm.enumerator(
             at: url,
-            includingPropertiesForKeys: keys,
-            options: [.skipsPackageDescendants],
+            includingPropertiesForKeys: Array(keys),
+            options: [.skipsHiddenFiles, .skipsPackageDescendants],
             errorHandler: { _, _ in true }
         ) else { return 0 }
 
-        let started = Date()
+        let rootDeadline = Date().addingTimeInterval(maximumDurationPerRoot)
         var total: Int64 = 0
-        var entries = 0
-
-        for case let fileURL as URL in enumerator {
-            entries += 1
-            if entries > maxEntries || (entries % 256 == 0 && Date().timeIntervalSince(started) > maxDuration) {
+        var rootEntries = 0
+        while let fileURL = enumerator.nextObject() as? URL {
+            if rootEntries >= maximumEntriesPerRoot
+                || (rootEntries.isMultiple(of: 64) && Date() >= rootDeadline) {
+                budget.markLimited()
                 break
             }
-            if let values = try? fileURL.resourceValues(forKeys: Set(keys)) {
-                let size = values.totalFileAllocatedSize ?? values.fileAllocatedSize ?? values.fileSize ?? 0
-                total += Int64(size)
+            guard budget.consumeEntry() else { break }
+            rootEntries += 1
+            let values = try? fileURL.resourceValues(forKeys: keys)
+            if SafeDeletionService.isApplicationOwnedPath(fileURL, policy: protectionPolicy) {
+                if values?.isDirectory == true { enumerator.skipDescendants() }
+                continue
             }
+            let size = values?.totalFileAllocatedSize
+                ?? values?.fileAllocatedSize
+                ?? values?.fileSize
+                ?? 0
+            total += Int64(size)
         }
         return total
     }
@@ -704,19 +811,18 @@ final class SystemRefreshService {
         [
             RefreshTask(id: "quicklook_cache", title: "Rebuild QuickLook cache", detail: "qlmanage -r cache"),
             RefreshTask(id: "quicklook_thumbs", title: "Rebuild QuickLook thumbnails", detail: "qlmanage -r"),
-            RefreshTask(id: "saved_window_state", title: "Clear stale saved window state", detail: "~/Library/Saved Application State"),
-            RefreshTask(id: "quarantine", title: "Clear quarantine history", detail: "xattr quarantine database"),
-            RefreshTask(id: "font_cache", title: "Rebuild font cache", detail: "atsutil databases -remove"),
-            RefreshTask(id: "launch_services", title: "Rebuild Launch Services database", detail: "lsregister -kill -r"),
+            RefreshTask(id: "saved_window_state", title: "Clear stale saved window state", detail: "Moves entries to Trash", isSelected: false),
+            RefreshTask(id: "quarantine", title: "Clear quarantine history", detail: "Moves quarantine database to Trash", isSelected: false),
+            RefreshTask(id: "font_cache", title: "Rebuild font cache", detail: "atsutil databases -remove", isSelected: false),
+            RefreshTask(id: "launch_services", title: "Rebuild Launch Services database", detail: "lsregister -r", isSelected: false),
             RefreshTask(id: "shared_file_list", title: "Clean empty shared file list entries", detail: "~/Library/Application Support/com.apple.sharedfilelist"),
-            RefreshTask(id: "broken_launch_agents", title: "Remove broken Launch Agents", detail: "~/Library/LaunchAgents"),
-            RefreshTask(id: "notification_db", title: "Prune Notification Center database", detail: "com.apple.notificationcenterui"),
-            RefreshTask(id: "orphaned_spotlight", title: "Remove orphaned Spotlight rules", detail: "Spotlight exclusion entries"),
-            RefreshTask(id: "login_items", title: "Audit Login Items", detail: "SMAppService / legacy login items"),
+            RefreshTask(id: "broken_launch_agents", title: "Remove broken Launch Agents", detail: "Moves invalid entries to Trash", isSelected: false),
+            RefreshTask(id: "notification_db", title: "Prune Notification Center database", detail: "Review: modifies live database sidecars", isSelected: false),
+            RefreshTask(id: "orphaned_spotlight", title: "Remove orphaned Spotlight rules", detail: "Spotlight exclusion entries", isSelected: false),
+            RefreshTask(id: "login_items", title: "Audit Login Items", detail: "SMAppService / legacy login items", isSelected: false),
             RefreshTask(id: "ds_store_network", title: "Prevent .DS_Store on network drives", detail: "defaults write DSDontWriteNetworkStores"),
-            RefreshTask(id: "usage_db", title: "Trim oversized usage database", detail: "~/Library/Application Support/Knowledge"),
-            RefreshTask(id: "corrupted_prefs", title: "Recover corrupted preferences", detail: "defaults read + plist validation"),
-            RefreshTask(id: "purge_memory", title: "Purge inactive memory", detail: "Flush page cache", isSelected: false),
+            RefreshTask(id: "usage_db", title: "Trim oversized usage database", detail: "Review: modifies live database sidecars", isSelected: false),
+            RefreshTask(id: "corrupted_prefs", title: "Recover corrupted preferences", detail: "Moves invalid plists to Trash", isSelected: false),
         ]
     }
 
@@ -753,8 +859,6 @@ final class SystemRefreshService {
                 ok = trimUsageDB()
             case "corrupted_prefs":
                 ok = recoverCorruptedPrefs()
-            case "purge_memory":
-                ok = RAMCleaner.runPurgeWithAuth()
             default:
                 ok = false
             }
@@ -792,7 +896,7 @@ final class SystemRefreshService {
         var ok = true
         for item in contents {
             let full = (path as NSString).appendingPathComponent(item)
-            do { try fm.removeItem(atPath: full) } catch { ok = false }
+            do { _ = try SafeDeletionService.moveToTrash(URL(fileURLWithPath: full)) } catch { ok = false }
         }
         return ok
     }
@@ -802,7 +906,7 @@ final class SystemRefreshService {
         let dbPath = "\(home)/Library/Preferences/com.apple.LaunchServices.QuarantineEventsV2"
         let fm = FileManager.default
         if fm.fileExists(atPath: dbPath) {
-            do { try fm.removeItem(atPath: dbPath); return true } catch { return false }
+            do { _ = try SafeDeletionService.moveToTrash(URL(fileURLWithPath: dbPath)); return true } catch { return false }
         }
         return true
     }
@@ -816,7 +920,7 @@ final class SystemRefreshService {
             let full = (path as NSString).appendingPathComponent(file)
             if let attrs = try? fm.attributesOfItem(atPath: full),
                let size = attrs[.size] as? Int, size == 0 {
-                try? fm.removeItem(atPath: full)
+                _ = try? SafeDeletionService.moveToTrash(URL(fileURLWithPath: full))
             }
         }
         return true
@@ -833,11 +937,11 @@ final class SystemRefreshService {
                 let parsed = try? PropertyListSerialization.propertyList(from: data, format: nil)
                 guard let dict = parsed as? [String: Any] else { continue }
                 if let prog = dict["Program"] as? String, !fm.fileExists(atPath: prog) {
-                    try? fm.removeItem(atPath: full)
+                    _ = try? SafeDeletionService.moveToTrash(URL(fileURLWithPath: full))
                 }
                 if let args = dict["ProgramArguments"] as? [String],
                    let exe = args.first, !fm.fileExists(atPath: exe) {
-                    try? fm.removeItem(atPath: full)
+                    _ = try? SafeDeletionService.moveToTrash(URL(fileURLWithPath: full))
                 }
             }
         }
@@ -854,7 +958,7 @@ final class SystemRefreshService {
             let dbDir = (ncDir as NSString).appendingPathComponent(group)
             if let files = try? fm.contentsOfDirectory(atPath: dbDir) {
                 for file in files where file.hasSuffix(".db-wal") || file.hasSuffix(".db-shm") {
-                    try? fm.removeItem(atPath: (dbDir as NSString).appendingPathComponent(file))
+                    _ = try? SafeDeletionService.moveToTrash(URL(fileURLWithPath: (dbDir as NSString).appendingPathComponent(file)))
                 }
             }
         }
@@ -896,7 +1000,7 @@ final class SystemRefreshService {
             guard let data = fm.contents(atPath: full) else { continue }
             let parsed = try? PropertyListSerialization.propertyList(from: data, format: nil)
             if parsed == nil {
-                try? fm.removeItem(atPath: full) // corrupted plist
+                _ = try? SafeDeletionService.moveToTrash(URL(fileURLWithPath: full))
             }
         }
         return true
@@ -926,7 +1030,7 @@ final class SystemRefreshService {
         guard fm.fileExists(atPath: knowledgePath),
               let files = try? fm.contentsOfDirectory(atPath: knowledgePath) else { return true }
         for file in files where file.hasSuffix(".db-wal") || file.hasSuffix(".db-shm") {
-            try? fm.removeItem(atPath: (knowledgePath as NSString).appendingPathComponent(file))
+            _ = try? SafeDeletionService.moveToTrash(URL(fileURLWithPath: (knowledgePath as NSString).appendingPathComponent(file)))
         }
         return true
     }
@@ -941,7 +1045,7 @@ final class SystemRefreshService {
                 let parsed = try? PropertyListSerialization.propertyList(from: data, format: nil)
                 if parsed == nil {
                     // Corrupted — remove so macOS recreates with defaults
-                    try? fm.removeItem(atPath: full)
+                    _ = try? SafeDeletionService.moveToTrash(URL(fileURLWithPath: full))
                 }
             }
         }

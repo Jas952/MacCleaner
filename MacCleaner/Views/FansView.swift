@@ -235,7 +235,13 @@ struct FansView: View {
             .frame(maxWidth: .infinity)
             .padding(.trailing, 24)
         }
-        .onAppear { monitor.refresh(forceSensors: true) }
+        .onAppear {
+            monitor.setConsumer(.fans, active: true)
+            monitor.refresh(forceSensors: true)
+        }
+        .onDisappear {
+            monitor.setConsumer(.fans, active: false)
+        }
     }
 
     // MARK: - Fans Panel

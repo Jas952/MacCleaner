@@ -1,21 +1,132 @@
 import SwiftUI
 import AppKit
+import ImageIO
 import QuickLook
 import UniformTypeIdentifiers
 
 // MARK: - Thumbnail Cache
 
+@MainActor
 final class ThumbnailCache {
     static let shared = ThumbnailCache()
-    private let cache = NSCache<NSURL, NSImage>()
+    nonisolated static let maximumCount = 200
+    nonisolated static let maximumCostBytes = 64 * 1024 * 1024
+    private let cache = NSCache<NSString, NSImage>()
     private init() {
-        cache.countLimit = 300
-        cache.totalCostLimit = 150 * 1024 * 1024  // 150 MB
+        cache.countLimit = Self.maximumCount
+        cache.totalCostLimit = Self.maximumCostBytes
     }
-    func get(_ url: URL) -> NSImage? { cache.object(forKey: url as NSURL) }
-    func set(_ img: NSImage, for url: URL) {
-        let cost = Int(img.size.width * img.size.height * 4)
-        cache.setObject(img, forKey: url as NSURL, cost: cost)
+
+    func get(_ url: URL, maxPixelSize: Int) -> NSImage? {
+        cache.object(forKey: key(for: url, maxPixelSize: maxPixelSize))
+    }
+
+    func set(_ image: NSImage, for url: URL, maxPixelSize: Int, pixelCost: Int) {
+        cache.setObject(
+            image,
+            forKey: key(for: url, maxPixelSize: maxPixelSize),
+            cost: max(pixelCost, 1)
+        )
+    }
+
+    func removeAll() {
+        cache.removeAllObjects()
+    }
+
+    private func key(for url: URL, maxPixelSize: Int) -> NSString {
+        let values = try? url.resourceValues(forKeys: [.contentModificationDateKey])
+        let modified = values?.contentModificationDate?.timeIntervalSinceReferenceDate ?? 0
+        return "\(url.standardizedFileURL.path)#\(maxPixelSize)#\(modified)" as NSString
+    }
+}
+
+private struct SendableThumbnailCGImage: @unchecked Sendable {
+    let image: CGImage
+    let pixelCost: Int
+}
+
+@MainActor
+enum DesktopThumbnailLoader {
+    static func load(
+        url: URL,
+        maxPixelSize: Int,
+        preferredSize: CGSize,
+        cacheResult: Bool = true,
+        iconFallback: Bool = true
+    ) async -> NSImage? {
+        if cacheResult,
+           let cached = ThumbnailCache.shared.get(url, maxPixelSize: maxPixelSize) {
+            return cached
+        }
+
+        let payload = await Task.detached(priority: .utility) {
+            makePayload(url: url, maxPixelSize: maxPixelSize, preferredSize: preferredSize)
+        }.value
+
+        let image: NSImage?
+        let pixelCost: Int
+        if let payload {
+            image = NSImage(cgImage: payload.image, size: preferredSize)
+            pixelCost = payload.pixelCost
+        } else if iconFallback {
+            image = NSWorkspace.shared.icon(forFile: url.path)
+            pixelCost = maxPixelSize * maxPixelSize * 4
+        } else {
+            image = nil
+            pixelCost = 0
+        }
+
+        if cacheResult, let image {
+            ThumbnailCache.shared.set(
+                image,
+                for: url,
+                maxPixelSize: maxPixelSize,
+                pixelCost: pixelCost
+            )
+        }
+        return image
+    }
+
+    nonisolated private static func makePayload(
+        url: URL,
+        maxPixelSize: Int,
+        preferredSize: CGSize
+    ) -> SendableThumbnailCGImage? {
+        if isImageFile(url),
+           let source = CGImageSourceCreateWithURL(url as CFURL, nil) {
+            let options: [CFString: Any] = [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceShouldCacheImmediately: false,
+                kCGImageSourceThumbnailMaxPixelSize: maxPixelSize
+            ]
+            if let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) {
+                return SendableThumbnailCGImage(
+                    image: image,
+                    pixelCost: image.width * image.height * 4
+                )
+            }
+        }
+
+        let options: [CFString: Any] = [kQLThumbnailOptionIconModeKey: false]
+        if let reference = QLThumbnailImageCreate(
+            kCFAllocatorDefault,
+            url as CFURL,
+            preferredSize,
+            options as CFDictionary
+        ) {
+            let image = reference.takeRetainedValue()
+            return SendableThumbnailCGImage(
+                image: image,
+                pixelCost: image.width * image.height * 4
+            )
+        }
+        return nil
+    }
+
+    nonisolated private static func isImageFile(_ url: URL) -> Bool {
+        let extensions: Set<String> = ["png", "jpg", "jpeg", "heic", "gif", "bmp", "tiff", "tif", "webp"]
+        return extensions.contains(url.pathExtension.lowercased())
     }
 }
 
@@ -263,6 +374,17 @@ struct DesktopManagerView: View {
                             { service.filterCategory = cat }
                         }
                     }.padding(.horizontal, 8).padding(.bottom, 10)
+
+                    if service.desktopSummaryWasLimited {
+                        Label(
+                            "Partial low-load scan · \(service.desktopSummaryScannedEntries.formatted()) entries",
+                            systemImage: "gauge.with.dots.needle.67percent"
+                        )
+                        .font(.system(size: 8, weight: .medium))
+                        .foregroundStyle(Color.accentAmber)
+                        .padding(.horizontal, 12)
+                        .padding(.bottom, 8)
+                    }
 
                     Rectangle().fill(Color.borderLight).frame(height: 1).padding(.horizontal, 12)
 
@@ -844,13 +966,8 @@ struct DesktopFileCell: View {
         )
         .contextMenu { contextMenuContent }
         .task(id: file.url) {
-            // Instant display from cache — no flicker
-            if let cached = ThumbnailCache.shared.get(file.url) {
-                thumbnail = cached
-            } else {
-                thumbnail = nil
-                thumbnail = await loadThumbnail(for: file.url, isDir: file.isDirectory)
-            }
+            thumbnail = nil
+            thumbnail = await loadThumbnail(for: file.url, isDir: file.isDirectory)
         }
     }
 
@@ -903,41 +1020,11 @@ struct DesktopFileCell: View {
 
     private func loadThumbnail(for url: URL, isDir: Bool) async -> NSImage? {
         guard !isDir else { return nil }
-        // Cache hit — instant, no background task needed
-        if let cached = ThumbnailCache.shared.get(url) { return cached }
-        return await Task.detached(priority: .utility) {
-            let ext = url.pathExtension.lowercased()
-            let imageExts: Set<String> = ["png","jpg","jpeg","heic","gif","bmp","tiff","tif","webp"]
-            var result: NSImage?
-
-            if imageExts.contains(ext) {
-                let opts: [CFString: Any] = [
-                    kCGImageSourceCreateThumbnailFromImageAlways: true,
-                    kCGImageSourceCreateThumbnailWithTransform: true,
-                    kCGImageSourceShouldCacheImmediately: false,
-                    kCGImageSourceThumbnailMaxPixelSize: 240
-                ]
-                if let src = CGImageSourceCreateWithURL(url as CFURL, nil),
-                   let cgImg = CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary) {
-                    result = NSImage(cgImage: cgImg, size: .zero)
-                }
-            }
-
-            if result == nil {
-                let size = CGSize(width: 240, height: 180)
-                let dict: [CFString: Any] = [kQLThumbnailOptionIconModeKey: false]
-                if let ref = QLThumbnailImageCreate(kCFAllocatorDefault, url as CFURL, size, dict as CFDictionary) {
-                    result = NSImage(cgImage: ref.takeRetainedValue(), size: size)
-                }
-            }
-
-            if result == nil {
-                result = NSWorkspace.shared.icon(forFile: url.path)
-            }
-
-            if let img = result { ThumbnailCache.shared.set(img, for: url) }
-            return result
-        }.value
+        return await DesktopThumbnailLoader.load(
+            url: url,
+            maxPixelSize: 240,
+            preferredSize: CGSize(width: 240, height: 180)
+        )
     }
 }
 
@@ -1209,45 +1296,17 @@ struct ColumnsThumbView: View {
 
     private func startLoad() {
         guard !file.isDirectory else { return }
-        // Instant from cache
-        if let cached = ThumbnailCache.shared.get(file.url) {
-            thumbnail = cached; return
-        }
         thumbnail = nil
         loadingTask?.cancel()
         let url = file.url
         loadingTask = Task {
-            let img = await Task.detached(priority: .utility) { () -> NSImage? in
-                let ext = url.pathExtension.lowercased()
-                let imageExts: Set<String> = ["png","jpg","jpeg","heic","gif","bmp","tiff","tif","webp"]
-                var result: NSImage?
-
-                if imageExts.contains(ext) {
-                    let opts: [CFString: Any] = [
-                        kCGImageSourceCreateThumbnailFromImageAlways: true,
-                        kCGImageSourceCreateThumbnailWithTransform: true,
-                        kCGImageSourceShouldCacheImmediately: false,
-                        kCGImageSourceThumbnailMaxPixelSize: 480
-                    ]
-                    if let src = CGImageSourceCreateWithURL(url as CFURL, nil),
-                       let cgImg = CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary) {
-                        result = NSImage(cgImage: cgImg, size: .zero)
-                    }
-                }
-
-                if result == nil {
-                    let size = CGSize(width: 480, height: 360)
-                    let dict: [CFString: Any] = [kQLThumbnailOptionIconModeKey: false]
-                    if let ref = QLThumbnailImageCreate(kCFAllocatorDefault, url as CFURL, size, dict as CFDictionary) {
-                        result = NSImage(cgImage: ref.takeRetainedValue(), size: size)
-                    }
-                }
-                if result == nil { result = NSWorkspace.shared.icon(forFile: url.path) }
-                if let img = result { ThumbnailCache.shared.set(img, for: url) }
-                return result
-            }.value
+            let img = await DesktopThumbnailLoader.load(
+                url: url,
+                maxPixelSize: 480,
+                preferredSize: CGSize(width: 480, height: 360)
+            )
             guard !Task.isCancelled else { return }
-            await MainActor.run { thumbnail = img }
+            thumbnail = img
         }
     }
 }
@@ -1552,34 +1611,11 @@ struct CanvasIcon: View {
 
     private func loadThumb(url: URL, isDir: Bool) async -> NSImage? {
         guard !isDir else { return nil }
-        if let cached = ThumbnailCache.shared.get(url) { return cached }
-        return await Task.detached(priority: .utility) {
-            let ext = url.pathExtension.lowercased()
-            let imageExts: Set<String> = ["png","jpg","jpeg","heic","gif","bmp","tiff","tif","webp"]
-            var result: NSImage?
-            if imageExts.contains(ext) {
-                let opts: [CFString: Any] = [
-                    kCGImageSourceCreateThumbnailFromImageAlways: true,
-                    kCGImageSourceCreateThumbnailWithTransform: true,
-                    kCGImageSourceShouldCacheImmediately: false,
-                    kCGImageSourceThumbnailMaxPixelSize: 116
-                ]
-                if let src = CGImageSourceCreateWithURL(url as CFURL, nil),
-                   let cgImg = CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary) {
-                    result = NSImage(cgImage: cgImg, size: .zero)
-                }
-            }
-            if result == nil {
-                let dict: [CFString: Any] = [kQLThumbnailOptionIconModeKey: false]
-                let sz = CGSize(width: 116, height: 116)
-                if let ref = QLThumbnailImageCreate(kCFAllocatorDefault, url as CFURL, sz, dict as CFDictionary) {
-                    result = NSImage(cgImage: ref.takeRetainedValue(), size: sz)
-                }
-            }
-            if result == nil { result = NSWorkspace.shared.icon(forFile: url.path) }
-            if let img = result { ThumbnailCache.shared.set(img, for: url) }
-            return result
-        }.value
+        return await DesktopThumbnailLoader.load(
+            url: url,
+            maxPixelSize: 116,
+            preferredSize: CGSize(width: 116, height: 116)
+        )
     }
 }
 
@@ -1708,15 +1744,12 @@ struct DesktopFilePreview: View {
 
     private func loadPreview() async {
         loadingPreview = true
-        let result = await Task.detached(priority: .utility) { () -> NSImage? in
-            let size = CGSize(width: 1440, height: 1080)
-            let dict: [CFString: Any] = [kQLThumbnailOptionIconModeKey: false]
-            guard let ref = QLThumbnailImageCreate(kCFAllocatorDefault, file.url as CFURL, size, dict as CFDictionary) else {
-                return NSWorkspace.shared.icon(forFile: file.url.path)
-            }
-            return NSImage(cgImage: ref.takeRetainedValue(), size: .zero)
-        }.value
-        previewImage = result
+        previewImage = await DesktopThumbnailLoader.load(
+            url: file.url,
+            maxPixelSize: 1440,
+            preferredSize: CGSize(width: 1440, height: 1080),
+            cacheResult: false
+        )
         loadingPreview = false
     }
 }
@@ -1869,13 +1902,12 @@ struct ImageMetadataSheet: View {
     }
 
     private func loadThumb() async -> NSImage? {
-        await Task.detached(priority: .utility) {
-            let size = CGSize(width: 560, height: 800)
-            let dict: [CFString: Any] = [kQLThumbnailOptionIconModeKey: false]
-            if let ref = QLThumbnailImageCreate(kCFAllocatorDefault, file.url as CFURL, size, dict as CFDictionary) {
-                return NSImage(cgImage: ref.takeRetainedValue(), size: size)
-            }
-            return nil
-        }.value
+        await DesktopThumbnailLoader.load(
+            url: file.url,
+            maxPixelSize: 800,
+            preferredSize: CGSize(width: 560, height: 800),
+            cacheResult: false,
+            iconFallback: false
+        )
     }
 }

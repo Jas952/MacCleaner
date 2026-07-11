@@ -177,10 +177,6 @@ final class AIIndexStoreService {
             paths.append(workspace)
         }
 
-        let repoPath = "/Users/dmitriy/Docs/project/new"
-        if FileManager.default.fileExists(atPath: repoPath), !paths.contains(repoPath) {
-            paths.append(repoPath)
-        }
         return paths
     }
 
@@ -199,8 +195,10 @@ final class AIIndexStoreService {
 
         let rootDepth = URL(fileURLWithPath: root).pathComponents.count
         var matches: [String] = []
+        var budget = ScanResourceBudget(maximumEntries: 30_000, maximumDuration: 2)
 
         for case let url as URL in enumerator {
+            guard budget.consumeEntry() else { break }
             let depth = url.pathComponents.count - rootDepth
             if depth > maxDepth {
                 enumerator.skipDescendants()

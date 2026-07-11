@@ -51,8 +51,35 @@
 		A034_KDV /* KeyboardDiagnosticView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F034KDV /* KeyboardDiagnosticView.swift */; };
 		A038_HDS /* HardwareDiagnosticServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = F038HDS /* HardwareDiagnosticServices.swift */; };
 		A039_TDV /* ToolDiagnosticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F039TDV /* ToolDiagnosticsView.swift */; };
+		A040_SDS /* SafeDeletionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F040SDS /* SafeDeletionService.swift */; };
+		A041_CAS /* CleanupAdvisorService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F041CAS /* CleanupAdvisorService.swift */; };
+		A042_CAV /* CleanupAdvisorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F042CAV /* CleanupAdvisorView.swift */; };
+		A043_DFS /* DuplicateFinderService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F043DFS /* DuplicateFinderService.swift */; };
+		A044_DFV /* DuplicateFinderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F044DFV /* DuplicateFinderView.swift */; };
+		A045_CRS /* CloudReclaimService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F045CRS /* CloudReclaimService.swift */; };
+		A046_CRV /* CloudReclaimView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F046CRV /* CloudReclaimView.swift */; };
+		A047_SPS /* SimilarPhotoService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F047SPS /* SimilarPhotoService.swift */; };
+		A048_SPV /* SimilarPhotoView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F048SPV /* SimilarPhotoView.swift */; };
+		A049_SOS /* StartupOptimizerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F049SOS /* StartupOptimizerService.swift */; };
+		A050_SOV /* StartupOptimizerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F050SOV /* StartupOptimizerView.swift */; };
+		A051_SRB /* ScanResourceBudget.swift in Sources */ = {isa = PBXBuildFile; fileRef = F051SRB /* ScanResourceBudget.swift */; };
+		A052_SWS /* StorageWorkspaceService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F052SWS /* StorageWorkspaceService.swift */; };
+		A_TEST_SAFETY /* SafetyPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F_TEST_SAFETY /* SafetyPolicyTests.swift */; };
 		A035_LIV /* LaunchIntroView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F035LIV /* LaunchIntroView.swift */; };
+		A053_US /* UpdateService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F053_US /* UpdateService.swift */; };
+		A054_UV /* UpdateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F054_UV /* UpdateView.swift */; };
+		A_SPARKLE /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = P_SPARKLE /* Sparkle */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		TEST_PROXY /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = PROJECT /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = TARGET;
+			remoteInfo = MacCleaner;
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
 		F001 /* MacCleanerApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacCleanerApp.swift; sourceTree = "<group>"; };
@@ -98,7 +125,24 @@
 		F034KDV /* KeyboardDiagnosticView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardDiagnosticView.swift; sourceTree = "<group>"; };
 		F038HDS /* HardwareDiagnosticServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HardwareDiagnosticServices.swift; sourceTree = "<group>"; };
 		F039TDV /* ToolDiagnosticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolDiagnosticsView.swift; sourceTree = "<group>"; };
+		F040SDS /* SafeDeletionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SafeDeletionService.swift; sourceTree = "<group>"; };
+		F041CAS /* CleanupAdvisorService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CleanupAdvisorService.swift; sourceTree = "<group>"; };
+		F042CAV /* CleanupAdvisorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CleanupAdvisorView.swift; sourceTree = "<group>"; };
+		F043DFS /* DuplicateFinderService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DuplicateFinderService.swift; sourceTree = "<group>"; };
+		F044DFV /* DuplicateFinderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DuplicateFinderView.swift; sourceTree = "<group>"; };
+		F045CRS /* CloudReclaimService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudReclaimService.swift; sourceTree = "<group>"; };
+		F046CRV /* CloudReclaimView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudReclaimView.swift; sourceTree = "<group>"; };
+		F047SPS /* SimilarPhotoService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SimilarPhotoService.swift; sourceTree = "<group>"; };
+		F048SPV /* SimilarPhotoView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SimilarPhotoView.swift; sourceTree = "<group>"; };
+		F049SOS /* StartupOptimizerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StartupOptimizerService.swift; sourceTree = "<group>"; };
+		F050SOV /* StartupOptimizerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StartupOptimizerView.swift; sourceTree = "<group>"; };
+		F051SRB /* ScanResourceBudget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanResourceBudget.swift; sourceTree = "<group>"; };
+		F052SWS /* StorageWorkspaceService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorageWorkspaceService.swift; sourceTree = "<group>"; };
+		F_TEST_SAFETY /* SafetyPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SafetyPolicyTests.swift; sourceTree = "<group>"; };
+		PROD_TEST /* MacCleanerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MacCleanerTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		F035LIV /* LaunchIntroView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchIntroView.swift; sourceTree = "<group>"; };
+		F053_US /* UpdateService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateService.swift; sourceTree = "<group>"; };
+		F054_UV /* UpdateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateView.swift; sourceTree = "<group>"; };
 		F010 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		F011 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		F012 /* MacCleaner.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = MacCleaner.entitlements; sourceTree = "<group>"; };
@@ -110,6 +154,7 @@
 			isa = PBXGroup;
 			children = (
 				G_APP /* MacCleaner */,
+				G_TESTS /* MacCleanerTests */,
 				G_PROD /* Products */,
 			);
 			sourceTree = "<group>";
@@ -118,6 +163,7 @@
 			isa = PBXGroup;
 			children = (
 				PROD /* MacCleaner.app */,
+				PROD_TEST /* MacCleanerTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -136,6 +182,14 @@
 				F012 /* MacCleaner.entitlements */,
 			);
 			path = MacCleaner;
+			sourceTree = "<group>";
+		};
+		G_TESTS /* MacCleanerTests */ = {
+			isa = PBXGroup;
+			children = (
+				F_TEST_SAFETY /* SafetyPolicyTests.swift */,
+			);
+			path = MacCleanerTests;
 			sourceTree = "<group>";
 		};
 		G_MODELS /* Models */ = {
@@ -166,6 +220,15 @@
 				F034MS /* MaintenanceService.swift */,
 				F034KDS /* KeyboardDiagnosticService.swift */,
 				F038HDS /* HardwareDiagnosticServices.swift */,
+				F040SDS /* SafeDeletionService.swift */,
+				F041CAS /* CleanupAdvisorService.swift */,
+				F043DFS /* DuplicateFinderService.swift */,
+				F045CRS /* CloudReclaimService.swift */,
+				F047SPS /* SimilarPhotoService.swift */,
+				F049SOS /* StartupOptimizerService.swift */,
+				F051SRB /* ScanResourceBudget.swift */,
+				F052SWS /* StorageWorkspaceService.swift */,
+				F053_US /* UpdateService.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -196,6 +259,12 @@
 				F034MV /* MaintenanceView.swift */,
 				F034KDV /* KeyboardDiagnosticView.swift */,
 				F039TDV /* ToolDiagnosticsView.swift */,
+				F042CAV /* CleanupAdvisorView.swift */,
+				F044DFV /* DuplicateFinderView.swift */,
+				F046CRV /* CloudReclaimView.swift */,
+				F048SPV /* SimilarPhotoView.swift */,
+				F050SOV /* StartupOptimizerView.swift */,
+				F054_UV /* UpdateView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -216,11 +285,40 @@
 			dependencies = (
 			);
 			name = MacCleaner;
+			packageProductDependencies = (
+				P_SPARKLE /* Sparkle */,
+			);
 			productName = MacCleaner;
 			productReference = PROD /* MacCleaner.app */;
 			productType = "com.apple.product-type.application";
 		};
+		TEST_TARGET /* MacCleanerTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = CFGLIST_TEST_TARGET;
+			buildPhases = (
+				TEST_PHASE_SRC /* Sources */,
+				TEST_PHASE_RES /* Resources */,
+				TEST_PHASE_FWK /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				TEST_DEP /* PBXTargetDependency */,
+			);
+			name = MacCleanerTests;
+			productName = MacCleanerTests;
+			productReference = PROD_TEST /* MacCleanerTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
+
+/* Begin PBXTargetDependency section */
+		TEST_DEP /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = TARGET /* MacCleaner */;
+			targetProxy = TEST_PROXY /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin PBXProject section */
 		PROJECT /* Project object */ = {
@@ -232,6 +330,10 @@
 				TargetAttributes = {
 					TARGET = {
 						CreatedOnToolsVersion = 15.0;
+					};
+					TEST_TARGET = {
+						CreatedOnToolsVersion = 15.0;
+						TestTargetID = TARGET;
 					};
 				};
 			};
@@ -247,8 +349,12 @@
 			productRefGroup = G_PROD /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
+			packageReferences = (
+				PKG_SPARKLE /* XCRemoteSwiftPackageReference "Sparkle" */,
+			);
 			targets = (
 				TARGET /* MacCleaner */,
+				TEST_TARGET /* MacCleanerTests */,
 			);
 		};
 /* End PBXProject section */
@@ -259,6 +365,13 @@
 			buildActionMask = 2147483647;
 			files = (
 				A010 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		TEST_PHASE_RES /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -311,8 +424,31 @@
 				A034_KDS /* KeyboardDiagnosticService.swift in Sources */,
 				A034_KDV /* KeyboardDiagnosticView.swift in Sources */,
 				A038_HDS /* HardwareDiagnosticServices.swift in Sources */,
+				A040_SDS /* SafeDeletionService.swift in Sources */,
+				A041_CAS /* CleanupAdvisorService.swift in Sources */,
+				A042_CAV /* CleanupAdvisorView.swift in Sources */,
+				A043_DFS /* DuplicateFinderService.swift in Sources */,
+				A044_DFV /* DuplicateFinderView.swift in Sources */,
+				A045_CRS /* CloudReclaimService.swift in Sources */,
+				A046_CRV /* CloudReclaimView.swift in Sources */,
+				A047_SPS /* SimilarPhotoService.swift in Sources */,
+				A048_SPV /* SimilarPhotoView.swift in Sources */,
+				A049_SOS /* StartupOptimizerService.swift in Sources */,
+				A050_SOV /* StartupOptimizerView.swift in Sources */,
+				A051_SRB /* ScanResourceBudget.swift in Sources */,
+				A052_SWS /* StorageWorkspaceService.swift in Sources */,
 				A039_TDV /* ToolDiagnosticsView.swift in Sources */,
 				A035_LIV /* LaunchIntroView.swift in Sources */,
+				A053_US /* UpdateService.swift in Sources */,
+				A054_UV /* UpdateView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		TEST_PHASE_SRC /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A_TEST_SAFETY /* SafetyPolicyTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -320,6 +456,14 @@
 
 /* Begin PBXFrameworksBuildPhase section */
 		PHASE_FWK /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A_SPARKLE /* Sparkle in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		TEST_PHASE_FWK /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -427,7 +571,7 @@
 				CODE_SIGN_ENTITLEMENTS = MacCleaner/MacCleaner.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				ENABLE_HARDENED_RUNTIME = NO;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = MacCleaner/Info.plist;
@@ -436,12 +580,13 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.maccleaner.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
+				SUPPORTED_PLATFORMS = macosx;
 			};
 			name = Debug;
 		};
@@ -453,7 +598,7 @@
 				CODE_SIGN_ENTITLEMENTS = MacCleaner/MacCleaner.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = MacCleaner/Info.plist;
@@ -462,12 +607,45 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.maccleaner.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
+				SUPPORTED_PLATFORMS = macosx;
+			};
+			name = Release;
+		};
+		CFG_TEST_DEBUG /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.maccleaner.app.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				SUPPORTED_PLATFORMS = macosx;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/MacCleaner.app/Contents/MacOS/MacCleaner";
+			};
+			name = Debug;
+		};
+		CFG_TEST_RELEASE /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.maccleaner.app.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				SUPPORTED_PLATFORMS = macosx;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/MacCleaner.app/Contents/MacOS/MacCleaner";
 			};
 			name = Release;
 		};
@@ -492,7 +670,35 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		CFGLIST_TEST_TARGET /* Build configuration list for PBXNativeTarget "MacCleanerTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				CFG_TEST_DEBUG /* Debug */,
+				CFG_TEST_RELEASE /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		PKG_SPARKLE /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.9.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		P_SPARKLE /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = PKG_SPARKLE /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
+		};
+/* End XCSwiftPackageProductDependency section */
 
 	};
 	rootObject = PROJECT /* Project object */;

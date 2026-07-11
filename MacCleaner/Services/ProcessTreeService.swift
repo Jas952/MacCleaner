@@ -129,13 +129,6 @@ final class ProcessTreeService {
     }
 
     private static func fetchRawProcesses() -> [ProcessNode] {
-        var daemonData: [Int32: ProcessInfoPayload] = [:]
-        if let payload = fetchDaemonProcessPayload() {
-            for p in payload {
-                daemonData[p.pid] = p
-            }
-        }
-        
         let task = Process()
         task.launchPath = "/bin/ps"
         task.arguments = ["-wwwwaxo", "pid=,ppid=,pcpu=,rss=,time=,args="]
@@ -185,8 +178,7 @@ final class ProcessTreeService {
             let name = displayName(from: commandLine)
             let isAgent = isBackgroundAgent(name: name, fullPath: commandLine)
 
-            let daemonInfo = daemonData[pid]
-            let memBytes = daemonInfo?.footprint ?? (rssKB * 1024)
+            let memBytes = rssKB * 1024
 
             results.append(ProcessNode(
                 id: pid,
@@ -195,38 +187,13 @@ final class ProcessTreeService {
                 cpuUsage: cpu,
                 cpuTime: timeStr,
                 memoryBytes: memBytes,
-                diskRead: daemonInfo?.diskRead ?? 0,
-                diskWritten: daemonInfo?.diskWritten ?? 0,
+                diskRead: 0,
+                diskWritten: 0,
                 parentPID: ppid,
                 isBackgroundAgent: isAgent
             ))
         }
         return results
-    }
-
-    private static func fetchDaemonProcessPayload(timeout: TimeInterval = 2) -> [ProcessInfoPayload]? {
-        guard HelperManager.shared.isInstalled,
-              let url = URL(string: "http://127.0.0.1:9099/processes") else { return nil }
-
-        var request = URLRequest(url: url)
-        request.timeoutInterval = timeout
-
-        let semaphore = DispatchSemaphore(value: 0)
-        var payload: [ProcessInfoPayload]?
-        let task = URLSession.shared.dataTask(with: request) { data, _, _ in
-            defer { semaphore.signal() }
-            guard let data,
-                  let decoded = try? JSONDecoder().decode([ProcessInfoPayload].self, from: data)
-            else { return }
-            payload = decoded
-        }
-        task.resume()
-
-        if semaphore.wait(timeout: .now() + timeout) == .timedOut {
-            task.cancel()
-            return nil
-        }
-        return payload
     }
 
     private static func displayName(from commandLine: String) -> String {
@@ -257,36 +224,21 @@ final class ProcessTreeService {
 
     @discardableResult
     static func killProcess(_ node: ProcessNode) -> KillResult {
+        sendSignal(SIGTERM, to: node)
+    }
+
+    @discardableResult
+    static func forceKillProcess(_ node: ProcessNode) -> KillResult {
+        sendSignal(SIGKILL, to: node)
+    }
+
+    private static func sendSignal(_ signal: Int32, to node: ProcessNode) -> KillResult {
         if isProtected(node) {
-            return .protected(reason: "\"\(node.name)\" is a protected macOS system process. Install the Root Helper to kill it.")
+            return .protected(reason: "\"\(node.name)\" is protected and cannot be terminated by MacCleaner.")
         }
-        
-        if HelperManager.shared.isInstalled {
-            if let url = URL(string: "http://127.0.0.1:9099/kill?pid=\(node.id)") {
-                var request = URLRequest(url: url)
-                request.httpMethod = "POST"
-                request.timeoutInterval = 3
-                let semaphore = DispatchSemaphore(value: 0)
-                var success = false
-                let task = URLSession.shared.dataTask(with: request) { data, _, _ in
-                    if let d = data, String(data: d, encoding: .utf8) == "OK" {
-                        success = true
-                    }
-                    semaphore.signal()
-                }
-                task.resume()
-                if semaphore.wait(timeout: .now() + 3) == .timedOut {
-                    task.cancel()
-                    return .failed(reason: "Daemon did not respond")
-                }
-                return success ? .success : .failed(reason: "Daemon failed to kill process")
-            }
-        }
-        
-        let result = Darwin.kill(node.id, SIGTERM)
+
+        let result = Darwin.kill(node.id, signal)
         if result == 0 { return .success }
-        let forceResult = Darwin.kill(node.id, SIGKILL)
-        if forceResult == 0 { return .success }
         return .failed(reason: String(cString: strerror(errno)))
     }
 

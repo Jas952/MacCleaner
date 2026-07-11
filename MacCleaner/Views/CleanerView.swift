@@ -3,7 +3,7 @@ import SwiftUI
 // MARK: - Cleaner Tool enum
 
 enum CleanerTool: CaseIterable, Identifiable {
-    case ram, disk, refresh, dns, shredder
+    case ram, disk, refresh, dns, shredder, startup
 
     var id: Self { self }
 
@@ -13,17 +13,19 @@ enum CleanerTool: CaseIterable, Identifiable {
         case .disk:      return "Disk Junk"
         case .refresh:   return "Refresh"
         case .dns:       return "DNS Cache"
-        case .shredder:  return "Shredder"
+        case .shredder:  return "Safe Delete"
+        case .startup:   return "Startup"
         }
     }
 
     var subtitle: String {
         switch self {
-        case .ram:       return "Free inactive memory"
+        case .ram:       return "Close memory-heavy apps"
         case .disk:      return "Remove caches & logs"
         case .refresh:   return "System maintenance"
         case .dns:       return "Flush DNS records"
-        case .shredder:  return "Securely erase files"
+        case .shredder:  return "Move files to Trash"
+        case .startup:   return "Reduce login background load"
         }
     }
 
@@ -34,6 +36,7 @@ enum CleanerTool: CaseIterable, Identifiable {
         case .refresh:   return "arrow.triangle.2.circlepath"
         case .dns:       return "globe.americas"
         case .shredder:  return "scissors.badge.ellipsis"
+        case .startup:   return "bolt.horizontal.circle"
         }
     }
 
@@ -44,6 +47,7 @@ enum CleanerTool: CaseIterable, Identifiable {
         case .refresh:   return "gearshape.arrow.triangle.2.circlepath"
         case .dns:       return "network"
         case .shredder:  return "doc.zipper"
+        case .startup:   return "powerplug.fill"
         }
     }
 
@@ -54,6 +58,7 @@ enum CleanerTool: CaseIterable, Identifiable {
         case .refresh:   return Color(red: 0.85, green: 0.65, blue: 0.3)
         case .dns:       return .accentBlue
         case .shredder:  return Color(red: 0.95, green: 0.45, blue: 0.4)
+        case .startup:   return .accentPurple
         }
     }
 
@@ -63,7 +68,8 @@ enum CleanerTool: CaseIterable, Identifiable {
         case .disk:      return ["Browser caches", "Dev tool leftovers", "AI tool caches"]
         case .refresh:   return ["QuickLook rebuild", "Font cache", "Launch Services"]
         case .dns:       return ["Site loading issues", "Internet connectivity", "DNS lookup errors"]
-        case .shredder:  return ["Sensitive files", "Stubborn files", "Secure deletion"]
+        case .shredder:  return ["Reversible removal", "macOS Trash", "No false overwrite claims"]
+        case .startup:   return ["Login speed", "Background RAM", "Reversible"]
         }
     }
 }
@@ -126,6 +132,9 @@ enum RAMCleaningFlow {
 
 final class CleanerViewState: ObservableObject {
     @Published var scanItems: [CleanableItem] = []
+    @Published var diskScanWasLimited = false
+    @Published var diskScannedEntryCount = 0
+    @Published var diskScanMode: DiskCleanScanMode = .efficient
     @Published var isScanning = false
     @Published var isCleaning = false
     @Published var hasScan = false
@@ -140,6 +149,8 @@ final class CleanerViewState: ObservableObject {
     @Published var ramAnalyzeProgress: Double = 0
     @Published var ramFreedBytes: UInt64 = 0
     @Published var ramPurgeSuccess = true
+    @Published var ramClosedApps = 0
+    @Published var ramRefusedApps = 0
     @Published var ramAnalyzePhase = "Checking memory pressure…"
 
     @Published var dnsFlow: SimpleToolFlow = .idle
@@ -181,12 +192,14 @@ struct CleanerView: View {
     @Binding var activeTool: CleanerTool?
     @Binding var ramFlow: RAMCleaningFlow
     @Binding var operationActive: Bool
+    @StateObject private var startupOptimizerService = StartupOptimizerService()
 
     // Disk cleaner state
     @State private var runningPulse = false
     @State private var cachedNetworkInterface = "Detecting…"
     @State private var cachedDNSResolver = "Detecting…"
     @State private var showOptimizationCleanupConfirmation = false
+    @State private var showRAMCloseConfirmation = false
 
     private var totalSelected: Int64 { state.scanItems.filter(\.isSelected).reduce(0) { $0 + $1.sizeBytes } }
     private var selectedCount: Int   { state.scanItems.filter(\.isSelected).count }
@@ -202,11 +215,7 @@ struct CleanerView: View {
             // ── Header ─────────────────────────────────────────────
             HStack {
                 if let tool = activeTool {
-                    Button {
-                        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                            activeTool = nil
-                        }
-                    } label: {
+                    Button(action: returnToToolGrid) {
                         HStack(spacing: 5) {
                             Image(systemName: "chevron.left")
                                 .font(.system(size: 11, weight: .semibold))
@@ -289,7 +298,6 @@ struct CleanerView: View {
                         ))
                 }
             }
-            .animation(.spring(response: 0.4, dampingFraction: 0.8, blendDuration: 0.05), value: activeTool)
             .animation(.spring(response: 0.4, dampingFraction: 0.8, blendDuration: 0.05), value: state.mode)
         }
         .background(Color.surfaceLight)
@@ -299,8 +307,35 @@ struct CleanerView: View {
                 runCleanup()
             }
         } message: {
-            Text("MacCleaner will optimize memory, flush DNS cache, refresh system state, and clean \(selectedCount) selected disk items totaling \(DiskCleaner.formattedSize(totalSelected)).")
+            Text("MacCleaner will flush DNS cache, refresh system state, and clean \(selectedCount) selected disk items totaling \(DiskCleaner.formattedSize(totalSelected)). Applications remain open; RAM suggestions always require separate manual review.")
         }
+        .alert("Quit selected applications?", isPresented: $showRAMCloseConfirmation) {
+            Button("Cancel", role: .cancel) {}
+            Button("Request Quit") { performRAMClean() }
+        } message: {
+            let selected = state.ramSources.filter(\.isSelected)
+            let bytes = selected.reduce(0) { $0 &+ $1.bytes }
+            Text("MacCleaner will request a normal Quit from \(selected.count) application\(selected.count == 1 ? "" : "s") using up to \(MemoryInfo.formatted(bytes)). Apps may ask you to save work. MacCleaner will never force-terminate them.")
+        }
+        .onChange(of: startupOptimizerService.isScanning) { _ in
+            syncOperationStateWithStartup()
+        }
+        .onChange(of: startupOptimizerService.isMutating) { _ in
+            syncOperationStateWithStartup()
+        }
+    }
+
+    private func syncOperationStateWithStartup() {
+        let dnsRunning: Bool
+        if case .running = state.dnsFlow { dnsRunning = true } else { dnsRunning = false }
+        operationActive = startupOptimizerService.isScanning
+            || startupOptimizerService.isMutating
+            || state.isScanning
+            || state.isCleaning
+            || state.refreshRunning
+            || state.isShredding
+            || state.optimizationRunning
+            || dnsRunning
     }
     // MARK: - Tool Picker Grid
 
@@ -326,6 +361,7 @@ struct CleanerView: View {
                 HStack(spacing: g) {
                     toolTile(.dns,       height: row2H)
                     toolTile(.shredder,  height: row2H)
+                    toolTile(.startup,   height: row2H)
                 }
                 systemStatusStrip
                     .frame(height: stripH)
@@ -488,9 +524,9 @@ struct CleanerView: View {
 
     private var sublabelForRAM: String {
         switch state.optimizationPhase {
-        case .review:   return "to free"
-        case .cleaning: return "cleaning"
-        case .success:  return "freed"
+        case .review:   return "manual review"
+        case .cleaning: return "apps unchanged"
+        case .success:  return "manual only"
         default:        return ""
         }
     }
@@ -694,6 +730,8 @@ struct CleanerView: View {
         state.optimizationDNSSuccess = false
         state.optimizationRAMSources = []
         state.scanItems = []
+        state.diskScanWasLimited = false
+        state.diskScannedEntryCount = 0
     }
 
     private func runOptimization() {
@@ -713,7 +751,7 @@ struct CleanerView: View {
         group.enter()
         var ramLogIDs: [UUID] = []
         ramLogIDs.append(addOptimizationLog("Scanning memory", status: .running))
-        RAMCleaner.analyze(memory: monitor.memory, processes: monitor.topProcesses) { logMessage in
+        RAMCleaner.analyze(memory: monitor.memory, processes: monitor.processNodes) { logMessage in
             DispatchQueue.main.async {
                 let id = self.addOptimizationLog(logMessage, status: .running, animated: false)
                 ramLogIDs.append(id)
@@ -722,11 +760,11 @@ struct CleanerView: View {
             DispatchQueue.main.async {
                 self.bulkUpdateRunningLogsToSuccess(ids: ramLogIDs)
                 self.state.optimizationFoundRAM = result.totalFreeable
-                self.state.optimizationRAMSources = result.sources.filter { $0.isSelected }
-                if self.state.optimizationRAMSources.isEmpty {
+                self.state.optimizationRAMSources = []
+                if result.totalFreeable == 0 {
                     self.addOptimizationLog("Memory is already optimized", status: .success)
                 } else {
-                    self.addOptimizationLog("Found \(MemoryInfo.formatted(result.totalFreeable)) of reclaimable memory", status: .success)
+                    self.addOptimizationLog("RAM Advisor found up to \(MemoryInfo.formatted(result.totalFreeable)); app review remains manual", status: .success)
                 }
                 group.leave()
             }
@@ -761,12 +799,20 @@ struct CleanerView: View {
                 let id = self.addOptimizationLog(logMessage, status: .running, animated: false)
                 diskLogIDs.append(id)
             }
-        } completion: { items in
+        } completion: { result in
             DispatchQueue.main.async {
                 self.bulkUpdateRunningLogsToSuccess(ids: diskLogIDs)
-                self.state.scanItems = items
-                self.state.optimizationFoundDisk = items.reduce(0) { $0 + $1.sizeBytes }
-                if items.isEmpty {
+                self.state.scanItems = result.items
+                self.state.diskScanWasLimited = result.wasLimited
+                self.state.diskScannedEntryCount = result.scannedEntryCount
+                self.state.optimizationFoundDisk = result.items.reduce(0) { $0 + $1.sizeBytes }
+                if result.wasLimited {
+                    self.addOptimizationLog(
+                        "Low-load scan stopped after \(result.scannedEntryCount) entries; shown results are partial",
+                        status: .success
+                    )
+                }
+                if result.items.isEmpty {
                     self.addOptimizationLog("No disk junk found", status: .success)
                 } else {
                     self.addOptimizationLog("Found \(DiskCleaner.formattedSize(self.state.optimizationFoundDisk)) of disk junk", status: .success)
@@ -800,21 +846,26 @@ struct CleanerView: View {
         // 1. RAM purge
         group.enter()
         if state.optimizationRAMSources.isEmpty {
-            addOptimizationLog("Memory already optimized", status: .success)
+            addOptimizationLog(
+                state.optimizationFoundRAM > 0
+                    ? "RAM suggestions preserved for manual review"
+                    : "Memory pressure needs no action",
+                status: .success
+            )
             group.leave()
         } else {
-            addOptimizationLog("Purging inactive memory", status: .running)
-            RAMCleaner.purge(items: state.optimizationRAMSources) { success, freed in
+            addOptimizationLog("Closing selected memory-heavy apps", status: .running)
+            RAMCleaner.closeSelectedApplications(items: state.optimizationRAMSources) { result in
                 DispatchQueue.main.async {
-                    if success && freed > 0 {
+                    if result.closedAny {
                         withAnimation(.easeInOut(duration: 0.5)) {
-                            self.state.optimizationFreedRAM = freed
+                            self.state.optimizationFreedRAM = result.estimatedReleasedBytes
                         }
-                        self.addOptimizationLog("Freed \(MemoryInfo.formatted(freed)) of memory", status: .success)
-                    } else if success {
-                        self.addOptimizationLog("Memory flushed", status: .success)
+                        self.addOptimizationLog("Closed \(result.closedCount) app\(result.closedCount == 1 ? "" : "s"); up to \(MemoryInfo.formatted(result.estimatedReleasedBytes)) released", status: .success)
+                    } else if result.requestedCount == 0 {
+                        self.addOptimizationLog("No user apps selected", status: .success)
                     } else {
-                        self.addOptimizationLog("Memory optimization skipped", status: .failure)
+                        self.addOptimizationLog("Apps remained open; no force termination was used", status: .failure)
                     }
                     group.leave()
                 }
@@ -859,7 +910,7 @@ struct CleanerView: View {
                         self.state.optimizationFreedDisk = freed
                     }
                     if freed > 0 {
-                        self.addOptimizationLog("Cleaned \(DiskCleaner.formattedSize(freed)) from disk", status: .success)
+                        self.addOptimizationLog("Moved \(DiskCleaner.formattedSize(freed)) to Trash", status: .success)
                     } else {
                         self.addOptimizationLog("Disk already clean", status: .success)
                     }
@@ -936,6 +987,9 @@ struct CleanerView: View {
         Button {
             if tool == .refresh && state.refreshTasks.isEmpty {
                 state.refreshTasks = SystemRefreshService.allTasks()
+            }
+            if tool == .startup && startupOptimizerService.items.isEmpty {
+                startupOptimizerService.startScan()
             }
             withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
                 activeTool = tool
@@ -1074,6 +1128,8 @@ struct CleanerView: View {
         case .refresh:   refreshPanel
         case .dns:       dnsPanel
         case .shredder:  shredderPanel
+        case .startup:
+            StartupOptimizerView(service: startupOptimizerService)
         }
     }
 
@@ -1340,7 +1396,7 @@ struct CleanerView: View {
         let usedPct = monitor.memory.usedPercent
         let freeable = state.ramSources.filter { $0.isSelected }.reduce(0) { $0 + $1.bytes }
         return toolShell(
-            description: "Frees inactive page cache and compressed memory to ease pressure. Wired memory is released only when apps quit.",
+            description: "Explains memory pressure and lets you close selected user apps. macOS continues to manage inactive and compressed memory.",
             infoTitle: "Memory Breakdown",
             info: { ramLiveAnalytics },
             right: { ramGauge(usedPct: usedPct, freeable: freeable) },
@@ -1365,7 +1421,7 @@ struct CleanerView: View {
                         Image(systemName: "sparkles").font(.system(size: 28)).foregroundStyle(Color.accentBlue)
                     }
                     .frame(width: 148, height: 148)
-                    Text("Freeing…").font(.system(size: 9, design: .monospaced)).foregroundStyle(Color.textTertiaryLight).padding(.top, 24)
+                    Text("Closing apps…").font(.system(size: 9, design: .monospaced)).foregroundStyle(Color.textTertiaryLight).padding(.top, 24)
                 case .done:
                     GaugeRing(progress: 1, color: state.ramPurgeSuccess ? .accentGreen : .accentRed) {
                         Image(systemName: state.ramPurgeSuccess ? "checkmark" : "xmark")
@@ -1373,7 +1429,7 @@ struct CleanerView: View {
                             .foregroundStyle(state.ramPurgeSuccess ? Color.accentGreen : Color.accentRed)
                     }
                     .frame(width: 148, height: 148)
-                    Text(state.ramPurgeSuccess ? (state.ramFreedBytes > 1024 * 1024 ? "\(MemoryInfo.formatted(state.ramFreedBytes)) freed" : "Flushed") : "Cancelled")
+                    Text(state.ramPurgeSuccess ? (state.ramFreedBytes > 1024 * 1024 ? "Up to \(MemoryInfo.formatted(state.ramFreedBytes))" : "Completed") : "Not closed")
                         .font(.system(size: 9, design: .monospaced))
                         .foregroundStyle(state.ramPurgeSuccess ? Color.textTertiaryLight : Color.accentRed)
                         .padding(.top, 24)
@@ -1454,31 +1510,35 @@ struct CleanerView: View {
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: 6) { ForEach(state.ramSources) { s in ramSourceRow(for: s.id) } }
                 }
-                actionButton(freeable > 0 ? "Free \(MemoryInfo.formatted(freeable))" : "Select sources",
-                             icon: "sparkles", color: Color.accentBlue, disabled: freeable == 0) { performRAMClean() }
+                actionButton(freeable > 0 ? "Review & Quit · \(MemoryInfo.formatted(freeable))" : "Select apps",
+                             icon: "rectangle.portrait.and.arrow.right", color: Color.accentBlue, disabled: freeable == 0) {
+                    showRAMCloseConfirmation = true
+                }
             }
         case .cleaning:
             VStack(alignment: .leading, spacing: 12) {
-                statusBlock(label: "Status", value: "Freeing memory", valueColor: Color.textPrimaryLight, sub: "Flushing page cache to reclaim RAM")
+                statusBlock(label: "Status", value: "Closing selected apps", valueColor: Color.textPrimaryLight, sub: "Requesting a normal application termination")
                 Spacer()
             }
         case .done:
             VStack(alignment: .leading, spacing: 14) {
                 if state.ramPurgeSuccess {
-                    statusBlock(label: "Complete", value: "Memory Freed", valueColor: Color.accentGreen,
-                                sub: state.ramFreedBytes > 1024 * 1024 ? "~\(MemoryInfo.formatted(state.ramFreedBytes)) reclaimed" : "Inactive pages flushed")
-                    Text("Wired & compressed memory is freed only when apps quit.")
+                    statusBlock(label: "Complete", value: "\(state.ramClosedApps) App\(state.ramClosedApps == 1 ? "" : "s") Closed", valueColor: Color.accentGreen,
+                                sub: "Up to \(MemoryInfo.formatted(state.ramFreedBytes)) released" + (state.ramRefusedApps > 0 ? " · \(state.ramRefusedApps) remained open" : ""))
+                    Text("macOS reclaims inactive and compressed pages automatically as pressure changes.")
                         .font(.system(size: 9, design: .monospaced)).foregroundStyle(Color.textTertiaryLight).fixedSize(horizontal: false, vertical: true)
                 } else {
-                    statusBlock(label: "Cancelled", value: "No Access", valueColor: Color.accentRed,
-                                sub: "Root Helper required")
-                    Text("Install the privileged helper from Processes to purge inactive memory.")
+                    statusBlock(label: "Not Closed", value: "Apps Remained Open", valueColor: Color.accentAmber,
+                                sub: "The app declined Quit, showed a save prompt, or changed state")
+                    Text("MacCleaner never force-terminates apps or purges system memory.")
                         .font(.system(size: 9, design: .monospaced)).foregroundStyle(Color.textTertiaryLight).fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer()
                 HStack(spacing: 8) {
                     secondaryButton("Done") { activeTool = nil; ramFlow = .idle; state.ramAnalysis = nil }
-                    actionButton("Try Again", icon: "arrow.clockwise", color: Color.accentBlue) { performRAMClean() }
+                    actionButton("Try Again", icon: "arrow.clockwise", color: Color.accentBlue) {
+                        showRAMCloseConfirmation = true
+                    }
                 }
             }
         }
@@ -1577,7 +1637,7 @@ struct CleanerView: View {
                         Image(systemName: "checkmark").font(.system(size: 34, weight: .bold)).foregroundStyle(.accentGreen)
                     }
                     .frame(width: 148, height: 148)
-                    Text("\(DiskCleaner.formattedSize(freed)) freed").font(.mono(9)).foregroundStyle(.textTertiary).padding(.top, 24)
+                    Text("\(DiskCleaner.formattedSize(freed)) moved").font(.mono(9)).foregroundStyle(.textTertiary).padding(.top, 24)
                 } else if state.isCleaning {
                     GaugeRing(progress: 0, color: CleanerTool.disk.accentColor, spinning: true, cleaning: true) {
                         Image(systemName: "sparkles").font(.system(size: 28)).foregroundStyle(CleanerTool.disk.accentColor)
@@ -1638,7 +1698,7 @@ struct CleanerView: View {
     private func diskLeft(disk: DiskInfo?) -> some View {
         if state.showResult, let freed = state.resultFreed {
             VStack(alignment: .leading, spacing: 14) {
-                statusBlock(label: "Complete", value: "\(DiskCleaner.formattedSize(freed)) freed", valueColor: .accentGreen, sub: "Cleaned successfully")
+                statusBlock(label: "Complete", value: "\(DiskCleaner.formattedSize(freed)) moved", valueColor: .accentGreen, sub: "Items are recoverable from Trash")
                 if state.resultErrors > 0 {
                     Text("\(state.resultErrors) item(s) skipped — needs Full Disk Access in Settings")
                         .font(.mono(9)).foregroundStyle(.accentAmber).fixedSize(horizontal: false, vertical: true)
@@ -1678,6 +1738,21 @@ struct CleanerView: View {
                                 .background(Color.surfaceCardLight).clipShape(RoundedRectangle(cornerRadius: 5))
                         }.buttonStyle(.plain)
                     }
+                }
+                if state.diskScanWasLimited {
+                    HStack(spacing: 5) {
+                        Image(systemName: "leaf.fill")
+                        Text("Low-load partial scan · \(state.diskScannedEntryCount) entries checked")
+                        Spacer()
+                        if state.diskScanMode == .efficient {
+                            Button("Run Thorough Scan") { startScan(mode: .thorough) }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                        }
+                    }
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(.accentAmber)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: 4) {
@@ -2142,13 +2217,13 @@ struct CleanerView: View {
             }
         }
     }
-    // MARK: - Shredder Panel
+    // MARK: - Safe Delete Panel
 
     private var shredderPanel: some View {
         let col = CleanerTool.shredder.accentColor
         return toolShell(
-            description: "Overwrites file data with random bytes before deletion so it can't be recovered, even with forensic tools.",
-            infoTitle: "Secure Deletion Info",
+            description: "Moves selected files to the macOS Trash so accidental removal can be undone.",
+            infoTitle: "Safe Deletion Info",
             info: { shredderLiveAnalytics },
             right: { shredderGauge(col: col) },
             left: { shredderLeft(col: col) }
@@ -2164,12 +2239,12 @@ struct CleanerView: View {
                     GaugeRing(progress: 1, color: .accentGreen) {
                         Image(systemName: "checkmark").font(.system(size: 34, weight: .bold)).foregroundStyle(.accentGreen)
                     }
-                    Text("\(state.shredderCount) shredded").font(.mono(9)).foregroundStyle(.textTertiary).padding(.top, 14)
+                    Text("\(state.shredderCount) moved").font(.mono(9)).foregroundStyle(.textTertiary).padding(.top, 14)
                 } else if state.isShredding {
                     GaugeRing(progress: 0, color: col, spinning: true, cleaning: true) {
                         Image(systemName: "flame.fill").font(.system(size: 28)).foregroundStyle(col)
                     }
-                    Text("Shredding…").font(.mono(9)).foregroundStyle(.textTertiary).padding(.top, 14)
+                    Text("Moving to Trash…").font(.mono(9)).foregroundStyle(.textTertiary).padding(.top, 14)
                 } else {
                     GaugeRing(progress: state.shredderFiles.isEmpty ? 0 : 1, color: col) {
                         VStack(spacing: 2) {
@@ -2177,7 +2252,7 @@ struct CleanerView: View {
                             Text("file(s)").font(.mono(8)).foregroundStyle(.textTertiary)
                         }
                     }
-                    Text(state.shredderFiles.isEmpty ? "No files selected" : "Ready to shred").font(.mono(9)).foregroundStyle(.textTertiary).padding(.top, 14)
+                    Text(state.shredderFiles.isEmpty ? "No files selected" : "Ready to move").font(.mono(9)).foregroundStyle(.textTertiary).padding(.top, 14)
                 }
             }
 
@@ -2186,7 +2261,7 @@ struct CleanerView: View {
             // Bottom: Compact status
             VStack(spacing: 6) {
                 Circle().fill(state.shredderDone ? Color.accentGreen : col).frame(width: 6, height: 6)
-                Text(state.shredderDone ? "Securely deleted" : state.isShredding ? "Processing" : "Waiting")
+                Text(state.shredderDone ? "Moved to Trash" : state.isShredding ? "Processing" : "Waiting")
                     .font(.system(size: 10, weight: .medium)).foregroundStyle(.textSecondary)
             }
             .frame(maxWidth: .infinity)
@@ -2201,22 +2276,22 @@ struct CleanerView: View {
     private func shredderLeft(col: Color) -> some View {
         if state.shredderDone {
             VStack(alignment: .leading, spacing: 14) {
-                statusBlock(label: "Complete", value: "\(state.shredderCount) Shredded", valueColor: .accentGreen, sub: "Securely overwritten and deleted")
+                statusBlock(label: "Complete", value: "\(state.shredderCount) Moved", valueColor: .accentGreen, sub: "Items remain recoverable from Trash")
                 VStack(spacing: 11) {
-                    stepRow("Data overwrite pass", state: 0, detail: "completed")
-                    stepRow("File system deletion", state: 0, detail: "completed")
-                    stepRow("Recovery possibility", state: 0, detail: "impossible")
+                    stepRow("Move to Trash", state: 0, detail: "completed")
+                    stepRow("Original location", state: 0, detail: "cleared")
+                    stepRow("Recovery", state: 0, detail: "available")
                 }
                 Spacer()
                 HStack(spacing: 8) {
                     secondaryButton("Done") { activeTool = nil; state.shredderDone = false; state.shredderFiles = [] }
-                    actionButton("Shred More", icon: "plus", color: col) { state.shredderDone = false; state.shredderFiles = [] }
+                    actionButton("Move More", icon: "plus", color: col) { state.shredderDone = false; state.shredderFiles = [] }
                 }
             }
         } else {
             VStack(spacing: 0) {
                 HStack {
-                    Text(state.shredderFiles.isEmpty ? "Select files to shred" : "\(state.shredderFiles.count) file(s) queued")
+                    Text(state.shredderFiles.isEmpty ? "Select files to move" : "\(state.shredderFiles.count) file(s) queued")
                         .font(.system(size: 12, weight: .semibold)).foregroundStyle(.textPrimary)
                     Spacer()
                 }
@@ -2264,15 +2339,22 @@ struct CleanerView: View {
                         .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(Color.borderSubtle))
                     }.buttonStyle(.plain)
                     if !state.shredderFiles.isEmpty {
-                        actionButton("Shred \(state.shredderFiles.count)", icon: "flame.fill", color: col, busy: state.isShredding) {
+                        actionButton("Move \(state.shredderFiles.count) to Trash", icon: "trash", color: col, busy: state.isShredding) {
                             operationActive = true
                             state.isShredding = true
-                            let count = state.shredderFiles.count
+                            let urls = state.shredderFiles
                             DispatchQueue.global(qos: .utility).async {
-                                for url in state.shredderFiles { try? FileManager.default.removeItem(at: url) }
+                                var moved: [URL] = []
+                                for url in urls {
+                                    if (try? SafeDeletionService.moveToTrash(url)) != nil {
+                                        moved.append(url)
+                                    }
+                                }
                                 DispatchQueue.main.async {
                                     operationActive = false
-                                    state.isShredding = false; state.shredderCount = count
+                                    state.isShredding = false
+                                    state.shredderCount = moved.count
+                                    state.shredderFiles.removeAll { moved.contains($0) }
                                     withAnimation { state.shredderDone = true }
                                 }
                             }
@@ -2504,13 +2586,13 @@ struct CleanerView: View {
         }
     private var shredderLiveAnalytics: some View {
         VStack(spacing: 0) {
-            analyticsHeader("Secure Deletion Info")
+            analyticsHeader("Safe Deletion Info")
             VStack(spacing: 8) {
                 ForEach([
-                    ("1. Select files",    "1.circle",          "Choose any files to shred"),
-                    ("2. Data overwrite",  "2.circle",          "Random bytes written over content"),
-                    ("3. File removed",    "3.circle",          "Entry deleted from filesystem"),
-                    ("4. Unrecoverable",   "4.circle",          "No trace left on disk"),
+                    ("1. Select files",    "1.circle",          "Choose files you no longer need"),
+                    ("2. Move to Trash",   "2.circle",          "macOS relocates each selected item"),
+                    ("3. Review",          "3.circle",          "Restore an item if removal was accidental"),
+                    ("4. Empty later",     "4.circle",          "Use Finder when permanent deletion is intended"),
                 ], id: \.0) { step in
                     HStack(spacing: 10) {
                         Image(systemName: step.1).font(.system(size: 14))
@@ -2528,7 +2610,7 @@ struct CleanerView: View {
 
                     Divider().opacity(0.3).padding(.vertical, 2)
 
-                    Text("Note: SSD TRIM means overwrite patterns differ on flash storage. The file entry is fully removed regardless.")
+                    Text("MacCleaner does not claim secure overwrite on APFS or SSD storage. FileVault is the appropriate protection for data at rest.")
                         .font(.mono(9)).foregroundStyle(.textTertiary)
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 4)
@@ -2772,7 +2854,7 @@ struct CleanerView: View {
                 }
             }
         }
-        RAMCleaner.analyze(memory: monitor.memory, processes: monitor.topProcesses) { result in
+        RAMCleaner.analyze(memory: monitor.memory, processes: monitor.processNodes) { result in
             withAnimation(.easeInOut(duration: 0.3)) {
                 state.ramAnalysis = result
                 state.ramSources = result.sources
@@ -2789,11 +2871,15 @@ struct CleanerView: View {
             ramFlow = .cleaning
             state.ramFreedBytes = 0
             state.ramPurgeSuccess = true
+            state.ramClosedApps = 0
+            state.ramRefusedApps = 0
         }
 
-        RAMCleaner.purge(items: state.ramSources) { success, freed in
-            state.ramPurgeSuccess = success
-            state.ramFreedBytes = freed
+        RAMCleaner.closeSelectedApplications(items: state.ramSources) { result in
+            state.ramPurgeSuccess = result.closedAny
+            state.ramFreedBytes = result.estimatedReleasedBytes
+            state.ramClosedApps = result.closedCount
+            state.ramRefusedApps = result.refusedCount
             withAnimation(.spring(response: 0.4, dampingFraction: 0.75)) {
                 ramFlow = .done
                 operationActive = false
@@ -2802,7 +2888,17 @@ struct CleanerView: View {
         }
     }
 
-    private func startScan() {
+    private func returnToToolGrid() {
+        DispatchQueue.main.async {
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                activeTool = nil
+            }
+        }
+    }
+
+    private func startScan(mode: DiskCleanScanMode = .efficient) {
         withAnimation(.easeInOut(duration: 0.2)) {
             operationActive = true
             state.isScanning = true
@@ -2810,6 +2906,9 @@ struct CleanerView: View {
             state.showResult = false
             state.scanProgress = 0
             state.scanPhase = .browsers
+            state.diskScanWasLimited = false
+            state.diskScannedEntryCount = 0
+            state.diskScanMode = mode
         }
 
         // Animate through phases
@@ -2833,9 +2932,11 @@ struct CleanerView: View {
             }
         }
 
-        DiskCleaner.scan { items in
+        DiskCleaner.scan(mode: mode) { result in
             withAnimation(.easeInOut(duration: 0.3)) {
-                state.scanItems = items
+                state.scanItems = result.items
+                state.diskScanWasLimited = result.wasLimited
+                state.diskScannedEntryCount = result.scannedEntryCount
                 state.isScanning = false
                 operationActive = false
                 state.hasScan = true

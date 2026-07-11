@@ -111,6 +111,13 @@ struct WindowsView: View {
             }
         }
         .background(Color.surfacePrimary)
+        .onAppear {
+            monitor.setConsumer(.windows, active: true)
+            monitor.refresh(forceProcesses: true)
+        }
+        .onDisappear {
+            monitor.setConsumer(.windows, active: false)
+        }
     }
 }
 

@@ -124,17 +124,17 @@ struct ProcessesView: View {
             .padding(.top, 16)
             .padding(.bottom, 12)
             
-            // Helper Banner
-            if !helper.isInstalled {
+            // Legacy helper migration banner
+            if helper.isInstalled {
                 HStack(spacing: 12) {
                     Image(systemName: "exclamationmark.shield.fill")
                         .font(.system(size: 16))
                         .foregroundStyle(.orange)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Root Helper Not Installed")
+                        Text("Legacy Root Helper Detected")
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundStyle(Color.textPrimaryLight)
-                        Text("Install the helper to view accurate memory, disk & network I/O, and to manage system processes.")
+                        Text("This older background daemon is no longer used. Remove it to close its root network service.")
                             .font(.system(size: 10))
                             .foregroundStyle(Color.textSecondaryLight)
                     }
@@ -145,9 +145,9 @@ struct ProcessesView: View {
                             .frame(width: 16, height: 16)
                     } else {
                         Button {
-                            helper.installHelper { success, error in
+                            helper.removeLegacyHelper { success, error in
                                 if let error = error {
-                                    self.killFeedback = "Install failed: \(error)"
+                                    self.killFeedback = "Removal failed: \(error)"
                                     self.feedbackIsError = true
                                     DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
                                         self.killFeedback = nil
@@ -155,7 +155,7 @@ struct ProcessesView: View {
                                 }
                             }
                         } label: {
-                            Text("Install")
+                            Text("Remove")
                                 .font(.system(size: 11, weight: .medium))
                                 .padding(.horizontal, 12)
                                 .padding(.vertical, 5)
@@ -183,13 +183,13 @@ struct ProcessesView: View {
                 Text("PID")
                     .font(.system(size: 10, weight: .medium, design: .monospaced))
                     .foregroundStyle(Color.textTertiaryLight)
-                    .frame(width: 50, alignment: .trailing)
+                    .frame(width: ProcessTableLayout.pidWidth, alignment: .trailing)
                 
                 if selectedTab == .cpu {
                     SortHeader(label: "TIME", sort: .cpu, current: sortBy) { }
-                        .frame(width: 65, alignment: .trailing)
+                        .frame(width: ProcessTableLayout.timeWidth, alignment: .trailing)
                     SortHeader(label: "CPU", sort: .cpu, current: sortBy) { sortBy = .cpu }
-                        .frame(width: 60, alignment: .trailing)
+                        .frame(width: ProcessTableLayout.cpuWidth, alignment: .trailing)
                 } else if selectedTab == .memory {
                     SortHeader(label: "MEM", sort: .memory, current: sortBy) { sortBy = .memory }
                         .frame(width: 80, alignment: .trailing)
@@ -279,12 +279,14 @@ struct ProcessesView: View {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) { monitor.refresh(forceProcesses: true) }
         }
         .onAppear {
+            monitor.setConsumer(.processes, active: true)
             if monitor.processNodes.isEmpty {
                 monitor.refresh(forceProcesses: true)
             }
             rebuildAttributions()
         }
         .onDisappear {
+            monitor.setConsumer(.processes, active: false)
             attributionTask?.cancel()
         }
         .onReceive(monitor.$processNodes) { _ in
@@ -431,6 +433,12 @@ struct SortHeader: View {
     }
 }
 
+private enum ProcessTableLayout {
+    static let pidWidth: CGFloat = 64
+    static let timeWidth: CGFloat = 92
+    static let cpuWidth: CGFloat = 68
+}
+
 struct ProcessRow: View {
     let proc: ProcessNode
     let maxMem: UInt64
@@ -475,17 +483,21 @@ struct ProcessRow: View {
             Text(String(proc.id))
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(Color.textTertiaryLight)
-                .frame(width: 50, alignment: .trailing)
+                .lineLimit(1)
+                .frame(width: ProcessTableLayout.pidWidth, alignment: .trailing)
 
             if selectedTab == .cpu {
                 Text(proc.cpuTime)
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(Color.textSecondaryLight)
-                    .frame(width: 65, alignment: .trailing)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+                    .frame(width: ProcessTableLayout.timeWidth, alignment: .trailing)
                 Text(String(format: "%.1f%%", proc.cpuUsage))
                     .font(.system(size: 11, weight: proc.cpuUsage > 5 ? .semibold : .regular, design: .monospaced))
                     .foregroundStyle(cpuColor)
-                    .frame(width: 60, alignment: .trailing)
+                    .lineLimit(1)
+                    .frame(width: ProcessTableLayout.cpuWidth, alignment: .trailing)
             } else if selectedTab == .memory {
                 Text(MemoryInfo.formatted(proc.memoryBytes))
                     .font(.system(size: 11, design: .monospaced))
