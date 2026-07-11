@@ -44,15 +44,19 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
-            release/MacCleaner.dmg \
-            --title "MacCleaner ${GITHUB_REF_NAME#v}" \
-            --notes-file docs/release-notes.md \
-            --verify-tag
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" release/MacCleaner.dmg --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              release/MacCleaner.dmg \
+              --title "MacCleaner ${GITHUB_REF_NAME#v}" \
+              --notes-file docs/release-notes.md \
+              --verify-tag
+          fi
 
       - name: Publish appcast on main
         run: |
-          cp release/appcast.xml "$RUNNER_TEMP/appcast.xml"
+          cp appcast.xml "$RUNNER_TEMP/appcast.xml"
           git fetch origin main
           git checkout main
           cp "$RUNNER_TEMP/appcast.xml" appcast.xml
