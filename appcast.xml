@@ -1,13 +1,10 @@
-<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<?xml version="1.0" standalone="yes"?>
 <rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
     <channel>
-        <title>MacCleaner Updates</title>
-        <link>https://github.com/Jas952/MacCleaner</link>
-        <description>Secure MacCleaner updates</description>
-        <language>en</language>
+        <title>MacCleaner</title>
         <item>
             <title>1.1</title>
-            <pubDate>Sat, 11 Jul 2026 14:59:22 +0000</pubDate>
+            <pubDate>Sat, 11 Jul 2026 15:03:03 +0000</pubDate>
             <link>https://github.com/Jas952/MacCleaner</link>
             <sparkle:version>3</sparkle:version>
             <sparkle:shortVersionString>1.1</sparkle:shortVersionString>
@@ -23,26 +20,7 @@
 - Added new cleanup, duplicate detection, photo review, cloud reclaim, startup optimization, and storage workflow improvements.
 - Includes the latest reliability, performance, and interface refinements.
 ]]></description>
-            <enclosure url="https://github.com/Jas952/MacCleaner/releases/download/v1.1/MacCleaner.dmg" length="8633170" type="application/octet-stream" sparkle:edSignature="9H1BMXPJ75l0bk/uX0BIKyPOzuktL5pHkJN4nDaQdDAW0UdR9BbF/H04lHMZO5vSAchq32Z8eX2RDjMSTZMfAg=="/>
-        </item>
-        <item>
-            <title>1.1</title>
-            <pubDate>Sat, 11 Jul 2026 14:47:35 +0000</pubDate>
-            <link>https://github.com/Jas952/MacCleaner</link>
-            <sparkle:version>2</sparkle:version>
-            <sparkle:shortVersionString>1.1</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[# MacCleaner 1.1
-
-- Added secure in-app updates powered by Sparkle.
-- Added automatic update checks every six hours and automatic downloads/installations.
-- Added an About & Updates popover with app icon, version, update controls, and live status.
-- Added update availability status to the app footer.
-- Added new cleanup, duplicate detection, photo review, cloud reclaim, startup optimization, and storage workflow improvements.
-- Includes the latest reliability, performance, and interface refinements.
-]]></description>
-            <enclosure url="https://github.com/Jas952/MacCleaner/releases/download/v1.1/MacCleaner.dmg" length="8632945" type="application/octet-stream" sparkle:edSignature="Dz8js4Pv7EnHs3pOK6qpoi/A20DVuOxdkZV9vCfS60zbC1x7rEy8JFscTrYEUQfiwanSIuVp9VyBhIEFianpDw=="/>
+            <enclosure url="https://github.com/Jas952/MacCleaner/releases/download/v1.1/MacCleaner.dmg" length="8633174" type="application/octet-stream" sparkle:edSignature="mwo3FSz/epbrbTYlUNoV+xcvYSYAkob+/vi0jvw93Yp/yvJ0bD5Z5i8nKvZScG+fYPhAZb1U4yKM5RoCQ9ZfBg=="/>
         </item>
     </channel>
 </rss>
