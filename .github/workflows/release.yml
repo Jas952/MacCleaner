@@ -15,36 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Import Developer ID certificate
-        env:
-          CERTIFICATE_P12: ${{ secrets.DEVELOPER_ID_APPLICATION_P12_BASE64 }}
-          CERTIFICATE_PASSWORD: ${{ secrets.DEVELOPER_ID_APPLICATION_P12_PASSWORD }}
-        run: |
-          KEYCHAIN="$RUNNER_TEMP/release.keychain-db"
-          echo "$CERTIFICATE_P12" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
-          security create-keychain -p actions "$KEYCHAIN"
-          security set-keychain-settings -lut 21600 "$KEYCHAIN"
-          security unlock-keychain -p actions "$KEYCHAIN"
-          security import "$RUNNER_TEMP/certificate.p12" -P "$CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN"
-          security list-keychains -d user -s "$KEYCHAIN" login.keychain-db
-          security set-key-partition-list -S apple-tool:,apple: -s -k actions "$KEYCHAIN"
-
-      - name: Configure Apple notarization
-        env:
-          API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
-          API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
-          API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
-        run: |
-          echo "$API_KEY_P8" | base64 --decode > "$RUNNER_TEMP/AuthKey.p8"
-          xcrun notarytool store-credentials MacCleanerNotary \
-            --key "$RUNNER_TEMP/AuthKey.p8" \
-            --key-id "$API_KEY_ID" \
-            --issuer "$API_ISSUER_ID"
-
-      - name: Build, sign and notarize DMG
-        env:
-          DEVELOPER_ID_APPLICATION: ${{ secrets.DEVELOPER_ID_APPLICATION }}
-          NOTARY_KEYCHAIN_PROFILE: MacCleanerNotary
+      - name: Build unsigned DMG
         run: ./scripts/build_dmg.sh
 
       - name: Resolve Sparkle publishing tools

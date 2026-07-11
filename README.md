@@ -109,7 +109,7 @@ release/                Ignored local release artifacts
 
 ## Distribution Notes
 
-GitHub source releases can use the ignored `release/MacCleaner.dmg` as a manually uploaded release asset. Public distribution outside local testing should use a Developer ID certificate and Apple notarization.
+GitHub releases publish `release/MacCleaner.dmg` from the release workflow. The DMG is unsigned and the app bundle is ad-hoc signed, so macOS Gatekeeper may show an unknown developer warning on first launch. Open the app with right click, then `Open`.
 
 <img src="./docs/assets-github/telegram-titlebar.svg" alt="Telegram Workflow title bar" />
 

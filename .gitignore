@@ -16,6 +16,8 @@ dist/
 *.dSYM
 *.app
 *.dmg
+*.p12
+*.p8
 
 # Local caches and generated helper data
 .codegraph/
