@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1600" height="900" viewBox="0 0 1600 900">
+  <defs>
+    <pattern id="grid" width="80" height="80" patternUnits="userSpaceOnUse">
+      <path d="M 80 0 L 0 0 0 80" fill="none" stroke="#dce3ee" stroke-width="1"/>
+    </pattern>
+    <filter id="shadow" x="-30%" y="-30%" width="180%" height="180%">
+      <feDropShadow dx="0" dy="20" stdDeviation="24" flood-color="#172033" flood-opacity="0.20"/>
+    </filter>
+    <linearGradient id="bottomFade" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f7f9fc" stop-opacity="0"/>
+      <stop offset="1" stop-color="#f7f9fc" stop-opacity="1"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1600" height="900" fill="#f7f9fc"/>
+  <rect width="1600" height="900" fill="url(#grid)" opacity="0.78"/>
+
+  <image xlink:href="../../MacCleaner/Assets.xcassets/AppIcon.appiconset/icon_512x512.png" x="104" y="112" width="116" height="116"/>
+
+  <text x="104" y="326" fill="#111827" font-size="76" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-weight="650">MacCleaner</text>
+  <text x="108" y="390" fill="#334155" font-size="30" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">Native control for a cleaner, quieter Mac.</text>
+
+  <text x="108" y="484" fill="#526078" font-size="24" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
+    <tspan x="108" dy="0">System clarity, safe cleanup, storage intelligence,</tspan>
+    <tspan x="108" dy="42">and AI workload visibility in one focused utility.</tspan>
+  </text>
+
+  <text x="108" y="666" fill="#78859a" font-size="20" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">BUILT WITH CARE FOR REAL MAC WORKFLOWS</text>
+
+  <g filter="url(#shadow)">
+    <image xlink:href="../images/overview.png" x="700" y="112" width="1300" height="833" preserveAspectRatio="xMidYMid meet"/>
+  </g>
+
+  <rect x="620" y="760" width="980" height="140" fill="url(#bottomFade)"/>
+</svg>

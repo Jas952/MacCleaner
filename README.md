@@ -1,81 +1,116 @@
 <p align="center">
-  <img src="./docs/readme-media/hero.png" alt="MacCleaner hero" />
+  <img src="./docs/readme-media/hero-v2.png" alt="MacCleaner — native macOS system, storage, and AI workload utility" width="100%" />
 </p>
 
 <h1 align="center">MacCleaner</h1>
 
 <p align="center">
-  A native macOS utility for keeping an agent-heavy Mac understandable, clean, and ready to work.
+  Native control for a cleaner, quieter, and more understandable Mac.
 </p>
 
 <p align="center">
-  <img alt="Swift" src="https://img.shields.io/badge/Swift-5-orange?style=for-the-badge&logo=swift&logoColor=white" />
-  <img alt="macOS" src="https://img.shields.io/badge/macOS-13%2B-111827?style=for-the-badge&logo=apple&logoColor=white" />
-  <img alt="Xcode" src="https://img.shields.io/badge/Xcode-Release-147EFB?style=for-the-badge&logo=xcode&logoColor=white" />
-  <img alt="Codex" src="https://img.shields.io/badge/Built%20with-Codex-111827?style=for-the-badge" />
-  <img alt="Gemini" src="https://img.shields.io/badge/Assisted%20by-Gemini-7C5CFF?style=for-the-badge" />
+  <img alt="Swift 5" src="https://img.shields.io/badge/Swift_5-F05138?style=for-the-badge&logo=swift&logoColor=white" />
+  <img alt="macOS 13 or newer" src="https://img.shields.io/badge/macOS_13+-111827?style=for-the-badge&logo=apple&logoColor=white" />
+  <img alt="Native SwiftUI application" src="https://img.shields.io/badge/Native-SwiftUI-147EFB?style=for-the-badge&logo=xcode&logoColor=white" />
 </p>
 
-MacCleaner started as a practical answer to a personal problem: the more local tools, agents, helpers, caches, and experiments live on a Mac, the harder it becomes to see what is happening. The app is built with care for people who want one calm place to inspect the system, clean obvious clutter, understand agent workload, and use a few extra utilities without jumping between unrelated apps.
+<p align="center">
+  <img alt="Local-first analysis" src="https://img.shields.io/badge/Local--first-Analysis-19A974?style=flat-square" />
+  <img alt="Trash-only safe cleanup" src="https://img.shields.io/badge/Trash--only-Safe_Cleanup-2F81F7?style=flat-square" />
+  <img alt="AI workload visibility" src="https://img.shields.io/badge/AI_Workload-Visibility-8B5CF6?style=flat-square" />
+  <img alt="Bounded deep scans" src="https://img.shields.io/badge/Bounded-Deep_Scans-F59E0B?style=flat-square" />
+  <img alt="Hardware diagnostics" src="https://img.shields.io/badge/Hardware-Diagnostics-EA4AAA?style=flat-square" />
+</p>
 
-It is not only a cleaner. It includes storage analysis, process inspection, maintenance tools, desktop organization, uninstall support, hardware diagnostics, and AI-agent workload visibility.
+MacCleaner began with a personal problem: a Mac used for development and local AI agents gradually becomes difficult to read. Processes multiply, caches grow, storage fragments across tools, and useful maintenance actions end up scattered around the system.
 
-## Visual Tour
+The result is a native utility built with care for anyone who wants one calm place to understand the machine, recover space safely, inspect agent workloads, and reach practical diagnostics without switching between unrelated apps.
+
+MacCleaner is more than a cleaner. It combines system monitoring, bounded storage analysis, safe cleanup, process inspection, app uninstalling, desktop organization, AI workload visibility, and a set of focused maintenance tools.
+
+## Measured Results
+
+The numbers below come from Release builds tested on the same Mac with the same toolchain. They measure engineering changes between v1.0 and the optimized architecture introduced in v1.1; v1.2 keeps those policies and extends the test barrier.
+
+| Result | What was measured |
+| --- | --- |
+| **39/39 tests passing** | Current v1.2 safety and policy suite covering paths, Trash semantics, bounded scans, duplicates, similar photos, cloud reclaim, startup items, and process aggregation. |
+| **94.2% fewer idle process snapshots** | Background process collection moved from every 105 seconds to every 1,800 seconds when no active screen needs it. |
+| **3.5× fresher process data** | The Processes screen refresh interval improved from 105 seconds to 30 seconds while active. |
+| **up to 33.3× more scan capacity** | Thorough storage scans increased the entry budget from 30,000 to 1,000,000 while retaining deadlines and cancellation. |
+| **91.7% fewer external battery scans** | Expensive `system_profiler` collection moved from every 30 minutes to every 6 hours while idle. |
+| **0 hard-delete fallbacks** | Migrated user-facing cleanup flows stop and report an error if Trash fails instead of permanently deleting the file. |
+
+These are not synthetic “cleaner scores.” They describe cadence, scan capacity, safety policy, and regression coverage. The same comparison also recorded a larger v1.1 bundle and about 7.2% higher average launch RSS, so footprint remains a visible optimization target. See the [full measurement report](./docs/maccleaner-v1.0-vs-v1.1-summary.md).
+
+## How It Works
+
+| Area | Method |
+| --- | --- |
+| System monitoring | Reads Mach, IOKit, IORegistry, CoreGraphics, network interface, and mounted-volume data. Refresh cadence adapts to the active screen so expensive work is reduced in the background. |
+| Storage analysis | Walks user-selected local roots with explicit entry and time budgets. Efficient and Thorough modes make the speed-versus-depth tradeoff visible and every long scan can be cancelled. |
+| Safe cleanup | Normalizes paths, protects MacCleaner and system-sensitive locations, then uses macOS Trash. A failed Trash operation is surfaced to the user and does not become permanent deletion. |
+| Exact duplicates | Groups candidates by metadata, applies a quick fingerprint, then proves matches with full SHA-256 only where needed. Hard links and changed files are rechecked before cleanup. |
+| Similar photos | Creates private 512 px ImageIO/Vision feature prints locally. Visual matches are reviewed by the user and revalidated before selected copies move to Trash. |
+| App removal | Finds the application and related user-space support files, presents them for review, and routes selected items through the same safe deletion policy. |
+| Startup optimization | Inspects LaunchAgents and allows reversible disable/restore while protecting Apple and MacCleaner entries. |
+| AI workload analysis | Correlates running processes with known local agents, profiles, MCP configurations, skills, components, and local index stores. |
+
+## Application Demo
 
 <p align="center">
-  <img src="./docs/readme-media/showcase.gif" alt="MacCleaner visual slideshow" />
+  <img src="./docs/assets-github/application-demo-titlebar.svg" alt="MacCleaner application demo title bar" width="100%" /><br />
+  <img src="./docs/readme-media/showcase.gif" alt="MacCleaner application demonstration" width="100%" />
 </p>
 
 <details>
-  <summary>Open the full visual overview</summary>
+  <summary><strong>Open the full interface gallery</strong></summary>
 
   <p align="center">
-    <img src="./docs/readme-media/showcase-grid.png" alt="MacCleaner feature grid" />
-  </p>
-
-  <p align="center">
-    <img src="./docs/readme-media/feature-cards.png" alt="MacCleaner feature cards" />
+    <img src="./docs/readme-media/showcase-grid.png" alt="MacCleaner interface gallery" width="100%" />
   </p>
 </details>
 
-## Why It Exists
+## AI Workload, Made Visible
 
-Modern Mac work can get noisy: developer tools, AI agents, browser apps, local caches, background processes, downloads, screenshots, desktop files, and old apps all compete for attention. MacCleaner is a focused control panel for that daily mess.
+MacCleaner treats local AI tooling as part of the system workload, not as an abstract badge. The Agents area identifies supported agent processes, groups their resource use, and inspects local MCP, skills, component, profile, and index-store footprints.
 
-The design goal is simple: make the Mac feel readable again.
+This helps answer practical questions: which agent is active, how much CPU and memory it is using, which local integrations are present, and where related workload data lives. Analysis stays on the Mac; availability depends on the tools and permissions present on that machine.
 
-## Core Areas
+<p align="center">
+  <img src="./docs/images/ai-workload.png" alt="MacCleaner AI workload analysis" width="100%" />
+</p>
 
-| Area | What it helps with |
+## More Than Cleanup
+
+| Tool | What it adds |
 | --- | --- |
-| Agent workload | Inspect local AI tooling footprint and activity around Codex, Claude, Gemini, and related processes. |
-| Storage | Review disk usage, large files, cleanup candidates, and storage pressure. |
-| Processes | See process details and resource usage without opening several system tools. |
-| Maintenance | Run practical cleanup and maintenance actions from one place. |
-| Desktop | Organize files and preview desktop clutter visually. |
-| Uninstaller | Remove apps with supporting cleanup context. |
-| Diagnostics | Check CPU, memory, fans, SMC, keyboard, battery, and thermal state. |
+| Cleanup Advisor | Ranks reclaim opportunities by size, risk, and recovery cost. |
+| Complete Analysis | Runs Advisor, Exact Duplicates, Similar Photos, and Cloud Reclaim as one bounded workflow with a combined result. |
+| Cloud Reclaim | Evicts only the local copy of confirmed iCloud files without deleting their cloud copy. |
+| Desktop Manager | Offers grid, list, column, and canvas views with preview, rename, move, organization, and Trash actions. |
+| Process and window inspector | Groups app instances, exposes individual PIDs and metrics, and associates visible windows through CoreGraphics. |
+| Hardware diagnostics | Covers storage health, APFS, SMART when available, thermals, fans, network, keyboard, pointer, and speakers. |
+| Pake Apps and LLM Library | Adds optional workflows powered by locally installed `pake` and `llmfit` command-line tools. |
+| Updates | Uses Sparkle with an HTTPS, EdDSA-signed appcast for manual and background update checks. |
 
-## Screenshots
+## Install
 
-The README uses a compact slideshow by default, so the page stays readable. Full raw screenshots are still available in [`docs/images`](./docs/images).
+Download the current DMG from [GitHub Releases](https://github.com/Jas952/MacCleaner/releases/latest), open it, and drag `MacCleaner.app` into `Applications`.
 
-## Requirements
+The public build is currently ad-hoc signed rather than Apple-notarized. On first launch, macOS may require right-clicking the app and choosing `Open`. Some inspections require Full Disk Access; hardware-specific diagnostics depend on the Mac and available system tools.
 
-- macOS 13.0 or newer
-- Xcode 15 or newer for local builds
+### Build From Source
 
-## Build
-
-Build a local Release DMG:
+Requirements: macOS 13.0 or newer and Xcode 15 or newer.
 
 ```bash
+git clone https://github.com/Jas952/MacCleaner.git
+cd MacCleaner
 ./scripts/build_dmg.sh
 ```
 
-The script builds the app in Release mode, applies an ad-hoc signature, creates `release/MacCleaner.dmg`, and removes temporary build output.
-
-For a plain Xcode build:
+The local image is created at `release/MacCleaner.dmg`. To build directly in Xcode:
 
 ```bash
 xcodebuild \
@@ -84,37 +119,22 @@ xcodebuild \
   -configuration Release
 ```
 
-## Install From DMG
-
-The local release image is generated at:
-
-```bash
-release/MacCleaner.dmg
-```
-
-Open the DMG and drag `MacCleaner.app` into `Applications`.
-
-The local DMG build is ad-hoc signed for local installation. It is not notarized with Apple Developer ID, so macOS Gatekeeper may require opening the app with right click, then `Open`.
-
-## Repository Layout
+## Project Structure
 
 ```text
-MacCleaner.xcodeproj/   Xcode project
-MacCleaner/             Swift source, assets, and app configuration
-docs/images/            Raw README screenshots
-docs/readme-media/      Designed README visuals and slideshow
-scripts/build_dmg.sh    Local DMG packaging script
-release/                Ignored local release artifacts
+MacCleaner/             SwiftUI views, services, models, settings, and assets
+MacCleanerTests/        Safety and policy regression tests
+MacCleaner.xcodeproj/   Xcode project and Swift Package dependencies
+docs/images/            Original full-resolution application screenshots
+docs/readme-media/      Designed README visuals and demo animation
+docs/knowledge/         Product, architecture, feature, and decision notes
+scripts/                Local build and DMG packaging tools
 ```
 
-## Distribution Notes
-
-GitHub releases publish `release/MacCleaner.dmg` from the release workflow. The DMG is unsigned and the app bundle is ad-hoc signed, so macOS Gatekeeper may show an unknown developer warning on first launch. Open the app with right click, then `Open`.
-
-<img src="./docs/assets-github/telegram-titlebar.svg" alt="Telegram Workflow title bar" />
+## Contact
 
 <p>
-  <img src="./docs/assets-github/n1.gif" alt="Project Demo" width="92" height="92" align="left"/>
+  <img src="./docs/assets-github/n1.gif" alt="Project author avatar" width="92" height="92" align="left" />
 </p>
 <pre hspace="12">
   <img src="./docs/assets-github/contacts/tg.jpg" alt="Telegram" height="14" /> Telegram ······ <a href="https://t.me/Jas953/">t.me/Jas953</a>
