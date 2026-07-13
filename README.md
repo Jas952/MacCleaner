@@ -49,21 +49,7 @@ All migrated user-facing cleanup flows share one safety policy: paths are normal
 
 ## Measured Results
 
-The figures below come from Release builds tested on the same Mac with the same toolchain. The cadence and capacity comparison measures v1.0 against the optimized architecture introduced in v1.1; the current v1.2 test barrier was verified again for this README update.
-
-| Result | Verified effect |
-| --- | --- |
-| **39/39 tests passing** | Current safety and policy suite passes for paths, Trash semantics, scan budgets, duplicates, similar photos, cloud reclaim, startup items, and process aggregation. |
-| **94.2% fewer idle process snapshots** | Background process collection moved from every 105 seconds to every 1,800 seconds when no active screen needs it. |
-| **3.5× fresher process data** | The active Processes screen refresh interval improved from 105 seconds to 30 seconds. |
-| **up to 33.3× more scan capacity** | Thorough storage scans increased the entry budget from 30,000 to 1,000,000 while retaining deadlines and cancellation. |
-| **6.67× more capacity in Efficient mode** | The low-load storage budget increased from 30,000 to 200,000 entries. |
-| **91.7% fewer external battery scans** | Expensive `system_profiler` collection moved from every 30 minutes to every 6 hours while idle. |
-| **50% fewer idle refreshes** | General idle monitoring changed from every 15 seconds to every 30 seconds. |
-| **50% fewer idle sensor scans** | Temperature and fan sampling changed from every 60 seconds to every 120 seconds while idle. |
-| **0 hard-delete fallbacks** | Migrated user-facing cleanup flows report a Trash error instead of permanently deleting the file. |
-
-These are cadence, scan-capacity, safety-policy, and regression results rather than a synthetic “cleaner score.” The same comparison recorded a larger bundle and about 7.2% higher average launch RSS, so footprint remains an explicit optimization target. The complete methodology and trade-offs are recorded in the [measurement report](./docs/maccleaner-v1.0-vs-v1.1-summary.md).
+Verified performance measurements are temporarily unavailable. This section will be updated after the next complete benchmark cycle.
 
 <p align="center">
   <img src="./docs/assets-github/product-overview-titlebar.svg" alt="MacCleaner product overview" width="100%" /><br />
