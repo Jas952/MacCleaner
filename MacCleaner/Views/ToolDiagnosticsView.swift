@@ -674,6 +674,7 @@ private struct ThermalPowerPanel: View {
 struct NetworkTestPanel: View {
     @ObservedObject private var service: NetworkDiagnosticService
     @State private var testMode: NetworkDiagnosticService.TestMode = .quick
+    @EnvironmentObject private var modalCoordinator: AppModalCoordinator
     private let minimumContentHeight: CGFloat
 
     init(service: NetworkDiagnosticService, minimumContentHeight: CGFloat = 400) {
@@ -716,12 +717,35 @@ struct NetworkTestPanel: View {
 
                 Spacer()
                 HStack(spacing: 7) {
-                    Picker("Mode", selection: $testMode) {
-                        ForEach(NetworkDiagnosticService.TestMode.allCases) { mode in
-                            Text(mode.rawValue).tag(mode)
+                    Button {
+                        modalCoordinator.present(title: "Network Test Mode", subtitle: "Choose the measurement depth") {
+                            VStack(spacing: 8) {
+                                ForEach(NetworkDiagnosticService.TestMode.allCases) { mode in
+                                    Button {
+                                        testMode = mode
+                                        modalCoordinator.dismiss()
+                                    } label: {
+                                        HStack {
+                                            Text(mode.rawValue); Spacer()
+                                            if testMode == mode { Image(systemName: "checkmark").foregroundStyle(Color.accentBlue) }
+                                        }
+                                        .foregroundStyle(Color.textPrimaryLight)
+                                        .padding(.horizontal, 14).frame(height: 42)
+                                        .background(testMode == mode ? Color.accentBlue.opacity(0.08) : Color.surfaceCardLight)
+                                        .overlay(Rectangle().strokeBorder(Color.borderLight))
+                                    }.buttonStyle(.plain)
+                                }
+                            }
                         }
+                    } label: {
+                        HStack { Text(testMode.rawValue); Spacer(); Image(systemName: "rectangle.on.rectangle") }
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(Color.textSecondaryLight)
+                            .padding(.horizontal, 10).frame(height: 30)
+                            .background(Color.surfaceCardLight)
+                            .overlay(Rectangle().strokeBorder(Color.borderLight))
                     }
-                    .pickerStyle(.menu)
+                    .buttonStyle(.plain)
                     .frame(width: 138)
                     .disabled(service.isRunning)
                     lastUsedBadge(service.lastUsedAt)
@@ -1186,12 +1210,19 @@ private func metricTile(_ label: String, _ value: String, _ color: Color, info: 
 private struct MetricInfoButton: View {
     let title: String
     let text: String
-    @State private var isPresented = false
     @State private var language: MetricInfoLanguage = .russian
+    @EnvironmentObject private var modalCoordinator: AppModalCoordinator
 
     var body: some View {
         Button {
-            isPresented.toggle()
+            modalCoordinator.present(title: title, subtitle: "Metric information") {
+                MetricInfoPopover(
+                    title: title,
+                    text: text,
+                    language: $language,
+                    close: modalCoordinator.dismiss
+                )
+            }
         } label: {
             Image(systemName: "info.circle")
                 .font(.system(size: 9, weight: .semibold))
@@ -1200,14 +1231,6 @@ private struct MetricInfoButton: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .popover(isPresented: $isPresented, arrowEdge: .top) {
-            MetricInfoPopover(
-                title: title,
-                text: text,
-                language: $language,
-                close: { isPresented = false }
-            )
-        }
         .accessibilityLabel("Metric information")
     }
 }
@@ -1256,13 +1279,12 @@ private struct MetricInfoPopover: View {
                 .buttonStyle(.plain)
             }
 
-            Picker("", selection: $language) {
-                ForEach(MetricInfoLanguage.allCases) { option in
-                    Text(option.rawValue).tag(option)
-                }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
+            AppSegmentedControl(
+                selection: $language,
+                options: MetricInfoLanguage.allCases,
+                accentColor: .accentBlue,
+                title: \.rawValue
+            )
             .frame(width: 92)
 
             Text(localizedText)

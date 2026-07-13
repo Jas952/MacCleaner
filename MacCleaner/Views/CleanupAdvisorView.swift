@@ -59,12 +59,12 @@ struct CleanupAdvisorView: View {
 
             if service.isScanning {
                 Button("Cancel") { service.cancelScan() }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(AppSecondaryButtonStyle())
             } else {
                 Button(action: service.scan) {
                     Label(service.lastScanAt == nil ? "Scan" : "Rescan", systemImage: "arrow.clockwise")
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(AppPrimaryButtonStyle(color: .accentGreen))
                 .disabled(service.isCleaning)
             }
         }
@@ -95,7 +95,7 @@ struct CleanupAdvisorView: View {
             subtitle: service.lastScanAt == nil
                 ? "Scan developer caches, old installers, app archives, and local device backups."
                 : "The scan found no supported target larger than 10 MB.",
-            actionTitle: service.lastScanAt == nil ? "Start local scan" : "Scan again",
+            actionTitle: "Scan",
             actionIcon: "sparkle.magnifyingglass",
             action: service.scan
         )
@@ -179,7 +179,7 @@ struct CleanupAdvisorView: View {
                     service.moveSelectedToTrash()
                 }
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(AppPrimaryButtonStyle(color: .accentRed))
             .disabled(service.selectedIDs.isEmpty || service.isCleaning)
         }
         .padding(.horizontal, 20)

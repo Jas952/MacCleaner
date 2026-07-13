@@ -247,9 +247,10 @@ struct FansView: View {
     // MARK: - Fans Panel
 
     private var fansPanel: some View {
-        VStack(spacing: 0) {
+        ScrollView(showsIndicators: false) {
+        VStack(spacing: 16) {
             // ── Вентиляторы (фиксированная высота) ───────────────
-            HStack(spacing: 0) {
+            HStack(spacing: 12) {
                 ForEach(monitor.fans) { fan in
                     VStack(spacing: 12) {
                         // Simple fan indicator
@@ -302,22 +303,15 @@ struct FansView: View {
                             .fill(Color.white)
                             .shadow(color: Color.shadowLight, radius: 8, x: 0, y: 2)
                     )
-                    .padding(.horizontal, 12)
-                    
-                    if fan.id == 0 && monitor.fans.count > 1 {
-                        Rectangle().fill(Color.borderLight).frame(width: 1)
-                    }
                 }
             }
-            .padding(.horizontal, 20)
-            .padding(.top, 16)
-            .padding(.bottom, 8)
 
             // ── Температурные индикаторы ──────────────────────────
             ThermalCardsGrid(monitor: monitor)
-                .padding(.horizontal, 24)
-                .padding(.bottom, 16)
-
+        }
+        .padding(.horizontal, 24)
+        .padding(.top, 16)
+        .padding(.bottom, 24)
         }
     }
 

@@ -895,7 +895,7 @@ struct MaintenanceView: View {
     @StateObject private var thermalPowerService = ThermalPowerService()
     @StateObject private var networkDiagnosticService = NetworkDiagnosticService()
     @State private var selectedPane: ToolsPane = .physical
-    @State private var isReportPresented = false
+    @EnvironmentObject private var modalCoordinator: AppModalCoordinator
     @State private var reportLanguage: ToolsReportLanguage = .russian
 
     var body: some View {
@@ -926,7 +926,12 @@ struct MaintenanceView: View {
                 Spacer(minLength: 12)
 
                 Button {
-                    isReportPresented = true
+                    modalCoordinator.present(title: "Final Report", subtitle: "Hardware and maintenance diagnostics") {
+                        ToolsDiagnosticReportSheet(
+                            language: $reportLanguage,
+                            report: diagnosticReport
+                        )
+                    }
                 } label: {
                     Label("Final Report", systemImage: "doc.text.magnifyingglass")
                         .font(.system(size: 11, weight: .semibold))
@@ -988,12 +993,6 @@ struct MaintenanceView: View {
         }
         .onDisappear {
             stopAllDiagnostics()
-        }
-        .sheet(isPresented: $isReportPresented) {
-            ToolsDiagnosticReportSheet(
-                language: $reportLanguage,
-                report: diagnosticReport
-            )
         }
     }
 

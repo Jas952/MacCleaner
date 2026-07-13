@@ -1,26 +1,6 @@
 import SwiftUI
 import AppKit
 
-// MARK: - NSVisualEffectView wrapper for frosted glass
-
-private struct VisualEffectBlur: NSViewRepresentable {
-    var material: NSVisualEffectView.Material
-    var blendingMode: NSVisualEffectView.BlendingMode
-
-    func makeNSView(context: Context) -> NSVisualEffectView {
-        let view = NSVisualEffectView()
-        view.material = material
-        view.blendingMode = blendingMode
-        view.state = .active
-        return view
-    }
-
-    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {
-        nsView.material = material
-        nsView.blendingMode = blendingMode
-    }
-}
-
 struct ProcessDetailView: View {
     let node: ProcessNode
     let onDismiss: () -> Void
@@ -35,31 +15,34 @@ struct ProcessDetailView: View {
     @State private var hoverForceQuit = false
     @State private var hoverClose = false
     @State private var terminationError: String?
+    @State private var showsInstances = true
+    @State private var terminatingInstanceIDs: Set<Int32> = []
+    @State private var terminatedInstanceIDs: Set<Int32> = []
+    @State private var selectedGroupInstance: ProcessNode?
 
-    private var isProtected: Bool { ProcessTreeService.isProtected(node) }
+    private var activeNode: ProcessNode { selectedGroupInstance ?? node }
+    private var isProtected: Bool { ProcessTreeService.isProtected(activeNode) }
+    private var visibleInstances: [ProcessNode] {
+        node.groupedInstances.filter { !terminatedInstanceIDs.contains($0.id) }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
-            if isLoading {
+            if !node.groupedInstances.isEmpty {
+                groupContent
+            } else if isLoading {
                 loadingState
             } else if let info = detail {
                 detailContent(info)
             }
         }
-        .frame(width: 520)
-        .background(
-            ZStack {
-                VisualEffectBlur(material: .sheet, blendingMode: .behindWindow)
-                Color.white.opacity(0.88)
-            }
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-        .overlay(
-            RoundedRectangle(cornerRadius: 14)
-                .strokeBorder(Color.borderLight, lineWidth: 1)
-        )
-        .shadow(color: Color.black.opacity(0.18), radius: 24, x: 0, y: 8)
-        .onAppear { loadDetail() }
+        .frame(width: 520, height: 560)
+        .background(Color.surfaceLight)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .shadow(color: Color.black.opacity(0.16), radius: 26, x: 0, y: 10)
+        .onAppear {
+            if node.groupedInstances.isEmpty { loadDetail(for: node) }
+        }
         .alert(
             "Could Not Terminate Process",
             isPresented: Binding(
@@ -71,6 +54,250 @@ struct ProcessDetailView: View {
         } message: {
             Text(terminationError ?? "The process could not be terminated.")
         }
+    }
+
+    private var groupContent: some View {
+        VStack(spacing: 0) {
+            groupHeader
+
+            Divider()
+
+            if selectedGroupInstance != nil {
+                if isLoading {
+                    loadingState
+                        .frame(maxHeight: .infinity)
+                } else if let info = detail {
+                    groupInstanceDetail(info)
+                }
+            } else {
+                groupOverview
+            }
+        }
+    }
+
+    private var groupHeader: some View {
+        HStack(spacing: 12) {
+            ProcessIconView(commandLine: node.commandLine, size: 36)
+                .frame(width: 36, height: 36)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(node.name)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(Color.textPrimaryLight)
+                Text(selectedGroupInstance.map { "PID \($0.id) details" } ?? "\(visibleInstances.count) running processes")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Color.textSecondaryLight)
+            }
+
+            Spacer()
+
+            if selectedGroupInstance != nil {
+                Button(action: returnToGroup) {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(Color.textSecondaryLight)
+                        .frame(width: 28, height: 28)
+                        .background(Color.surfaceLight)
+                        .clipShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .help("Back to process instances")
+            }
+
+            Button(action: onDismiss) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(Color.textSecondaryLight)
+                    .frame(width: 28, height: 28)
+                    .background(Color.surfaceLight)
+                    .clipShape(Circle())
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .keyboardShortcut(.cancelAction)
+            .help("Close")
+        }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 18)
+        .background(Color.surfaceCardLight.opacity(0.78))
+    }
+
+    private var groupOverview: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                groupMetric("CPU", String(format: "%.1f%%", node.cpuUsage))
+                groupMetric("MEM", MemoryInfo.formatted(node.memoryBytes))
+                groupMetric("READ", MemoryInfo.formatted(node.diskRead))
+                groupMetric("WRITTEN", MemoryInfo.formatted(node.diskWritten))
+            }
+            .padding(.horizontal, 24).padding(.vertical, 14)
+            .background(Color.surfaceLight.opacity(0.72))
+
+            Divider()
+
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) { showsInstances.toggle() }
+            } label: {
+                HStack {
+                    Text("Process instances").font(.system(size: 12, weight: .semibold))
+                    Spacer()
+                    Text("\(visibleInstances.count)").font(.system(size: 11, design: .monospaced))
+                    Image(systemName: showsInstances ? "chevron.up" : "chevron.down")
+                }
+                .foregroundStyle(Color.textPrimaryLight)
+                .padding(.horizontal, 24).padding(.vertical, 12)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if showsInstances {
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(visibleInstances) { instance in
+                            HStack(spacing: 10) {
+                                Text("PID \(instance.id)")
+                                    .fontWeight(.semibold)
+                                    .foregroundStyle(Color.textPrimaryLight)
+                                    .frame(width: 82, alignment: .leading)
+                                Text(String(format: "%.1f%% CPU", instance.cpuUsage))
+                                    .frame(width: 82, alignment: .trailing)
+                                Text(MemoryInfo.formatted(instance.memoryBytes))
+                                    .frame(width: 92, alignment: .trailing)
+                                Text(instance.commandLine)
+                                    .lineLimit(1).truncationMode(.middle)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                                Button {
+                                    showDetail(for: instance)
+                                } label: {
+                                    Image(systemName: "info.circle")
+                                        .font(.system(size: 11, weight: .medium))
+                                        .foregroundStyle(Color.textSecondaryLight)
+                                        .frame(width: 26, height: 22)
+                                        .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .help("Show details for PID \(instance.id)")
+
+                                if ProcessTreeService.isProtected(instance) {
+                                    Image(systemName: "lock.fill")
+                                        .font(.system(size: 9, weight: .semibold))
+                                        .foregroundStyle(Color.textTertiaryLight)
+                                        .frame(width: 42, height: 22)
+                                } else {
+                                    Button {
+                                        terminate(instance: instance)
+                                    } label: {
+                                        Group {
+                                            if terminatingInstanceIDs.contains(instance.id) {
+                                                ProgressView().controlSize(.small)
+                                            } else {
+                                                Text("Quit")
+                                                    .font(.system(size: 10, weight: .semibold))
+                                            }
+                                        }
+                                        .foregroundStyle(Color.accentRed)
+                                        .frame(width: 42, height: 22)
+                                        .background(Color.accentRed.opacity(0.07))
+                                        .clipShape(RoundedRectangle(cornerRadius: 5))
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 5)
+                                                .strokeBorder(Color.accentRed.opacity(0.25), lineWidth: 1)
+                                        )
+                                    }
+                                    .buttonStyle(.plain)
+                                    .disabled(terminatingInstanceIDs.contains(instance.id))
+                                    .help("Quit PID \(instance.id)")
+                                }
+                            }
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(Color.textSecondaryLight)
+                            .padding(.horizontal, 24).padding(.vertical, 9)
+                            Divider().padding(.horizontal, 24)
+                        }
+                    }
+                }
+                .frame(maxHeight: .infinity)
+            }
+
+            Spacer(minLength: 0)
+            Divider()
+            HStack {
+                Text("Quit affects only the PID shown on the same row.")
+                    .font(.system(size: 10)).foregroundStyle(Color.textTertiaryLight)
+                Spacer()
+                Button("Close", action: onDismiss).buttonStyle(AppSecondaryButtonStyle())
+            }
+            .padding(.horizontal, 24).padding(.vertical, 12)
+            .background(Color.surfaceCardLight.opacity(0.72))
+        }
+    }
+
+    private func groupInstanceDetail(_ info: ProcessDetailInfo) -> some View {
+        VStack(spacing: 0) {
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 0) {
+                    descriptionBlock(info)
+                        .padding(.top, 14)
+
+                    if info.parentChain.count > 1 {
+                        parentChainRow(info)
+                    }
+
+                    Divider().padding(.horizontal, 24)
+                    propertyRows(info)
+                    commandSection(info)
+                }
+            }
+            .frame(maxHeight: .infinity)
+
+            Divider()
+            actionBar(info)
+        }
+    }
+
+    private func groupMetric(_ label: String, _ value: String) -> some View {
+        VStack(spacing: 3) {
+            Text(label).font(.system(size: 9, weight: .semibold)).foregroundStyle(Color.textTertiaryLight)
+            Text(value).font(.system(size: 12, weight: .semibold, design: .monospaced))
+                .foregroundStyle(Color.textPrimaryLight)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func terminate(instance: ProcessNode) {
+        guard !terminatingInstanceIDs.contains(instance.id) else { return }
+        terminatingInstanceIDs.insert(instance.id)
+
+        Task.detached(priority: .utility) {
+            let result = ProcessTreeService.killProcess(instance)
+            await MainActor.run {
+                terminatingInstanceIDs.remove(instance.id)
+                switch result {
+                case .success:
+                    terminatedInstanceIDs.insert(instance.id)
+                    onKill?(instance)
+                    if visibleInstances.isEmpty { onDismiss() }
+                case .protected(let reason), .failed(let reason):
+                    terminationError = reason
+                }
+            }
+        }
+    }
+
+    private func showDetail(for instance: ProcessNode) {
+        selectedGroupInstance = instance
+        detail = nil
+        isLoading = true
+        showCommand = false
+        loadDetail(for: instance)
+    }
+
+    private func returnToGroup() {
+        selectedGroupInstance = nil
+        detail = nil
+        isLoading = true
+        showCommand = false
     }
 
     // MARK: - Loading
@@ -126,9 +353,22 @@ struct ProcessDetailView: View {
 
     private func header(_ info: ProcessDetailInfo) -> some View {
         HStack(spacing: 12) {
+            if selectedGroupInstance != nil {
+                Button(action: returnToGroup) {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Color.textSecondaryLight)
+                        .frame(width: 28, height: 28)
+                        .background(Color.borderLight.opacity(0.45))
+                        .clipShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .help("Back to process group")
+            }
+
             // App icon
             Group {
-                if let icon = ProcessDetailService.appIcon(for: node.commandLine) {
+                if let icon = ProcessDetailService.appIcon(for: activeNode.commandLine) {
                     Image(nsImage: icon)
                         .resizable()
                         .aspectRatio(contentMode: .fit)
@@ -161,6 +401,7 @@ struct ProcessDetailView: View {
         .padding(.horizontal, 24)
         .padding(.top, 18)
         .padding(.bottom, 14)
+        .background(Color.surfaceCardLight.opacity(0.78))
     }
 
     // MARK: - Description
@@ -261,14 +502,14 @@ struct ProcessDetailView: View {
         VStack(spacing: 0) {
             HStack(alignment: .top, spacing: 12) {
                 Text(label)
-                    .font(.system(size: 12))
-                    .foregroundStyle(Color.textTertiaryLight)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Color.textSecondaryLight)
                     .frame(width: 120, alignment: .leading)
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
 
                 Text(value)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(Color.textPrimaryLight)
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
@@ -358,7 +599,7 @@ struct ProcessDetailView: View {
                 color: Color.textSecondaryLight,
                 bgColor: Color.borderLight.opacity(0.5)
             ) {
-                ProcessDetailService.revealInFinder(commandLine: node.commandLine)
+                ProcessDetailService.revealInFinder(commandLine: activeNode.commandLine)
             }
 
             if !isProtected {
@@ -370,7 +611,7 @@ struct ProcessDetailView: View {
                     color: Color.textSecondaryLight,
                     bgColor: Color.borderLight.opacity(0.5)
                 ) {
-                    finishTermination(ProcessTreeService.killProcess(node))
+                    finishTermination(ProcessTreeService.killProcess(activeNode))
                 }
 
                 // Force Quit
@@ -381,19 +622,30 @@ struct ProcessDetailView: View {
                     color: Color.accentRed,
                     bgColor: Color.accentRed.opacity(0.08)
                 ) {
-                    finishTermination(ProcessTreeService.forceKillProcess(node))
+                    finishTermination(ProcessTreeService.forceKillProcess(activeNode))
                 }
             }
         }
         .padding(.horizontal, 24)
         .padding(.vertical, 12)
+        .background(Color.surfaceCardLight.opacity(0.76))
     }
 
     private func finishTermination(_ result: KillResult) {
         switch result {
         case .success:
-            onKill?(node)
-            onDismiss()
+            let killedNode = activeNode
+            onKill?(killedNode)
+            if selectedGroupInstance != nil {
+                terminatedInstanceIDs.insert(killedNode.id)
+                if visibleInstances.isEmpty {
+                    onDismiss()
+                } else {
+                    returnToGroup()
+                }
+            } else {
+                onDismiss()
+            }
         case .protected(let reason), .failed(let reason):
             terminationError = reason
         }
@@ -430,14 +682,13 @@ struct ProcessDetailView: View {
 
     // MARK: - Loading
 
-    private func loadDetail() {
+    private func loadDetail(for process: ProcessNode) {
         Task.detached(priority: .utility) {
-            let info = ProcessDetailService.fetchDetail(for: node)
+            let info = ProcessDetailService.fetchDetail(for: process)
             await MainActor.run {
-                withAnimation(.easeInOut(duration: 0.15)) {
-                    detail = info
-                    isLoading = false
-                }
+                guard selectedGroupInstance?.id == process.id || node.id == process.id else { return }
+                detail = info
+                isLoading = false
             }
         }
     }
@@ -464,10 +715,10 @@ struct ProcessDetailOverlay: ViewModifier {
                     onDismiss: { selectedProcess = nil },
                     onKill: onKill
                 )
-                .transition(.scale(scale: 0.96).combined(with: .opacity))
+                .transition(.opacity)
             }
         }
-        .animation(.easeInOut(duration: 0.2), value: selectedProcess != nil)
+        .animation(.easeOut(duration: 0.12), value: selectedProcess != nil)
     }
 }
 

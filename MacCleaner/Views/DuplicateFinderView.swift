@@ -45,28 +45,38 @@ struct DuplicateFinderView: View {
             }
 
             Button("Choose…", action: chooseFolder)
-                .buttonStyle(.bordered)
+                .buttonStyle(AppSecondaryButtonStyle())
                 .disabled(service.isScanning || service.isCleaning)
 
             Spacer()
 
-            Picker("Mode", selection: $service.mode) {
-                ForEach(DuplicateScanMode.allCases, id: \.self) { mode in
-                    Text(mode.rawValue).tag(mode)
-                }
-            }
-            .pickerStyle(.segmented)
+            AppSegmentedControl(
+                selection: $service.mode,
+                options: DuplicateScanMode.allCases,
+                accentColor: .accentGreen,
+                title: \.rawValue
+            )
             .frame(width: 180)
             .disabled(service.isScanning || service.isCleaning)
 
             if service.isScanning {
                 Button("Cancel", action: service.cancelScan)
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Color.accentRed)
+                    .padding(.horizontal, 12)
+                    .frame(height: 28)
+                    .background(Color.accentRed.opacity(0.08))
+                    .overlay(Rectangle().strokeBorder(Color.accentRed.opacity(0.28)))
             } else {
                 Button(action: service.startScan) {
                     Label(service.status.phase == .finished ? "Rescan" : "Scan", systemImage: "doc.on.doc")
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.plain)
+                .foregroundStyle(Color.white)
+                .padding(.horizontal, 13)
+                .frame(height: 30)
+                .background(Color.accentPurple)
+                .overlay(Rectangle().strokeBorder(Color.accentPurple.opacity(0.55)))
                 .keyboardShortcut("r", modifiers: [.command, .shift])
                 .disabled(service.isCleaning)
             }
@@ -108,7 +118,7 @@ struct DuplicateFinderView: View {
             color: .accentPurple,
             title: service.status.phase == .finished ? "No exact duplicates verified" : "Find byte-for-byte duplicate files",
             subtitle: emptySubtitle,
-            actionTitle: "Scan \(service.mode.rawValue.lowercased())",
+            actionTitle: "Scan",
             actionIcon: "doc.on.doc",
             details: [
                 "Group by logical size",
@@ -124,7 +134,7 @@ struct DuplicateFinderView: View {
         VStack(spacing: 0) {
             summary
 
-            if service.scanWasLimited || service.skippedCloudFiles > 0 || service.resultMessage != nil {
+            if service.skippedCloudFiles > 0 || (service.resultMessage != nil && !service.scanWasLimited) {
                 resultNotice
             }
 
@@ -196,7 +206,12 @@ struct DuplicateFinderView: View {
     private var cleanupBar: some View {
         HStack(spacing: 12) {
             Button("Select suggested copies", action: service.selectSuggestedCopies)
-                .buttonStyle(.bordered)
+                .buttonStyle(.plain)
+                .foregroundStyle(Color.accentBlue)
+                .padding(.horizontal, 11)
+                .frame(height: 28)
+                .background(Color.accentBlue.opacity(0.10))
+                .overlay(Rectangle().strokeBorder(Color.accentBlue.opacity(0.28)))
                 .disabled(service.isCleaning)
             if !service.selectedFileIDs.isEmpty {
                 Button("Clear", action: service.clearSelection)
@@ -204,7 +219,7 @@ struct DuplicateFinderView: View {
                     .foregroundStyle(Color.textSecondary)
             }
             Spacer()
-            VStack(alignment: .trailing, spacing: 2) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text("\(service.selectedCount) selected · \(formatBytes(service.selectedBytes))")
                     .font(.system(size: 12, weight: .bold))
                     .foregroundStyle(Color.textPrimary)
@@ -213,13 +228,19 @@ struct DuplicateFinderView: View {
                     .foregroundStyle(Color.textTertiary)
             }
             if service.isCleaning { ProgressView().controlSize(.small) }
-            Button("Move to Trash") { showCleanupConfirmation = true }
-                .buttonStyle(.borderedProminent)
+            Button("Delete") { showCleanupConfirmation = true }
+                .buttonStyle(.plain)
+                .foregroundStyle(Color.white)
+                .padding(.horizontal, 16)
+                .frame(height: 30)
+                .background(Color.accentRed)
+                .overlay(Rectangle().strokeBorder(Color.accentRed.opacity(0.65)))
                 .disabled(service.selectedFileIDs.isEmpty || service.isCleaning || !service.selectionKeepsOneFilePerGroup)
+                .opacity(service.selectedFileIDs.isEmpty ? 0.45 : 1)
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 12)
-        .background(.ultraThinMaterial)
+        .background(Color.surfacePrimary)
         .overlay(alignment: .top) { Divider() }
     }
 

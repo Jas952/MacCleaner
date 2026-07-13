@@ -8,6 +8,7 @@ RELEASE_DIR="$ROOT_DIR/release"
 APP_PATH="$BUILD_DIR/Release/MacCleaner.app"
 DMG_STAGING="$BUILD_DIR/dmg_content"
 DMG_PATH="$RELEASE_DIR/MacCleaner.dmg"
+SOURCE_PACKAGES_DIR="${SOURCE_PACKAGES_DIR:-$DERIVED_DATA/SourcePackages}"
 
 cd "$ROOT_DIR"
 
@@ -21,6 +22,8 @@ xcodebuild \
   -configuration Release \
   -destination "platform=macOS" \
   -derivedDataPath "$DERIVED_DATA" \
+  -clonedSourcePackagesDirPath "$SOURCE_PACKAGES_DIR" \
+  -disableAutomaticPackageResolution \
   CONFIGURATION_BUILD_DIR="$BUILD_DIR/Release" \
   CODE_SIGNING_ALLOWED=NO \
   -quiet

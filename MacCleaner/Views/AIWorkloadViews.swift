@@ -61,7 +61,7 @@ struct AIAgentsView: View {
     @State private var selectedTab: AgentsViewTab = .agents
     @State private var inspectorAgentID: String?
     @State private var inspectorKind: AgentInspectorKind = .processes
-    @State private var showingInspector = false
+    @EnvironmentObject private var modalCoordinator: AppModalCoordinator
     @State private var snapshot: AIWorkloadSnapshot?
     @State private var snapshotTask: Task<Void, Never>?
     @State private var stores: [AIIndexStore] = []
@@ -140,13 +140,6 @@ struct AIAgentsView: View {
             loadSnapshot(debounce: 0.15)
             loadStores(debounce: 0.15)
         }
-        .sheet(isPresented: $showingInspector) {
-            AgentInspectorWindow(
-                agents: currentSnapshot.agents,
-                selectedAgentID: $inspectorAgentID,
-                selectedKind: $inspectorKind
-            )
-        }
     }
 
     // MARK: - Agents Tab
@@ -164,7 +157,13 @@ struct AIAgentsView: View {
                     AIAgentCard(agent: agent, totalMemory: currentSnapshot.totalMemoryBytes) { agentID, kind in
                         inspectorAgentID = agentID
                         inspectorKind = kind
-                        showingInspector = true
+                        modalCoordinator.present(title: "Agent Inspector", subtitle: "Processes and attributed workloads") {
+                            AgentInspectorWindow(
+                                agents: currentSnapshot.agents,
+                                selectedAgentID: $inspectorAgentID,
+                                selectedKind: $inspectorKind
+                            )
+                        }
                     }
                 }
             }
@@ -848,66 +847,35 @@ private struct LLMFilterButton: View {
     let value: String
     let options: [String]
     let onSelect: (String) -> Void
+    @EnvironmentObject private var modalCoordinator: AppModalCoordinator
 
     var body: some View {
-        ZStack {
-            LLMFilterPickerLabel(title: title, value: value)
-            LLMSystemSingleMenuClickLayer(value: value, options: options, onSelect: onSelect)
-        }
-        .frame(height: 32)
-    }
-}
-
-private struct LLMSystemSingleMenuClickLayer: NSViewRepresentable {
-    let value: String
-    let options: [String]
-    let onSelect: (String) -> Void
-
-    func makeNSView(context: Context) -> NSButton {
-        let button = NSButton(title: "", target: context.coordinator, action: #selector(Coordinator.openMenu(_:)))
-        button.isBordered = false
-        button.bezelStyle = .regularSquare
-        button.wantsLayer = true
-        button.layer?.backgroundColor = NSColor.clear.cgColor
-        button.setButtonType(.momentaryChange)
-        return button
-    }
-
-    func updateNSView(_ nsView: NSButton, context: Context) {
-        context.coordinator.parent = self
-        nsView.target = context.coordinator
-        nsView.action = #selector(Coordinator.openMenu(_:))
-    }
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(parent: self)
-    }
-
-    final class Coordinator: NSObject {
-        var parent: LLMSystemSingleMenuClickLayer
-
-        init(parent: LLMSystemSingleMenuClickLayer) {
-            self.parent = parent
-        }
-
-        @objc func openMenu(_ sender: NSButton) {
-            let menu = NSMenu()
-
-            for option in parent.options {
-                let item = NSMenuItem(title: option, action: #selector(selectItem(_:)), keyEquivalent: "")
-                item.target = self
-                item.representedObject = option
-                item.state = option == parent.value ? .on : .off
-                menu.addItem(item)
+        Button {
+            modalCoordinator.present(title: title, subtitle: "Choose one option") {
+                VStack(spacing: 8) {
+                    ForEach(options, id: \.self) { option in
+                        Button {
+                            onSelect(option)
+                            modalCoordinator.dismiss()
+                        } label: {
+                            HStack {
+                                Text(option).font(.system(size: 12, weight: .medium))
+                                Spacer()
+                                if option == value { Image(systemName: "checkmark").foregroundStyle(Color.accentBlue) }
+                            }
+                            .foregroundStyle(Color.textPrimaryLight)
+                            .padding(.horizontal, 14).frame(height: 42)
+                            .background(option == value ? Color.accentBlue.opacity(0.08) : Color.surfaceCardLight)
+                            .overlay(Rectangle().strokeBorder(Color.borderLight))
+                        }.buttonStyle(.plain)
+                    }
+                }
             }
-
-            menu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.height + 2), in: sender)
+        } label: {
+            LLMFilterPickerLabel(title: title, value: value)
         }
-
-        @objc private func selectItem(_ item: NSMenuItem) {
-            guard let value = item.representedObject as? String else { return }
-            parent.onSelect(value)
-        }
+        .buttonStyle(.plain)
+        .frame(height: 32)
     }
 }
 
@@ -916,6 +884,7 @@ private struct LLMSelectionFilterButton: View {
     @Binding var selected: Set<String>
     let options: [String]
     var display: (String) -> String = { $0 }
+    @EnvironmentObject private var modalCoordinator: AppModalCoordinator
 
     private var valueText: String {
         if selected.isEmpty { return "All" }
@@ -924,80 +893,40 @@ private struct LLMSelectionFilterButton: View {
     }
 
     var body: some View {
-        ZStack {
+        Button {
+            modalCoordinator.present(title: title, subtitle: "Select one or more filters") {
+                VStack(spacing: 8) {
+                    Button {
+                        selected.removeAll()
+                    } label: {
+                        HStack { Text("All"); Spacer(); if selected.isEmpty { Image(systemName: "checkmark") } }
+                            .foregroundStyle(Color.textPrimaryLight)
+                            .padding(.horizontal, 14).frame(height: 40)
+                            .background(selected.isEmpty ? Color.accentBlue.opacity(0.08) : Color.surfaceCardLight)
+                            .overlay(Rectangle().strokeBorder(Color.borderLight))
+                    }.buttonStyle(.plain)
+                    ForEach(options, id: \.self) { option in
+                        Button {
+                            if selected.contains(option) { selected.remove(option) } else { selected.insert(option) }
+                        } label: {
+                            HStack {
+                                Text(display(option)); Spacer()
+                                Image(systemName: selected.contains(option) ? "checkmark.square.fill" : "square")
+                                    .foregroundStyle(selected.contains(option) ? Color.accentBlue : Color.textTertiaryLight)
+                            }
+                            .foregroundStyle(Color.textPrimaryLight)
+                            .padding(.horizontal, 14).frame(height: 40)
+                            .background(Color.surfaceCardLight)
+                            .overlay(Rectangle().strokeBorder(Color.borderLight))
+                        }.buttonStyle(.plain)
+                    }
+                }
+            }
+        } label: {
             LLMValuePickerLabel(value: valueText)
-            LLMSystemMenuClickLayer(selected: $selected, options: options, display: display)
         }
+        .buttonStyle(.plain)
         .frame(height: 32)
-    }
-}
-
-private struct LLMSystemMenuClickLayer: NSViewRepresentable {
-    @Binding var selected: Set<String>
-    let options: [String]
-    let display: (String) -> String
-
-    func makeNSView(context: Context) -> NSButton {
-        let button = NSButton(title: "", target: context.coordinator, action: #selector(Coordinator.openMenu(_:)))
-        button.isBordered = false
-        button.bezelStyle = .regularSquare
-        button.wantsLayer = true
-        button.layer?.backgroundColor = NSColor.clear.cgColor
-        button.setButtonType(.momentaryChange)
-        return button
-    }
-
-    func updateNSView(_ nsView: NSButton, context: Context) {
-        context.coordinator.parent = self
-        nsView.target = context.coordinator
-        nsView.action = #selector(Coordinator.openMenu(_:))
-    }
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(parent: self)
-    }
-
-    final class Coordinator: NSObject {
-        var parent: LLMSystemMenuClickLayer
-
-        init(parent: LLMSystemMenuClickLayer) {
-            self.parent = parent
-        }
-
-        @objc func openMenu(_ sender: NSButton) {
-            let menu = NSMenu()
-
-            let allItem = NSMenuItem(title: "All", action: #selector(selectItem(_:)), keyEquivalent: "")
-            allItem.target = self
-            allItem.representedObject = "__all__"
-            allItem.state = parent.selected.isEmpty ? .on : .off
-            menu.addItem(allItem)
-
-            if !parent.options.isEmpty {
-                menu.addItem(.separator())
-            }
-
-            for option in parent.options {
-                let item = NSMenuItem(title: parent.display(option), action: #selector(selectItem(_:)), keyEquivalent: "")
-                item.target = self
-                item.representedObject = option
-                item.state = parent.selected.contains(option) ? .on : .off
-                menu.addItem(item)
-            }
-
-            menu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.height + 2), in: sender)
-        }
-
-        @objc private func selectItem(_ item: NSMenuItem) {
-            guard let value = item.representedObject as? String else { return }
-            if value == "__all__" {
-                parent.selected.removeAll()
-            } else if parent.selected.contains(value) {
-                parent.selected.remove(value)
-            } else {
-                parent.selected.insert(value)
-            }
-        }
     }
 }
 

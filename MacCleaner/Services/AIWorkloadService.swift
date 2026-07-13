@@ -79,9 +79,10 @@ final class AIWorkloadService {
             keywords: ["codex"],
             components: codexInstallComponents
         )
-        let mcpProcesses = processes.filter { $0.name.lowercased().contains("mcp") || $0.reason.lowercased().contains("mcp") }
         let codexPIDs = Set(codexProcesses.map(\.id))
         let codexHelpers = descendantProcesses(of: codexPIDs, in: processes)
+        let codexMCPProcesses = codexHelpers.filter(isMCPProcess)
+        let codexNonMCPHelpers = codexHelpers.filter { !isMCPProcess($0) }
 
         if codexInstallDetected() {
             let codexMCP = codexMCPServers()
@@ -94,8 +95,8 @@ final class AIWorkloadService {
                 description: "Local OpenAI Codex agent runtime, workspace state, skills, plugins, and tool bridges.",
                 rootPath: "\(FileManager.default.homeDirectoryForCurrentUser.path)/.codex",
                 processes: codexProcesses,
-                mcpProcesses: mcpProcesses,
-                helperProcesses: codexHelpers,
+                mcpProcesses: codexMCPProcesses,
+                helperProcesses: codexNonMCPHelpers,
                 components: codexComponents() + mcpConfigComponents(),
                 mcpComponents: codexMCP,
                 skillComponents: codexSkillItems,
@@ -121,6 +122,8 @@ final class AIWorkloadService {
             if hasInstallAnchor(agent.3) {
                 let rows = agentProcesses(in: processes, keywords: agent.2, components: agent.3)
                 let helpers = descendantProcesses(of: Set(rows.map(\.id)), in: processes)
+                let agentMCPProcesses = helpers.filter(isMCPProcess)
+                let nonMCPHelpers = helpers.filter { !isMCPProcess($0) }
                 let runtimeProcesses = rows + helpers
                 let terminals = terminalChildren(for: runtimeProcesses, in: processes)
                 profiles.append(.init(
@@ -129,8 +132,8 @@ final class AIWorkloadService {
                     description: "Detected active AI assistant runtime.",
                     rootPath: rootPath(from: agent.3),
                     processes: rows,
-                    mcpProcesses: [],
-                    helperProcesses: helpers,
+                    mcpProcesses: agentMCPProcesses,
+                    helperProcesses: nonMCPHelpers,
                     components: agent.3,
                     mcpComponents: agent.4,
                     skillComponents: agent.5,
@@ -143,6 +146,11 @@ final class AIWorkloadService {
         }
 
         return profiles.sorted { $0.memoryTotal > $1.memoryTotal }
+    }
+
+    private static func isMCPProcess(_ process: AIWorkloadProcess) -> Bool {
+        let evidence = "\(process.name) \(process.commandLine) \(process.reason)".lowercased()
+        return evidence.contains("mcp") || evidence.contains("modelcontextprotocol")
     }
 
     private static func agentProcesses(

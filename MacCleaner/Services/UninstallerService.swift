@@ -47,6 +47,14 @@ class UninstallerService: ObservableObject {
     @Published var scanWasLimited = false
     @Published var scannedEntryCount = 0
 
+    @MainActor
+    func resetForNavigation() {
+        guard !isScanning else { return }
+        apps = []
+        scanWasLimited = false
+        scannedEntryCount = 0
+    }
+
     func scan() {
         guard !isScanning else { return }
         DispatchQueue.main.async {

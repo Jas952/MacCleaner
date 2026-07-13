@@ -15,8 +15,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build unsigned DMG
-        run: ./scripts/build_dmg.sh
+      - name: Validate release notes version
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          EXPECTED_TITLE="# MacCleaner $VERSION"
+          ACTUAL_TITLE="$(head -n 1 MacCleaner/ReleaseNotes.md)"
+          if [[ "$ACTUAL_TITLE" != "$EXPECTED_TITLE" ]]; then
+            echo "Release notes title '$ACTUAL_TITLE' does not match tag '$GITHUB_REF_NAME'."
+            exit 1
+          fi
 
       - name: Resolve Sparkle publishing tools
         run: |
@@ -25,12 +32,17 @@ jobs:
             -scheme MacCleaner \
             -clonedSourcePackagesDirPath "$RUNNER_TEMP/SourcePackages"
 
+      - name: Build unsigned DMG
+        env:
+          SOURCE_PACKAGES_DIR: ${{ runner.temp }}/SourcePackages
+        run: ./scripts/build_dmg.sh
+
       - name: Generate signed appcast
         env:
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          cp docs/release-notes.md "release/MacCleaner.md"
+          cp MacCleaner/ReleaseNotes.md "release/MacCleaner.md"
           APPCAST_TOOL="$(find "$RUNNER_TEMP/SourcePackages/artifacts" -type f -name generate_appcast -print -quit)"
           rm -f appcast.xml
           printf '%s' "$SPARKLE_PRIVATE_KEY" | "$APPCAST_TOOL" \
@@ -47,11 +59,14 @@ jobs:
         run: |
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" release/MacCleaner.dmg --clobber
+            gh release edit "$GITHUB_REF_NAME" \
+              --title "MacCleaner ${GITHUB_REF_NAME#v}" \
+              --notes-file MacCleaner/ReleaseNotes.md
           else
             gh release create "$GITHUB_REF_NAME" \
               release/MacCleaner.dmg \
               --title "MacCleaner ${GITHUB_REF_NAME#v}" \
-              --notes-file docs/release-notes.md \
+              --notes-file MacCleaner/ReleaseNotes.md \
               --verify-tag
           fi
 

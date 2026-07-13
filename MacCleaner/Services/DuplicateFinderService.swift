@@ -252,6 +252,17 @@ final class DuplicateFinderService: ObservableObject {
         resultMessage = nil
     }
 
+    func resetForNavigation() {
+        guard !isScanning, !isCleaning else { return }
+        groups = []
+        selectedFileIDs = []
+        status = .idle
+        scanWasLimited = false
+        skippedCloudFiles = 0
+        lastScanDuration = nil
+        resultMessage = nil
+    }
+
     func moveSelectedToTrash() {
         guard !isScanning, !isCleaning, !selectedFileIDs.isEmpty else { return }
         guard selectionKeepsOneFilePerGroup else {

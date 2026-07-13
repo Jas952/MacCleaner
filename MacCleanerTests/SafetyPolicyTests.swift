@@ -107,6 +107,68 @@ final class SafetyPolicyTests: XCTestCase {
         XCTAssertTrue(ProcessTreeService.isProtected(node))
     }
 
+    func testProcessAggregationKeepsUniqueInstancesAndSumsMetrics() throws {
+        func node(_ id: Int32, cpu: Double, time: String, memory: UInt64, read: UInt64, written: UInt64) -> ProcessNode {
+            ProcessNode(
+                id: id,
+                name: "Example App",
+                commandLine: "/Applications/Example App.app/Contents/MacOS/Example --pid \(id)",
+                cpuUsage: cpu,
+                cpuTime: time,
+                memoryBytes: memory,
+                diskRead: read,
+                diskWritten: written,
+                parentPID: 1,
+                isBackgroundAgent: false
+            )
+        }
+
+        let first = node(100, cpu: 2.5, time: "0:10", memory: 100, read: 10, written: 20)
+        let second = node(101, cpu: 7.5, time: "1:05", memory: 250, read: 30, written: 40)
+        let groups = ProcessAggregator.aggregate([first, second, first])
+        let group = try XCTUnwrap(groups.first)
+
+        XCTAssertEqual(groups.count, 1)
+        XCTAssertEqual(group.instanceCount, 2)
+        XCTAssertEqual(group.groupedInstances.map(\.id), [100, 101])
+        XCTAssertEqual(group.cpuUsage, 10, accuracy: 0.001)
+        XCTAssertEqual(group.cpuTime, "1:15")
+        XCTAssertEqual(group.memoryBytes, 350)
+        XCTAssertEqual(group.diskRead, 40)
+        XCTAssertEqual(group.diskWritten, 60)
+    }
+
+    func testProcessAggregationDoesNotExposeSingleProcessAsGroup() throws {
+        let process = ProcessNode(
+            id: 200,
+            name: "Solo",
+            commandLine: "/tmp/solo",
+            cpuUsage: 1,
+            cpuTime: "2:03",
+            memoryBytes: 42,
+            parentPID: 1,
+            isBackgroundAgent: false
+        )
+        let result = try XCTUnwrap(ProcessAggregator.aggregate([process]).first)
+        XCTAssertEqual(result.instanceCount, 1)
+        XCTAssertTrue(result.groupedInstances.isEmpty)
+        XCTAssertEqual(result.cpuTime, "2:03")
+    }
+
+    func testProcessAggregationDoesNotMergeGenericNamesFromDifferentExecutables() {
+        let first = ProcessNode(
+            id: 301, name: "com", commandLine: "/usr/libexec/com.apple.alpha",
+            cpuUsage: 1, cpuTime: "0:01", memoryBytes: 10, parentPID: 1, isBackgroundAgent: true
+        )
+        let second = ProcessNode(
+            id: 302, name: "com", commandLine: "/usr/libexec/com.apple.beta",
+            cpuUsage: 2, cpuTime: "0:02", memoryBytes: 20, parentPID: 1, isBackgroundAgent: true
+        )
+        let groups = ProcessAggregator.aggregate([first, second])
+        XCTAssertEqual(groups.count, 2)
+        XCTAssertTrue(groups.allSatisfy { $0.instanceCount == 1 })
+    }
+
     func testCleanupAdvisorRanksMoreBytesHigherAtEqualRisk() {
         let small = CleanupRecommendation.priorityScore(
             bytes: 50 * 1_048_576,
@@ -244,6 +306,49 @@ final class SafetyPolicyTests: XCTestCase {
         try Data(repeating: 0x22, count: 1_100_000).write(to: copy)
         let changedDigest = try XCTUnwrap(DuplicateFinderService.fullFingerprint(url: copy)?.digest)
         XCTAssertNotEqual(changedDigest, expectedDigest)
+    }
+
+    func testDuplicateRescanDoesNotReturnRemovedPath() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("MacCleanerDuplicateRescanTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let original = root.appendingPathComponent("original.bin")
+        let copy = root.appendingPathComponent("copy.bin")
+        let data = Data(repeating: 0x42, count: 1_200_000)
+        try data.write(to: original)
+        try data.write(to: copy)
+
+        XCTAssertEqual(DuplicateFinderService.performScan(root: root, mode: .efficient).groups.count, 1)
+        try FileManager.default.removeItem(at: copy)
+        let rescanned = DuplicateFinderService.performScan(root: root, mode: .efficient)
+        XCTAssertTrue(rescanned.groups.isEmpty)
+        XCTAssertFalse(rescanned.groups.flatMap(\.files).contains { $0.url == copy })
+    }
+
+    @MainActor
+    func testCleanerNavigationResetRestoresInitialState() {
+        let state = CleanerViewState()
+        state.hasScan = true
+        state.showResult = true
+        state.scanProgress = 1
+        state.resultFreed = 512
+        state.dnsFlow = .done
+        state.dnsSuccess = true
+        state.optimizationPhase = .success
+        state.optimizationFoundDisk = 1_024
+        state.optimizationLogs = [OptimizationLog(message: "Finished", status: .success)]
+
+        state.resetForNavigation()
+
+        XCTAssertFalse(state.hasScan)
+        XCTAssertFalse(state.showResult)
+        XCTAssertEqual(state.scanProgress, 0)
+        XCTAssertNil(state.resultFreed)
+        if case .idle = state.dnsFlow {} else { XCTFail("DNS flow was not reset") }
+        if case .ready = state.optimizationPhase {} else { XCTFail("Optimization phase was not reset") }
+        XCTAssertTrue(state.optimizationLogs.isEmpty)
+        XCTAssertEqual(state.optimizationFoundDisk, 0)
     }
 
     @MainActor

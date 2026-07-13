@@ -41,27 +41,65 @@ enum Tab: String, CaseIterable {
 
 struct ContentView: View {
     @ObservedObject var monitor: SystemMonitor
-    @State private var selectedTab: Tab = .dashboard
+    @State private var selectedTab: Tab
+    @State private var previousTab: Tab
     @State private var ramCleaningFlow: RAMCleaningFlow = .idle
     @State private var cleanerOperationActive = false
     @State private var storageOperationActive = false
     @State private var storageAnalysisOperationActive = false
     @State private var desktopOperationActive = false
-    @State private var cleanerSelectedTool: CleanerTool? = nil
-    @State private var storageSelectedTool: InternalStorageTool? = nil
-    @State private var showingLaunchIntro = true
+    @State private var cleanerSelectedTool: CleanerTool?
+    @State private var storageSelectedTool: InternalStorageTool?
+    @State private var showingLaunchIntro: Bool
     @State private var storageViewPrepared = false
+    @State private var showingUpdates: Bool
     
     // Global state for Storage and Uninstaller tools
     @StateObject private var uninstallerService = UninstallerService()
     @StateObject private var analyzerService = StorageAnalyzerService()
     @StateObject private var storageWorkspace = StorageWorkspaceService()
     @StateObject private var desktopService = DesktopService()
-    @StateObject private var cleanerViewState = CleanerViewState()
+    @StateObject private var cleanerViewState: CleanerViewState
     @StateObject private var webAppsPackager = PakePackager()
     @StateObject private var updateService = UpdateService.shared
+    @StateObject private var modalCoordinator = AppModalCoordinator()
 
     @StateObject private var themeManager = ThemeManager.shared
+
+    init(monitor: SystemMonitor) {
+        self.monitor = monitor
+        let arguments = ProcessInfo.processInfo.arguments
+        let requestedTab = arguments
+            .first(where: { $0.hasPrefix("--tab=") })?
+            .dropFirst("--tab=".count)
+            .lowercased()
+        let tab = Tab.allCases.first {
+            $0.rawValue.lowercased() == requestedTab || String(describing: $0).lowercased() == requestedTab
+        } ?? .dashboard
+        _selectedTab = State(initialValue: tab)
+        _previousTab = State(initialValue: tab)
+        _showingLaunchIntro = State(initialValue: !arguments.contains("--skip-intro"))
+        let requestedStorageTool = arguments
+            .first(where: { $0.hasPrefix("--storage-tool=") })?
+            .dropFirst("--storage-tool=".count)
+            .lowercased()
+        let storageTool = InternalStorageTool.allCases.first {
+            $0.rawValue.lowercased() == requestedStorageTool
+        }
+        _storageSelectedTool = State(initialValue: storageTool)
+        _showingUpdates = State(initialValue: arguments.contains("--show-updates"))
+        let requestedCleanerTool = arguments
+            .first(where: { $0.hasPrefix("--cleaner-tool=") })?
+            .dropFirst("--cleaner-tool=".count)
+            .lowercased()
+        let cleanerTool = CleanerTool.allCases.first {
+            $0.title.lowercased() == requestedCleanerTool || String(describing: $0).lowercased() == requestedCleanerTool
+        }
+        _cleanerSelectedTool = State(initialValue: cleanerTool)
+        let cleanerState = CleanerViewState()
+        if cleanerTool != nil { cleanerState.mode = .professional }
+        _cleanerViewState = StateObject(wrappedValue: cleanerState)
+    }
 
     private var isCleanerWorking: Bool {
         ramCleaningFlow.isActive || cleanerOperationActive
@@ -80,11 +118,15 @@ struct ContentView: View {
         selectedTab == .webApps && webAppsPackager.shouldShowStatus
     }
 
+    private var isModalOverlayActive: Bool {
+        showingUpdates || modalCoordinator.presentation != nil
+    }
+
     var body: some View {
         ZStack {
             mainContent
-                .blur(radius: isWebAppsOverlayActive ? 8 : 0)
-                .disabled(isWebAppsOverlayActive || showingLaunchIntro)
+                .blur(radius: isWebAppsOverlayActive || isModalOverlayActive ? 6 : 0)
+                .disabled(isWebAppsOverlayActive || isModalOverlayActive || showingLaunchIntro)
 
             if isWebAppsOverlayActive {
                 Color.black.opacity(0.08)
@@ -104,11 +146,35 @@ struct ContentView: View {
                 .zIndex(10)
                 .transition(.opacity)
             }
+
+            if showingUpdates {
+                AppModalOverlay(
+                    title: "About & Updates",
+                    subtitle: "MacCleaner version and update preferences",
+                    width: 600,
+                    height: 520,
+                    scrollsContent: false,
+                    onDismiss: { showingUpdates = false }
+                ) {
+                    UpdateWindowContent(updateService: updateService)
+                }
+            }
+
+            if let presentation = modalCoordinator.presentation {
+                AppModalOverlay(
+                    title: presentation.title,
+                    subtitle: presentation.subtitle,
+                    onDismiss: modalCoordinator.dismiss
+                ) {
+                    presentation.content
+                }
+            }
         }
         .background(Color.surfaceLight)
-        .animation(.easeInOut(duration: 0.22), value: isWebAppsOverlayActive)
+        .animation(.easeInOut(duration: 0.16), value: isWebAppsOverlayActive)
         .animation(.easeInOut(duration: 0.36), value: showingLaunchIntro)
         .preferredColorScheme(themeManager.effectiveColorScheme)
+        .environmentObject(modalCoordinator)
     }
 
     private var mainContent: some View {
@@ -180,7 +246,8 @@ struct ContentView: View {
                 // Footer with version and theme toggle
                 AppFooter(
                     version: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "",
-                    updateService: updateService
+                    updateService: updateService,
+                    showUpdates: { showingUpdates = true }
                 )
             }
             .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .top)
@@ -192,6 +259,21 @@ struct ContentView: View {
         .background(Color.surfaceLight)
         .onChange(of: storageWorkspace.isWorking) { isWorking in
             storageAnalysisOperationActive = isWorking
+        }
+        .onChange(of: selectedTab) { newTab in
+            let oldTab = previousTab
+            previousTab = newTab
+
+            if oldTab == .cleaner, newTab != .cleaner, !isCleanerWorking {
+                cleanerSelectedTool = nil
+                cleanerViewState.resetForNavigation()
+                ramCleaningFlow = .idle
+            }
+            if oldTab == .storage, newTab != .storage, !isStorageWorking {
+                storageWorkspace.resetForNavigation()
+                uninstallerService.resetForNavigation()
+                analyzerService.resetForNavigation()
+            }
         }
         .onAppear {
             DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
@@ -597,7 +679,7 @@ struct StatCardLight: View {
         .padding(.vertical, 10)
         .background(
             RoundedRectangle(cornerRadius: 10)
-                .fill(Color.white)
+                .fill(Color.surfaceSecondary)
                 .shadow(color: Color.shadowLight, radius: 8, x: 0, y: 2)
         )
         .overlay(
@@ -611,39 +693,69 @@ struct StatCardLight: View {
 
 struct StorageToolCard: View {
     let tool: InternalStorageTool
+    var height: CGFloat = 96
     @State private var isHovered = false
 
     var body: some View {
-        HStack(spacing: 20) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(tool.color.opacity(0.15))
-                    .frame(width: 64, height: 64)
-                Image(systemName: tool.icon)
-                    .font(.system(size: 28, weight: .semibold))
-                    .foregroundStyle(tool.color)
+        Group {
+            if tool == .specialized {
+                VStack(spacing: 16) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 20)
+                            .fill(tool.color.opacity(0.15))
+                            .frame(width: 76, height: 76)
+                        Image(systemName: tool.icon)
+                            .font(.system(size: 32, weight: .semibold))
+                            .foregroundStyle(tool.color)
+                    }
+                    VStack(spacing: 8) {
+                        Text(tool.rawValue)
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundStyle(Color.textPrimary)
+                        Text(tool.description)
+                            .font(.system(size: 12))
+                            .foregroundStyle(Color.textSecondary)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .lineLimit(3)
+                    }
+                }
+                .padding(.horizontal, 24)
+                .frame(height: height)
+                .frame(maxWidth: .infinity)
+            } else {
+                HStack(spacing: 20) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 16)
+                            .fill(tool.color.opacity(0.15))
+                            .frame(width: 64, height: 64)
+                        Image(systemName: tool.icon)
+                            .font(.system(size: 28, weight: .semibold))
+                            .foregroundStyle(tool.color)
+                    }
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(tool.rawValue)
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundStyle(Color.textPrimary)
+                        Text(tool.description)
+                            .font(.system(size: 12))
+                            .foregroundStyle(Color.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .lineLimit(2)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Color.textTertiary)
+                }
+                .padding(.horizontal, 20)
+                .frame(height: height)
+                .frame(maxWidth: .infinity)
             }
-            VStack(alignment: .leading, spacing: 6) {
-                Text(tool.rawValue)
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(Color.textPrimary)
-                Text(tool.description)
-                    .font(.system(size: 12))
-                    .foregroundStyle(Color.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .lineLimit(2)
-            }
-            Spacer()
-            Image(systemName: "chevron.right")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(Color.textTertiary)
         }
-        .padding(.horizontal, 20)
-        .frame(height: 96)
-        .frame(maxWidth: .infinity)
         .background(
             RoundedRectangle(cornerRadius: 16)
-                .fill(Color.surfaceSecondary)
+                .fill(Color.white)
                 .overlay(
                     RoundedRectangle(cornerRadius: 16)
                         .strokeBorder(
@@ -687,23 +799,84 @@ struct ScanningPlaceholder: View {
     let icon: String
     let color: Color
     let message: String
+    var path: String? = nil
+    var cancelAction: (() -> Void)? = nil
 
     var body: some View {
-        VStack(spacing: 20) {
-            Spacer()
+        VStack(spacing: 16) {
+            Spacer(minLength: 20)
+            
             ZStack {
-                Circle().fill(color.opacity(0.10)).frame(width: 110, height: 110)
+                Circle().fill(color.opacity(0.07)).frame(width: 124, height: 124)
+                Circle().fill(color.opacity(0.12)).frame(width: 100, height: 100)
                 Image(systemName: icon)
-                    .font(.system(size: 48, weight: .semibold))
+                    .font(.system(size: 42, weight: .semibold))
                     .foregroundStyle(color)
             }
+
             Text(message)
-                .font(.system(size: 15))
-                .foregroundStyle(Color.textSecondary)
-            ProgressView().tint(color)
-            Spacer()
+                .font(.system(size: 21, weight: .bold))
+                .foregroundStyle(Color.textPrimary)
+                .lineLimit(2)
+                .frame(maxWidth: 620, minHeight: 28)
+
+            if let cancelAction {
+                Button(action: cancelAction) {
+                    Label("Cancel", systemImage: "xmark")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Color.white)
+                        .frame(width: 190, height: 38)
+                        .background(Color.accentRed)
+                        .clipShape(RoundedRectangle(cornerRadius: 9))
+                }
+                .buttonStyle(.plain)
+            } else {
+                ProgressView().tint(color).frame(height: 38)
+            }
+
+            VStack(spacing: 9) {
+                if let path, !path.isEmpty {
+                    LiveScanPathLine(path: path, color: color)
+                        .padding(.horizontal, 64)
+                        .frame(maxWidth: 620)
+                } else {
+                    Text("Scanning in progress...")
+                        .font(.system(size: 13))
+                        .foregroundStyle(Color.textSecondary)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 580, minHeight: 36, alignment: .top)
+                }
+            }
+            .frame(maxWidth: 620, minHeight: 100, alignment: .top)
+
+            Spacer(minLength: 20)
         }
+        .padding(.horizontal, 20)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+struct LiveScanPathLine: View {
+    let path: String
+    let color: Color
+
+    private var displayPath: String {
+        let home = NSHomeDirectory()
+        return path.hasPrefix(home) ? "~" + path.dropFirst(home.count) : path
+    }
+
+    var body: some View {
+        HStack(spacing: 9) {
+            ProgressView()
+                .controlSize(.small)
+                .tint(color)
+            Text(displayPath)
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .foregroundStyle(Color.textSecondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 }
 
@@ -721,6 +894,7 @@ struct UninstallerView: View {
     @State private var isUninstalling = false
     @State private var isSuccess = false
     @State private var sortOrder: UninstallerSortOrder = .lastUsed
+    @EnvironmentObject private var modalCoordinator: AppModalCoordinator
     
     var sortedApps: [InstalledApp] {
         switch sortOrder {
@@ -762,26 +936,16 @@ struct UninstallerView: View {
 
                     Spacer()
 
-                    Menu {
-                        ForEach(UninstallerSortOrder.allCases, id: \.self) { order in
-                            Button(action: { sortOrder = order }) {
-                                if sortOrder == order {
-                                    Label(order.rawValue, systemImage: "checkmark")
-                                } else {
-                                    Text(order.rawValue)
-                                }
-                            }
-                        }
-                    } label: {
+                    Button(action: presentSortPicker) {
                         HStack(spacing: 4) {
                             Text(sortOrder.rawValue)
                                 .font(.system(size: 11, weight: .medium))
-                            Image(systemName: "chevron.down")
+                            Image(systemName: "arrow.up.arrow.down")
                                 .font(.system(size: 9, weight: .medium))
                         }
                         .foregroundStyle(Color.textSecondaryLight)
                     }
-                    .menuStyle(.borderlessButton)
+                    .buttonStyle(.plain)
                     .disabled(service.isScanning || isUninstalling)
 
                     Button(action: { service.scan() }) {
@@ -796,30 +960,22 @@ struct UninstallerView: View {
                 .padding(16)
                 .background(Color.surfaceCardLight)
 
-                if service.scanWasLimited, !service.isScanning {
-                    HStack(spacing: 5) {
-                        Image(systemName: "leaf.fill")
-                        Text("All apps listed · some size estimates are partial after \(service.scannedEntryCount.formatted()) measured entries")
-                            .lineLimit(2)
-                    }
-                    .font(.system(size: 9, design: .monospaced))
-                    .foregroundStyle(.accentAmber)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                    .background(Color.surfaceCardLight)
-                }
-
                 Rectangle().fill(Color.borderLight).frame(height: 1)
 
-                List(selection: $selectedAppId) {
-                    ForEach(sortedApps) { app in
-                        AppRow(app: app)
-                            .tag(app.id)
+                ScrollView {
+                    LazyVStack(spacing: 2) {
+                        ForEach(sortedApps) { app in
+                            Button { selectedAppId = app.id } label: {
+                                AppRow(app: app)
+                                    .padding(.horizontal, 10)
+                                    .background(selectedAppId == app.id ? Color.accentBlue.opacity(0.10) : Color.clear)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
+                    .padding(.vertical, 6)
                 }
-                .listStyle(.plain)
-                .scrollContentBackground(.hidden)
                 .background(Color.surfaceCardLight)
                 .disabled(isUninstalling)
             }
@@ -884,6 +1040,32 @@ struct UninstallerView: View {
         .onAppear {
             if service.apps.isEmpty {
                 service.scan()
+            }
+        }
+    }
+
+    private func presentSortPicker() {
+        modalCoordinator.present(title: "Sort Applications", subtitle: "Choose the order used in Uninstaller") {
+            VStack(spacing: 8) {
+                ForEach(UninstallerSortOrder.allCases, id: \.self) { order in
+                    Button {
+                        sortOrder = order
+                        modalCoordinator.dismiss()
+                    } label: {
+                        HStack {
+                            Text(order.rawValue).font(.system(size: 12, weight: .medium))
+                            Spacer()
+                            if sortOrder == order {
+                                Image(systemName: "checkmark").foregroundStyle(Color.accentBlue)
+                            }
+                        }
+                        .foregroundStyle(Color.textPrimaryLight)
+                        .padding(.horizontal, 14).frame(height: 44)
+                        .background(sortOrder == order ? Color.accentBlue.opacity(0.08) : Color.surfaceCardLight)
+                        .overlay(Rectangle().strokeBorder(Color.borderLight))
+                    }
+                    .buttonStyle(.plain)
+                }
             }
         }
     }
@@ -960,9 +1142,9 @@ struct AppDetailView: View {
     let isSuccess: Bool
     
     private var autoCount: Int { app.autoSelected.filter(\.isSelected).count }
-    private var autoSize: UInt64 { app.autoSelected.filter(\.isSelected).reduce(0) { $0 + $1.size } }
+    private var autoSize: UInt64 { app.autoSelected.filter(\.isSelected).reduce(UInt64(0)) { $0 + $1.size } }
     private var reviewCount: Int { app.needsReview.count }
-    private var reviewSize: UInt64 { app.needsReview.reduce(0) { $0 + $1.size } }
+    private var reviewSize: UInt64 { app.needsReview.reduce(UInt64(0)) { $0 + $1.size } }
     
     private var lastUsedText: String {
         guard let date = app.lastUsed else { return "Unknown" }
@@ -1186,7 +1368,7 @@ struct DiskAnalyzerView: View {
                             Text(isDeleting ? "Deleting…" : "Delete")
                         }
                         .font(.system(size: 12, weight: .semibold))
-                        .padding(.horizontal, 12).padding(.vertical, 5)
+                        .frame(width: 78, height: 26)
                         .background(isDeleting ? Color.surfaceLight : Color.accentRed)
                         .foregroundStyle(isDeleting ? Color.textSecondaryLight : .white)
                         .clipShape(Capsule())
@@ -1202,25 +1384,15 @@ struct DiskAnalyzerView: View {
                     }.buttonStyle(.plain).foregroundStyle(Color.accentBlue)
                 }
             }
-            .padding(.horizontal, 16).padding(.vertical, 10)
+            .padding(.horizontal, 16)
+            .frame(height: 48)
             .background(Color.surfaceCardLight)
             
             Rectangle().fill(Color.borderLight).frame(height: 1)
             
             // Content
             if service.packedCircles.isEmpty {
-                if service.isScanning {
-                    ScanningPlaceholder(icon: "network", color: .indigo, message: "Building disk map\u{2026}")
-                } else {
-                    ToolSplashScreen(
-                        icon: "network",
-                        color: .indigo,
-                        title: "Disk Map Analysis",
-                        subtitle: "Run a bounded fast scan of your home folder. Results are labelled partial if a time or entry limit is reached.",
-                        buttonTitle: "Start Scan",
-                        action: { service.scan() }
-                    )
-                }
+                diskMapStartScreen
             } else {
                 GeometryReader { geo in
                     HStack(spacing: 0) {
@@ -1273,6 +1445,12 @@ struct DiskAnalyzerView: View {
                                                         .lineLimit(1)
                                                         .truncationMode(.tail)
                                                         .foregroundStyle(node.isDeletable ? Color.textPrimaryLight : Color.textTertiaryLight)
+                                                        .contentShape(Rectangle())
+                                                        .onTapGesture {
+                                                            if node.isDirectory, node.children != nil {
+                                                                withAnimation(.easeInOut(duration: 0.24)) { service.navigateTo(node: node) }
+                                                            }
+                                                        }
                                                     Text(relativePath(node.url))
                                                         .font(.system(size: 9, design: .monospaced))
                                                         .lineLimit(1)
@@ -1357,6 +1535,85 @@ struct DiskAnalyzerView: View {
                 }
             }
         }
+    }
+
+    private var diskMapStartScreen: some View {
+        GeometryReader { geo in
+            ZStack {
+                StorageScanHero(
+                    icon: "network",
+                    color: .indigo,
+                    title: "Disk Map Analysis",
+                    subtitle: "Run a bounded fast scan of your home folder. Results are labelled partial if a time or entry limit is reached.",
+                    isRunning: service.isScanning,
+                    action: {
+                        if service.isScanning { service.cancel() }
+                        else { service.scan() }
+                    }
+                )
+                .position(
+                    x: geo.size.width / 2,
+                    y: geo.size.height * 0.42 - 28
+                )
+
+                VStack {
+                    Spacer()
+                    if service.isScanning {
+                        diskMapProgressCard
+                            .transition(.opacity.combined(with: .move(edge: .bottom)))
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 32)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: service.isScanning)
+        .background(Color.white)
+    }
+
+    private var diskMapProgressCard: some View {
+        VStack(spacing: 12) {
+            Text("ANALYSIS IN PROGRESS")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Color.textSecondaryLight)
+                .textCase(.uppercase)
+                .tracking(0.5)
+
+            VStack(alignment: .leading, spacing: 12) {
+                ProgressView(value: service.scanProgress)
+                    .tint(.indigo)
+
+                HStack {
+                    Text("Building disk map...")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Color.textPrimaryLight)
+                    Spacer()
+                    Text("\(Int((service.scanProgress * 100).rounded()))%")
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundStyle(Color.textSecondaryLight)
+                }
+
+                HStack(spacing: 8) {
+                    Text(service.currentPath.isEmpty ? "Preparing…" : service.currentPath)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Spacer(minLength: 12)
+                    Text("\(service.scannedEntryCount) items")
+                        .lineLimit(1)
+                }
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(Color.textTertiaryLight)
+            }
+        }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 20)
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(Color.surfaceCardLight)
+                .shadow(color: Color.black.opacity(0.03), radius: 10, y: 4)
+        )
+        .frame(maxWidth: 500)
     }
 
     private var diskMapStatusText: String {
@@ -1561,115 +1818,70 @@ struct LargeFilesView: View {
     @State private var isDeleting = false
     @State private var showError = false
     @State private var errorMessage = ""
+    @State private var hasDeletedItems = false
     
     var body: some View {
         VStack(spacing: 0) {
-            // Toolbar
-            HStack(spacing: 8) {
-                Text(service.largeFiles.isEmpty ? "" : "\(service.largeFiles.count) files · ≥ 10 MB")
-                    .font(.system(size: 12)).foregroundStyle(Color.textTertiaryLight)
-                Spacer()
-                if !selectedFileIds.isEmpty {
-                    Button(action: deleteSelected) {
-                        HStack(spacing: 4) {
-                            if isDeleting {
-                                ProgressView()
-                                    .controlSize(.small)
-                                    .scaleEffect(0.55)
-                                    .frame(width: 12, height: 12)
-                            } else {
-                                Image(systemName: "trash")
-                                    .font(.system(size: 10, weight: .semibold))
-                                    .frame(width: 12, height: 12)
-                            }
-                            Text(isDeleting ? "Deleting" : "\(selectedFileIds.count)")
-                        }
-                        .font(.system(size: 11, weight: .semibold))
-                        .frame(height: 24)
-                        .padding(.horizontal, 9)
-                        .background(isDeleting ? Color.surfaceLight : Color.accentRed)
-                        .foregroundStyle(isDeleting ? Color.textSecondaryLight : .white)
-                        .clipShape(Capsule())
-                    }.buttonStyle(.plain).disabled(isDeleting)
-                } else if !service.largeFiles.isEmpty {
-                    Button(action: { service.scanLargeFiles() }) {
-                        Image(systemName: "arrow.clockwise").font(.system(size: 12))
-                    }.buttonStyle(.plain).foregroundStyle(Color.accentBlue)
-                }
-            }
-            .padding(.horizontal, 16)
-            .frame(height: 44)
-            .background(Color.surfaceCardLight)
-            
-            Rectangle().fill(Color.borderLight).frame(height: 1)
-            
             if service.largeFiles.isEmpty {
-                if service.isScanning {
-                    ScanningPlaceholder(icon: "doc.text.magnifyingglass", color: .accentAmber, message: "Scanning for large files\u{2026}")
-                } else {
-                    ToolSplashScreen(
-                        icon: "doc.text.magnifyingglass",
-                        color: .accentAmber,
-                        title: "Large Files Finder",
-                        subtitle: "Locate and remove the biggest files on your disk to free up space quickly.",
-                        buttonTitle: "Scan Now",
-                        action: { service.scanLargeFiles() }
-                    )
-                }
+                largeStartScreen
             } else {
-                HStack {
-                    let allSelected = !service.largeFiles.isEmpty && selectedFileIds.count == service.largeFiles.count
-                    Button(action: {
-                        if allSelected {
-                            selectedFileIds.removeAll()
-                        } else {
-                            selectedFileIds = Set(service.largeFiles.map { $0.id })
-                        }
-                    }) {
-                        Image(systemName: allSelected ? "checkmark.circle.fill" : "circle")
+                largeResultsView
+            }
+        }
+        .alert("Failed to Delete", isPresented: $showError) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(errorMessage)
+        }
+    }
+
+    private var largeResultsView: some View {
+        VStack(spacing: 0) {
+            HStack(alignment: .center) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Scan Complete")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(Color.textPrimary)
+                    Text("\(service.largeFiles.count) large files found")
+                        .font(.mono(11))
+                        .foregroundStyle(Color.textTertiary)
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 24)
+            .padding(.top, 20)
+            .padding(.bottom, 16)
+
+            // Select all row
+            HStack(spacing: 12) {
+                let allSelected = !service.largeFiles.isEmpty && selectedFileIds.count == service.largeFiles.count
+                Button(action: {
+                    if allSelected {
+                        selectedFileIds.removeAll()
+                    } else {
+                        selectedFileIds = Set(service.largeFiles.map { $0.id })
+                    }
+                }) {
+                    HStack(spacing: 12) {
+                        Image(systemName: allSelected ? "checkmark.square.fill" : "square")
                             .font(.system(size: 16))
                             .foregroundStyle(allSelected ? Color.accentBlue : Color.textTertiaryLight)
+                            .frame(width: 20)
+                        
+                        Text(allSelected ? "Deselect All" : "Select All")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(Color.textPrimaryLight)
                     }
-                    .buttonStyle(.plain)
-                    
-                    Text(allSelected ? "Deselect All" : "Select All")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(Color.textPrimaryLight)
-                    
-                    Spacer()
-                    
-                    let selectedSize = service.largeFiles.filter { selectedFileIds.contains($0.id) }.reduce(0) { $0 + $1.size }
-                    Text("\(selectedFileIds.count) selected (\(MemoryInfo.formatted(selectedSize)))")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(Color.textSecondaryLight)
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-                .background(Color.surfaceLight)
-
-                if service.largeFileScanWasLimited {
-                    HStack(spacing: 7) {
-                        Image(systemName: "gauge.with.dots.needle.67percent")
-                            .foregroundStyle(Color.accentAmber)
-                        Text("Partial result · \(service.largeFileScannedEntryCount.formatted()) entries checked")
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundStyle(Color.textSecondary)
-                        Spacer()
-                        if service.largeFileScanMode == .efficient {
-                            Button("Run Thorough Scan") {
-                                selectedFileIds.removeAll()
-                                service.scanLargeFiles(mode: .thorough)
-                            }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 7)
-                    .background(Color.accentAmber.opacity(0.08))
-                }
+                .buttonStyle(.plain)
                 
-                Rectangle().fill(Color.borderLight).frame(height: 1)
+                Spacer()
+            }
+            .padding(.leading, 35)
+            .padding(.trailing, 20)
+            .padding(.bottom, 8)
+
+            Divider()
                 
                 List {
                     ForEach(service.largeFiles) { file in
@@ -1681,7 +1893,7 @@ struct LargeFilesView: View {
                             }
                         }) {
                             HStack(spacing: 12) {
-                                Image(systemName: selectedFileIds.contains(file.id) ? "checkmark.circle.fill" : "circle")
+                                Image(systemName: selectedFileIds.contains(file.id) ? "checkmark.square.fill" : "square")
                                     .font(.system(size: 16))
                                     .foregroundStyle(selectedFileIds.contains(file.id) ? Color.accentBlue : Color.textTertiaryLight)
                                     .frame(width: 20)
@@ -1717,27 +1929,159 @@ struct LargeFilesView: View {
                                     .foregroundStyle(Color.textSecondaryLight)
                                     .frame(width: 70, alignment: .trailing)
                             }
+                            .padding(.horizontal, 20)
                             .padding(.vertical, 4)
                             .opacity(isDeleting ? 0.5 : 1.0)
                         }
                         .buttonStyle(.plain)
                         .disabled(isDeleting)
+                        .listRowInsets(EdgeInsets())
                     }
                 }
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
                 .background(Color.surfaceCardLight)
                 .background(Color.surfaceLight)
+
+                // Footer
+                VStack(spacing: 0) {
+                    Divider()
+                    HStack(spacing: 16) {
+                        HStack(spacing: 4) {
+                            if selectedFileIds.isEmpty {
+                                Text("Select files to delete")
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(Color.textTertiary)
+                            } else {
+                                let selectedSize = service.largeFiles.filter { selectedFileIds.contains($0.id) }.reduce(UInt64(0)) { $0 + $1.size }
+                                Text(MemoryInfo.formatted(selectedSize))
+                                    .font(.system(size: 15, weight: .semibold))
+                                    .foregroundStyle(Color.textPrimary)
+                                Text("· \(selectedFileIds.count) selected · will be moved to Trash")
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(Color.textTertiary)
+                            }
+                        }
+                        Spacer()
+                        HStack(spacing: 8) {
+                            Button(action: { service.resetForNavigation() }) {
+                                HStack(spacing: 4) {
+                                    Image(systemName: hasDeletedItems ? "checkmark" : "xmark").font(.system(size: 11))
+                                    Text(hasDeletedItems ? "Done" : "Cancel").font(.system(size: 12))
+                                }
+                                .foregroundStyle(Color.textTertiary)
+                                .padding(.horizontal, 10).padding(.vertical, 8)
+                                .background(Color.surfaceSecondary)
+                                .clipShape(RoundedRectangle(cornerRadius: 7))
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(isDeleting)
+
+                            Button(action: deleteSelected) {
+                                ZStack {
+                                    HStack(spacing: 8) {
+                                        ProgressView().controlSize(.small).tint(.white)
+                                        Text("Deleting…")
+                                    }
+                                    .opacity(isDeleting ? 1 : 0)
+
+                                    HStack(spacing: 8) {
+                                        Image(systemName: "trash.fill")
+                                        let selectedSize = service.largeFiles.filter { selectedFileIds.contains($0.id) }.reduce(UInt64(0)) { $0 + $1.size }
+                                        Text(selectedFileIds.isEmpty ? "Select files" : "Delete \(MemoryInfo.formatted(selectedSize))")
+                                    }
+                                    .opacity(isDeleting ? 0 : 1)
+                                }
+                                .font(.system(size: 13, weight: .semibold))
+                                .frame(width: 160, height: 34)
+                                .background(selectedFileIds.isEmpty ? Color.surfaceSecondary : Color.accentRed)
+                                .foregroundStyle(selectedFileIds.isEmpty ? Color.textTertiary : .white)
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(isDeleting || selectedFileIds.isEmpty)
+                        }
+                    }
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 16)
+                }
+                .background(Color.surfaceSecondary.opacity(0.5))
             }
-        }
         .background(Color.surfaceLight)
-        .alert("Failed to Delete", isPresented: $showError) {
-            Button("OK", role: .cancel) { }
-        } message: {
-            Text(errorMessage)
-        }
     }
     
+    // MARK: - Idle & Scanning Screen
+    private var largeStartScreen: some View {
+        GeometryReader { geo in
+            ZStack {
+                StorageScanHero(
+                    icon: "doc.text.magnifyingglass",
+                    color: .accentAmber,
+                    title: "Large Files Finder",
+                    subtitle: "Locate and remove the biggest files on your disk to free up space quickly.",
+                    isRunning: service.isScanning,
+                    action: {
+                        if service.isScanning { service.cancel() }
+                        else { service.scanLargeFiles() }
+                    }
+                )
+                .position(x: geo.size.width / 2, y: geo.size.height * 0.42)
+
+                VStack {
+                    Spacer()
+                    if service.isScanning {
+                        largeProgressCard
+                            .transition(.opacity.combined(with: .move(edge: .bottom)))
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 32)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: service.isScanning)
+        .background(Color.white)
+    }
+
+    private var largeProgressCard: some View {
+        VStack(spacing: 12) {
+            Text("ANALYSIS IN PROGRESS")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Color.textSecondaryLight)
+                .textCase(.uppercase)
+                .tracking(0.5)
+
+            VStack(alignment: .leading, spacing: 12) {
+                ProgressView(value: service.scanProgress)
+                    .tint(.accentAmber)
+
+                HStack {
+                    Text("Searching for large files...")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Color.textPrimaryLight)
+                    Spacer()
+                    Text("\(Int(service.scanProgress * 100))%")
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundStyle(Color.textSecondaryLight)
+                }
+
+                Text(service.currentPath.isEmpty ? "Preparing…" : service.currentPath)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(Color.textTertiaryLight)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+        }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 20)
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(Color.surfaceCardLight)
+                .shadow(color: Color.black.opacity(0.03), radius: 10, y: 4)
+        )
+        .frame(maxWidth: 500)
+    }
+
     private func deleteSelected() {
         let filesToDelete = service.largeFiles.filter { selectedFileIds.contains($0.id) }
         guard !filesToDelete.isEmpty else { return }
@@ -1768,6 +2112,10 @@ struct LargeFilesView: View {
                 isDeleting = false
                 operationActive = false
                 
+                if !successfullyDeleted.isEmpty {
+                    hasDeletedItems = true
+                }
+                
                 if !errors.isEmpty {
                     self.errorMessage = errors.joined(separator: "\n")
                     self.showError = true
@@ -1797,29 +2145,7 @@ private enum _CVJunkType: CaseIterable, Hashable {
     var color: Color { .gray }
 }
 
-// MARK: - Animated progress bar for scanning
-private struct JunkScanProgressBar: View {
-    let color: Color
-    @State private var phase: CGFloat = 0
 
-    var body: some View {
-        GeometryReader { geo in
-            let w = geo.size.width
-            let barW = w * 0.38
-            RoundedRectangle(cornerRadius: 3)
-                .fill(color)
-                .frame(width: barW, height: 4)
-                .offset(x: -barW + phase * (w + barW))
-                .onAppear {
-                    withAnimation(.linear(duration: 1.3).repeatForever(autoreverses: false)) {
-                        phase = 1.0
-                    }
-                }
-        }
-        .frame(height: 4)
-        .clipped()
-    }
-}
 
 // MARK: - Junk Files View
 
@@ -1831,12 +2157,14 @@ struct JunkFilesView: View {
     @State private var showError = false
     @State private var errorMessage = ""
     @State private var cleanupNotice: String?
+    @State private var hasDeletedItems = false
+    private let junkAccent = Color(red: 0.42, green: 0.40, blue: 0.56)
 
     private var selectedSize: UInt64 {
-        service.junkCategories.filter { selectedTypes.contains($0.type) }.reduce(0) { $0 + $1.size }
+        service.junkCategories.filter { selectedTypes.contains($0.type) }.reduce(UInt64(0)) { $0 + $1.size }
     }
     private var totalSize: UInt64 {
-        service.junkCategories.reduce(0) { $0 + $1.size }
+        service.junkCategories.reduce(UInt64(0)) { $0 + $1.size }
     }
     private var allSelected: Bool {
         let safeTypes = Set(service.junkCategories.filter(\.isSelectedByDefault).map { $0.type })
@@ -1846,18 +2174,7 @@ struct JunkFilesView: View {
     var body: some View {
         VStack(spacing: 0) {
             if service.junkCategories.isEmpty {
-                if service.isScanningJunk {
-                    junkScanningView
-                } else {
-                    ToolSplashScreen(
-                        icon: "archivebox.fill",
-                        color: .purple,
-                        title: "Junk Files Cleaner",
-                        subtitle: "Find and remove user-space caches, logs, and temporary files to keep your Mac running smoothly.",
-                        buttonTitle: "Start Scan",
-                        action: { service.scanJunk() }
-                    )
-                }
+                junkStartScreen
             } else {
                 junkResultsView
             }
@@ -1869,70 +2186,76 @@ struct JunkFilesView: View {
         }
     }
 
-    // MARK: - Scanning Screen
-    private var junkScanningView: some View {
-        VStack(spacing: 0) {
-            Spacer()
-            // Icon
+    // MARK: - Idle & Scanning Screen
+    private var junkStartScreen: some View {
+        GeometryReader { geo in
             ZStack {
-                Circle()
-                    .fill(Color.purple.opacity(0.12))
-                    .frame(width: 96, height: 96)
-                Circle()
-                    .fill(Color.purple.opacity(0.07))
-                    .frame(width: 130, height: 130)
-                Image(systemName: "archivebox.fill")
-                    .font(.system(size: 40, weight: .semibold))
-                    .foregroundStyle(Color.purple)
-            }
-            .padding(.bottom, 28)
+                StorageScanHero(
+                    icon: "archivebox.fill",
+                    color: junkAccent,
+                    title: "Junk Files Cleaner",
+                    subtitle: "Find and remove user-space caches, logs, and temporary files to keep your Mac running smoothly.",
+                    isRunning: service.isScanningJunk,
+                    action: {
+                        if service.isScanningJunk { service.cancel() }
+                        else { service.scanJunk() }
+                    }
+                )
+                .position(x: geo.size.width / 2, y: geo.size.height * 0.42)
 
-            Text("Scanning for Junk Files")
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(Color.textPrimary)
-                .padding(.bottom, 8)
-
-            Text("Checking caches, logs, developer files and downloads…")
-                .font(.system(size: 13))
-                .foregroundStyle(Color.textTertiary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 48)
-                .padding(.bottom, 32)
-
-            // Animated progress bar
-            ZStack(alignment: .leading) {
-                RoundedRectangle(cornerRadius: 3)
-                    .fill(Color.white.opacity(0.06))
-                    .frame(height: 4)
-                JunkScanProgressBar(color: .purple)
-            }
-            .frame(height: 4)
-            .padding(.horizontal, 64)
-            .padding(.bottom, 16)
-
-            Text(service.junkScanMode == .efficient
-                 ? "Utility-priority scan · up to 8 seconds or 100,000 entries"
-                 : "Thorough utility-priority scan · up to 45 seconds or 500,000 entries")
-                .font(.system(size: 11))
-                .foregroundStyle(Color.textTertiary.opacity(0.6))
-
-            Spacer()
-
-            // Bottom scan area — shows what's being scanned
-            VStack(spacing: 12) {
-                Divider()
-                HStack(spacing: 8) {
-                    ProgressView().scaleEffect(0.7).tint(Color.purple)
-                    Text("Analyzing…")
-                        .font(.mono(11))
-                        .foregroundStyle(Color.textTertiary)
+                VStack {
                     Spacer()
+                    if service.isScanningJunk {
+                        junkProgressCard
+                            .transition(.opacity.combined(with: .move(edge: .bottom)))
+                    }
                 }
-                .padding(.horizontal, 24)
-                .padding(.vertical, 12)
+                .padding(.horizontal, 20)
+                .padding(.bottom, 32)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: service.isScanningJunk)
+        .background(Color.white)
+    }
+
+    private var junkProgressCard: some View {
+        VStack(spacing: 12) {
+            Text("ANALYSIS IN PROGRESS")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Color.textSecondaryLight)
+                .textCase(.uppercase)
+                .tracking(0.5)
+
+            VStack(alignment: .leading, spacing: 12) {
+                ProgressView(value: service.scanProgress)
+                    .tint(junkAccent)
+
+                HStack {
+                    Text("Checking caches, logs, developer files...")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Color.textPrimaryLight)
+                    Spacer()
+                    Text("\(Int(service.scanProgress * 100))%")
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundStyle(Color.textSecondaryLight)
+                }
+
+                Text(service.currentPath.isEmpty ? "Preparing…" : service.currentPath)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(Color.textTertiaryLight)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+        }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 20)
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(Color.surfaceCardLight)
+                .shadow(color: Color.black.opacity(0.03), radius: 10, y: 4)
+        )
+        .frame(maxWidth: 500)
     }
 
     // MARK: - Results Screen
@@ -1949,62 +2272,10 @@ struct JunkFilesView: View {
                         .foregroundStyle(Color.textTertiary)
                 }
                 Spacer()
-                Text(MemoryInfo.formatted(totalSize))
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(Color.textSecondary)
             }
             .padding(.horizontal, 24)
             .padding(.top, 20)
             .padding(.bottom, 16)
-
-            if service.junkScanWasLimited {
-                HStack(spacing: 7) {
-                    Image(systemName: "gauge.with.dots.needle.67percent")
-                        .foregroundStyle(Color.accentAmber)
-                    Text("Partial low-load result · \(service.junkScannedEntryCount.formatted()) entries checked. Listed sizes are valid; additional junk may exist.")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(Color.textSecondary)
-                    Spacer()
-                    if service.junkScanMode == .efficient {
-                        Button("Run Thorough Scan") {
-                            service.scanJunk(mode: .thorough)
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                    }
-                }
-                .padding(9)
-                .background(Color.accentAmber.opacity(0.08))
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-                .padding(.horizontal, 24)
-                .padding(.bottom, 10)
-            }
-
-            // Select all / Rescan row
-            HStack {
-                Button(action: {
-                    withAnimation(.easeInOut(duration: 0.15)) {
-                        if allSelected { selectedTypes.removeAll() }
-                        else { selectedTypes = Set(service.junkCategories.filter(\.isSelectedByDefault).map { $0.type }) }
-                    }
-                }) {
-                    HStack(spacing: 6) {
-                        Image(systemName: allSelected ? "checkmark.square.fill" : "square")
-                            .font(.system(size: 13))
-                            .foregroundStyle(allSelected ? Color.accent : Color.textTertiary)
-	                        Text(allSelected ? "Deselect All" : "Select Safe")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(Color.textSecondary)
-                    }
-                    .padding(.horizontal, 10).padding(.vertical, 6)
-                    .background(Color.surfaceSecondary)
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
-                }
-                .buttonStyle(.plain)
-                Spacer()
-            }
-            .padding(.horizontal, 24)
-            .padding(.bottom, 12)
 
             Divider()
 
@@ -2027,6 +2298,10 @@ struct JunkFilesView: View {
                                         RoundedRectangle(cornerRadius: 4)
                                             .fill(isSelected ? Color.accent : Color.surfaceSecondary)
                                             .frame(width: 18, height: 18)
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: 4)
+                                                    .strokeBorder(isSelected ? Color.clear : Color.borderSubtle, lineWidth: 1)
+                                            )
                                         if isSelected {
                                             Image(systemName: "checkmark")
                                                 .font(.system(size: 10, weight: .bold))
@@ -2132,20 +2407,44 @@ struct JunkFilesView: View {
                             Text(MemoryInfo.formatted(selectedSize))
                                 .font(.system(size: 15, weight: .semibold))
                                 .foregroundStyle(Color.textPrimary)
-                            Text("will be moved to Trash")
+                            Text("· \(selectedTypes.count) selected · will be moved to Trash")
                                 .font(.system(size: 13))
                                 .foregroundStyle(Color.textTertiary)
                         }
                     }
                     Spacer()
                     HStack(spacing: 8) {
-                        Button(action: { service.scanJunk() }) {
+                        Button(action: { service.resetForNavigation() }) {
                             HStack(spacing: 4) {
-                                Image(systemName: "arrow.clockwise").font(.system(size: 11))
-                                Text("Rescan").font(.system(size: 12))
+                                Image(systemName: hasDeletedItems ? "checkmark" : "xmark").font(.system(size: 11))
+                                Text(hasDeletedItems ? "Done" : "Cancel").font(.system(size: 12))
                             }
                             .foregroundStyle(Color.textTertiary)
                             .padding(.horizontal, 10).padding(.vertical, 8)
+                            .background(Color.surfaceSecondary)
+                            .clipShape(RoundedRectangle(cornerRadius: 7))
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(isDeleting)
+
+                        Button(action: {
+                            withAnimation(.easeInOut(duration: 0.15)) {
+                                if allSelected {
+                                    selectedTypes.removeAll()
+                                } else {
+                                    selectedTypes = Set(service.junkCategories.filter(\.isSelectedByDefault).map { $0.type })
+                                }
+                            }
+                        }) {
+                            HStack(spacing: 6) {
+                                Image(systemName: allSelected ? "checkmark.square.fill" : "square")
+                                    .font(.system(size: 11))
+                                Text(allSelected ? "Deselect Safe" : "Select Safe")
+                            }
+                            .font(.system(size: 12))
+                            .foregroundStyle(Color.textTertiary)
+                            .padding(.horizontal, 10)
+                            .frame(height: 32)
                             .background(Color.surfaceSecondary)
                             .clipShape(RoundedRectangle(cornerRadius: 7))
                         }
@@ -2215,6 +2514,9 @@ struct JunkFilesView: View {
 
         dispatchGroup.notify(queue: .main) {
             withAnimation {
+                if !successfullyDeletedTypes.isEmpty {
+                    hasDeletedItems = true
+                }
                 service.junkCategories.removeAll { successfullyDeletedTypes.contains($0.type) }
                 selectedTypes.subtract(successfullyDeletedTypes)
                 isDeleting = false

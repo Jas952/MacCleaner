@@ -42,14 +42,19 @@ struct ProcessesView: View {
                     (processAttributions[node.id]?.searchText.localizedCaseInsensitiveContains(searchText) == true)
             }
         let visible = showAgents ? base : base.filter { processAttributions[$0.id]?.isAgent != true }
+        let grouped = ProcessAggregator.aggregate(visible)
         switch sortBy {
-        case .cpu:    return visible.sorted { $0.cpuUsage > $1.cpuUsage }
-        case .memory: return visible.sorted { $0.memoryBytes > $1.memoryBytes }
-        case .name:   return visible.sorted { $0.name < $1.name }
+        case .cpu:    return grouped.sorted { $0.cpuUsage > $1.cpuUsage }
+        case .memory: return grouped.sorted { $0.memoryBytes > $1.memoryBytes }
+        case .name:   return grouped.sorted { $0.name < $1.name }
         }
     }
 
     var body: some View {
+        let visibleProcesses = filtered
+        let visibleProcessCount = visibleProcesses.count
+        let maxMemory = allNodes.max(by: { $0.memoryBytes < $1.memoryBytes })?.memoryBytes ?? 1
+
         VStack(spacing: 0) {
             // Header
             HStack(spacing: 10) {
@@ -57,7 +62,7 @@ struct ProcessesView: View {
                     Text("Processes")
                         .font(.system(size: 22, weight: .semibold))
                         .foregroundStyle(Color.textPrimaryLight)
-                    Text(summaryText)
+                    Text(summaryText(groupCount: visibleProcessCount))
                         .font(.system(size: 10))
                         .foregroundStyle(Color.textTertiaryLight)
                 }
@@ -232,17 +237,16 @@ struct ProcessesView: View {
 
             ScrollView(showsIndicators: false) {
                 LazyVStack(spacing: 0) {
-                    let maxMemory = allNodes.max(by: { $0.memoryBytes < $1.memoryBytes })?.memoryBytes ?? 1
-                    ForEach(Array(filtered.enumerated()), id: \.element.id) { idx, proc in
+                    ForEach(Array(visibleProcesses.enumerated()), id: \.element.id) { idx, proc in
                         ProcessRow(
                             proc: proc,
                             maxMem: maxMemory,
                             selectedTab: selectedTab,
-                            attribution: processAttributions[proc.id],
+                            attribution: attribution(for: proc),
                             onKill: { killTarget = proc },
                             onTap: { detailProcess = proc }
                         )
-                        if idx < filtered.count - 1 {
+                        if idx < visibleProcessCount - 1 {
                             Rectangle().fill(Color.borderLight.opacity(0.5)).frame(height: 1)
                                 .padding(.leading, 24)
                         }
@@ -302,14 +306,18 @@ struct ProcessesView: View {
             presenting: killTarget
         ) { proc in
             if !ProcessTreeService.isProtected(proc) {
-                Button("Quit \"\(proc.name)\"", role: .destructive) {
+                Button(proc.instanceCount > 1 ? "Quit All \(proc.instanceCount) Processes" : "Quit \"\(proc.name)\"", role: .destructive) {
                     killTarget = nil
                     Task.detached(priority: .utility) {
-                        let result = ProcessTreeService.killProcess(proc)
+                        let result = proc.instanceCount > 1
+                            ? ProcessTreeService.killProcessGroup(proc)
+                            : ProcessTreeService.killProcess(proc)
                         await MainActor.run {
                             switch result {
                             case .success:
-                                killFeedback = "\(proc.name) terminated"
+                                killFeedback = proc.instanceCount > 1
+                                    ? "\(proc.instanceCount) \(proc.name) processes terminated"
+                                    : "\(proc.name) terminated"
                                 feedbackIsError = false
                                 DispatchQueue.main.asyncAfter(deadline: .now() + 2) { killFeedback = nil }
                                 DispatchQueue.main.asyncAfter(deadline: .now() + 1) { monitor.refresh(forceProcesses: true) }
@@ -330,18 +338,19 @@ struct ProcessesView: View {
         } message: { proc in
             if ProcessTreeService.isProtected(proc) {
                 Text("\"\(proc.name)\" is a protected macOS system process and cannot be quit.")
+            } else if proc.instanceCount > 1 {
+                Text("This will quit all \(proc.instanceCount) processes in the \"\(proc.name)\" group. Unsaved data may be lost. Continue?")
             } else {
                 Text("Quitting \"\(proc.name)\" (PID \(proc.id)) may cause data loss. Continue?")
             }
         }
     }
 
-    private var summaryText: String {
+    private func summaryText(groupCount: Int) -> String {
         let agentCount = allNodes.filter { processAttributions[$0.id]?.isAgent == true }.count
-        let indexCount = allNodes.filter { processAttributions[$0.id]?.isIndex == true }.count
         return showAgents
-            ? "\(filtered.count) shown · \(agentCount) agent processes · \(indexCount) index processes"
-            : "\(filtered.count) shown · \(agentCount) agent processes hidden · \(indexCount) index processes"
+            ? "\(groupCount) groups · \(allNodes.count) processes · \(agentCount) agent processes"
+            : "\(groupCount) groups · \(allNodes.count) processes · \(agentCount) agent processes hidden"
     }
 
     private func rebuildAttributions(debounce: TimeInterval = 0) {
@@ -356,7 +365,11 @@ struct ProcessesView: View {
 
             let snapshot = AIWorkloadService.snapshot(from: processes, memory: memory)
             let stores = AIIndexStoreService.stores(from: processes)
-            let map = ProcessAttribution.build(agents: snapshot.agents, indexes: stores)
+            let map = ProcessAttribution.build(
+                agents: snapshot.agents,
+                indexes: stores,
+                processes: snapshot.allProcesses
+            )
             if Task.isCancelled { return }
 
             await MainActor.run {
@@ -364,20 +377,41 @@ struct ProcessesView: View {
             }
         }
     }
+
+    private func attribution(for process: ProcessNode) -> ProcessAttribution? {
+        let members = process.groupedInstances.isEmpty ? [process] : process.groupedInstances
+        var merged = ProcessAttribution()
+        for member in members {
+            guard let value = processAttributions[member.id] else { continue }
+            merged.agents.append(contentsOf: value.agents.filter { !merged.agents.contains($0) })
+            merged.mcpTools.append(contentsOf: value.mcpTools.filter { !merged.mcpTools.contains($0) })
+            merged.indexes.append(contentsOf: value.indexes.filter { !merged.indexes.contains($0) })
+        }
+        return merged.isAgent || merged.isIndex ? merged : nil
+    }
 }
 
 struct ProcessAttribution {
     var agents: [String] = []
     var indexes: [String] = []
+    var mcpTools: [String] = []
 
-    var isAgent: Bool { !agents.isEmpty }
+    var isAgent: Bool { !agents.isEmpty || !mcpTools.isEmpty }
     var isIndex: Bool { !indexes.isEmpty }
 
     var searchText: String {
-        (agents.map { "agent \($0)" } + indexes.map { "index \($0)" }).joined(separator: " ")
+        (
+            agents.map { "agent \($0)" }
+                + mcpTools.map { "mcp \($0)" }
+                + indexes.map { "index \($0)" }
+        ).joined(separator: " ")
     }
 
-    static func build(agents: [AIAgentProfile], indexes: [AIIndexStore]) -> [Int32: ProcessAttribution] {
+    static func build(
+        agents: [AIAgentProfile],
+        indexes: [AIIndexStore],
+        processes: [AIWorkloadProcess]
+    ) -> [Int32: ProcessAttribution] {
         var result: [Int32: ProcessAttribution] = [:]
 
         for agent in agents {
@@ -401,6 +435,16 @@ struct ProcessAttribution {
                 }
                 result[process.id] = attribution
             }
+        }
+
+        for process in processes {
+            let evidence = "\(process.name) \(process.commandLine) \(process.reason)".lowercased()
+            let isMCP = evidence.contains("mcp") || evidence.contains("modelcontextprotocol")
+            guard isMCP, result[process.id]?.agents.isEmpty != false else { continue }
+
+            var attribution = result[process.id] ?? ProcessAttribution()
+            attribution.mcpTools = ["Shared"]
+            result[process.id] = attribution
         }
 
         return result
@@ -460,13 +504,20 @@ struct ProcessRow: View {
             HStack(spacing: 6) {
                 ProcessIconView(commandLine: proc.commandLine, size: 18)
 
-                Text(proc.name)
+                Text(proc.instanceCount > 1 ? "\(proc.name) ×\(proc.instanceCount)" : proc.name)
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(Color.textPrimaryLight)
                     .lineLimit(1)
                 if let attribution {
-                    ForEach(attribution.agents, id: \.self) { agent in
-                        ProcessAttributionBadge(title: agent, prefix: "Agent", color: Color.accentAmber)
+                    if !attribution.agents.isEmpty {
+                        ProcessAttributionBadge(
+                            title: attribution.agents.joined(separator: " + "),
+                            prefix: attribution.agents.count > 1 ? "Agents" : "Agent",
+                            color: Color.accentAmber
+                        )
+                    }
+                    ForEach(attribution.mcpTools, id: \.self) { tool in
+                        ProcessAttributionBadge(title: tool, prefix: "MCP", color: Color.accentPurple)
                     }
                     ForEach(attribution.indexes, id: \.self) { index in
                         ProcessAttributionBadge(title: index, prefix: "Index", color: Color.accentBlue)
@@ -480,7 +531,7 @@ struct ProcessRow: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            Text(String(proc.id))
+            Text(proc.instanceCount > 1 ? "group" : String(proc.id))
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(Color.textTertiaryLight)
                 .lineLimit(1)
@@ -557,6 +608,7 @@ struct ProcessRow: View {
                 ))
             }
             .buttonStyle(.plain)
+            .help(proc.instanceCount > 1 ? "Quit all \(proc.instanceCount) processes in this group" : "Quit process")
             .onHover { hovered = $0 }
             .frame(width: 74, alignment: .trailing)
         }

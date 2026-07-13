@@ -62,23 +62,23 @@ struct CloudReclaimView: View {
             Spacer()
 
             if !service.items.isEmpty {
-                Picker("Sort", selection: $sortOrder) {
-                    ForEach(CloudReclaimSortOrder.allCases, id: \.self) { order in
-                        Text(order.rawValue).tag(order)
-                    }
-                }
-                .pickerStyle(.segmented)
+                AppSegmentedControl(
+                    selection: $sortOrder,
+                    options: CloudReclaimSortOrder.allCases,
+                    accentColor: .accentBlue,
+                    title: \.rawValue
+                )
                 .frame(width: 215)
             }
 
             if service.isScanning {
                 Button("Cancel", action: service.cancelScan)
-                    .buttonStyle(.bordered)
+                    .buttonStyle(AppSecondaryButtonStyle())
             } else {
                 Button(action: { service.scan() }) {
                     Label(service.lastScanDuration == nil ? "Scan" : "Rescan", systemImage: "icloud.and.arrow.down")
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(AppPrimaryButtonStyle(color: .accentBlue))
                 .keyboardShortcut("i", modifiers: [.command, .shift])
                 .disabled(!service.isAvailable || service.isEvicting)
             }
@@ -121,7 +121,7 @@ struct CloudReclaimView: View {
                     color: .accentBlue,
                     title: emptyTitle,
                     subtitle: emptySubtitle,
-                    actionTitle: "Scan local iCloud copies",
+                    actionTitle: "Scan",
                     actionIcon: "icloud.and.arrow.down",
                     footer: service.resultMessage,
                     action: { service.scan() }
@@ -231,11 +231,6 @@ struct CloudReclaimView: View {
                     .foregroundStyle(Color.textSecondary)
             }
             Spacer()
-            if service.scanWasLimited, service.scanMode == .efficient, !service.isScanning {
-                Button("Run Thorough Scan") { service.scan(mode: .thorough) }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-            }
         }
         .padding(11)
         .background(Color.accentGreen.opacity(0.07))
@@ -247,7 +242,7 @@ struct CloudReclaimView: View {
     private var actionBar: some View {
         HStack(spacing: 12) {
             Button("Select inactive 90+ days") { service.selectInactive() }
-                .buttonStyle(.bordered)
+                .buttonStyle(AppSecondaryButtonStyle())
                 .disabled(service.isEvicting)
             if !service.selectedIDs.isEmpty {
                 Button("Clear", action: service.clearSelection)
@@ -265,7 +260,7 @@ struct CloudReclaimView: View {
             }
             if service.isEvicting { ProgressView().controlSize(.small) }
             Button("Free Local Space") { showEvictionConfirmation = true }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(AppPrimaryButtonStyle(color: .accentBlue))
                 .disabled(service.selectedIDs.isEmpty || service.isEvicting)
         }
         .padding(.horizontal, 20)
@@ -294,11 +289,6 @@ struct CloudReclaimView: View {
         var details = ["Only current, fully uploaded files without conflicts are eligible. State is checked again immediately before eviction."]
         if service.skippedUnverified > 0 {
             details.append("\(service.skippedUnverified) iCloud item\(service.skippedUnverified == 1 ? " was" : "s were") excluded because safety could not be proven.")
-        }
-        if service.scanWasLimited {
-            details.append(service.scanMode == .efficient
-                ? "The efficient scan hit its 8-second or 200,000-file limit; shown items remain valid."
-                : "The thorough scan hit its 60-second or 1,000,000-file limit; shown items remain valid.")
         }
         if let message = service.resultMessage { details.append(message) }
         return details.joined(separator: " ")

@@ -184,6 +184,22 @@ final class CleanerViewState: ObservableObject {
     @Published var optimizationRAMSources: [RAMSource] = []
 
     @Published var mode: CleanerMode = .optimization
+
+    func resetForNavigation() {
+        guard !isScanning, !isCleaning, !optimizationRunning, !refreshRunning, !isShredding else { return }
+        scanItems = []; diskScanWasLimited = false; diskScannedEntryCount = 0
+        hasScan = false; scanPhase = .ready; scanProgress = 0
+        resultFreed = nil; resultErrors = 0; showResult = false
+        ramAnalysis = nil; ramSources = []; ramAnalyzeProgress = 0; ramFreedBytes = 0
+        dnsFlow = .idle; dnsSuccess = false; dnsMessage = ""
+        shredderFiles = []; shredderDone = false; shredderCount = 0
+        refreshTasks = []; refreshDone = false; refreshCurrent = 0; refreshTotal = 0
+        expandedCategories = []; optimizationLogs = []; optimizationPhase = .ready
+        optimizationFoundRAM = 0; optimizationFreedRAM = 0
+        optimizationFoundDisk = 0; optimizationFreedDisk = 0
+        optimizationRefreshTaskCount = 0; optimizationRefreshDoneCount = 0
+        optimizationDNSSuccess = false; optimizationRAMSources = []
+    }
 }
 
 struct CleanerView: View {
@@ -229,7 +245,7 @@ struct CleanerView: View {
                         .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Color.borderLight))
                     }
                     .buttonStyle(.plain)
-                    .transition(.opacity.combined(with: .move(edge: .leading)))
+                    .transition(.opacity)
 
                     Spacer()
 
@@ -278,24 +294,15 @@ struct CleanerView: View {
             Group {
                 if state.mode == .optimization {
                     optimizationView
-                        .transition(.asymmetric(
-                            insertion: .scale(scale: 0.95, anchor: .leading).combined(with: .move(edge: .leading)).combined(with: .opacity),
-                            removal:   .scale(scale: 0.95, anchor: .trailing).combined(with: .move(edge: .trailing)).combined(with: .opacity)
-                        ))
+                        .transition(.opacity)
                 } else if let tool = activeTool {
                     // ── Active tool panel ──────────────────────────────
                     toolPanel(for: tool)
-                        .transition(.asymmetric(
-                            insertion: .scale(scale: 0.95, anchor: .trailing).combined(with: .move(edge: .trailing)).combined(with: .opacity),
-                            removal:   .scale(scale: 0.95, anchor: .leading).combined(with: .move(edge: .leading)).combined(with: .opacity)
-                        ))
+                        .transition(.opacity)
                 } else {
                     // ── Tool picker grid ───────────────────────────────
                     toolGrid
-                        .transition(.asymmetric(
-                            insertion: .scale(scale: 0.95, anchor: .leading).combined(with: .move(edge: .leading)).combined(with: .opacity),
-                            removal:   .scale(scale: 0.95, anchor: .trailing).combined(with: .move(edge: .trailing)).combined(with: .opacity)
-                        ))
+                        .transition(.opacity)
                 }
             }
             .animation(.spring(response: 0.4, dampingFraction: 0.8, blendDuration: 0.05), value: state.mode)
@@ -378,9 +385,9 @@ struct CleanerView: View {
                 // Circle centered within the detail pane
                 VStack(spacing: 20) {
                     mainActionCircle
-                        .frame(width: 220, height: 220)
+                        .frame(width: 236, height: 236)
                 }
-                .position(x: geo.size.width / 2, y: geo.size.height / 2)
+                .position(x: geo.size.width / 2 - 10, y: geo.size.height * 0.39)
 
                 // Bottom panel aligned with the circle
                 VStack {
@@ -399,15 +406,59 @@ struct CleanerView: View {
             case .scanning:
                 optimizationLogList
                     .frame(width: 600, height: 120)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .transition(.opacity)
             case .review, .cleaning, .success:
                 optimizationSummaryPanel
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .transition(.opacity)
             case .ready:
-                EmptyView()
+                optimizationReadyPanel
+                    .transition(.opacity)
             }
         }
         .animation(.spring(response: 0.45, dampingFraction: 0.8), value: state.optimizationPhase)
+    }
+
+    private var optimizationReadyPanel: some View {
+        HStack(spacing: 10) {
+            optimizationReadyItem(
+                icon: "internaldrive",
+                color: .accentBlue,
+                title: "Disk cleanup",
+                detail: "Caches, logs, browser data and safe user-space leftovers"
+            )
+            optimizationReadyItem(
+                icon: "memorychip",
+                color: .accentPurple,
+                title: "Memory review",
+                detail: "Memory pressure and applications you can choose to close"
+            )
+            optimizationReadyItem(
+                icon: "gearshape.2",
+                color: .accentGreen,
+                title: "System & DNS",
+                detail: "Maintenance tasks, stale DNS records and system state"
+            )
+        }
+        .frame(width: 700)
+        .padding(12)
+        .background(Color.surfaceCardLight)
+        .overlay(Rectangle().strokeBorder(Color.borderLight))
+    }
+
+    private func optimizationReadyItem(icon: String, color: Color, title: String, detail: String) -> some View {
+        HStack(alignment: .top, spacing: 9) {
+            Image(systemName: icon)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(color)
+                .frame(width: 30, height: 30)
+                .background(color.opacity(0.10))
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(.system(size: 11, weight: .semibold)).foregroundStyle(Color.textPrimaryLight)
+                Text(detail).font(.system(size: 9)).foregroundStyle(Color.textTertiaryLight)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
     private var mainActionCircle: some View {
@@ -564,13 +615,13 @@ struct CleanerView: View {
                 .foregroundStyle(Color.textPrimaryLight)
                 .lineLimit(1)
                 .contentTransition(.numericText())
-            if !sublabel.isEmpty {
-                Text(sublabel)
-                    .font(.system(size: 9, weight: .medium))
-                    .foregroundStyle(color.opacity(0.8))
-            }
+            Text(sublabel.isEmpty ? " " : sublabel)
+                .font(.system(size: 9, weight: .medium))
+                .foregroundStyle(color.opacity(sublabel.isEmpty ? 0 : 0.8))
+                .frame(height: 11)
         }
         .frame(width: 80)
+        .frame(minHeight: 62, alignment: .top)
     }
 
     private var optimizationLogList: some View {
@@ -1164,8 +1215,8 @@ struct CleanerView: View {
                         .contentTransition(.opacity)
                     Divider().opacity(0.4)
                     right()
-                        .frame(width: 208, alignment: .top)
-                        .padding(.top, 20)
+                        .frame(width: 236, alignment: .top)
+                        .padding(.top, 16)
                         .padding(.bottom, 16)
                         .contentTransition(.opacity)
                 }
@@ -1738,21 +1789,6 @@ struct CleanerView: View {
                                 .background(Color.surfaceCardLight).clipShape(RoundedRectangle(cornerRadius: 5))
                         }.buttonStyle(.plain)
                     }
-                }
-                if state.diskScanWasLimited {
-                    HStack(spacing: 5) {
-                        Image(systemName: "leaf.fill")
-                        Text("Low-load partial scan · \(state.diskScannedEntryCount) entries checked")
-                        Spacer()
-                        if state.diskScanMode == .efficient {
-                            Button("Run Thorough Scan") { startScan(mode: .thorough) }
-                                .buttonStyle(.bordered)
-                                .controlSize(.small)
-                        }
-                    }
-                    .font(.system(size: 9, design: .monospaced))
-                    .foregroundStyle(.accentAmber)
-                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: 4) {
@@ -3199,7 +3235,7 @@ struct GaugeRing<Center: View>: View {
     var color: Color
     var spinning: Bool = false
     var cleaning: Bool = false
-    var size: CGFloat = 148
+    var size: CGFloat = 164
     var lineWidth: CGFloat = 11
     var glow: Bool = true
     @ViewBuilder var center: () -> Center
@@ -3292,6 +3328,7 @@ struct GaugeRing<Center: View>: View {
                 .animation(isVisible ? .easeInOut(duration: 0.6).repeatForever(autoreverses: true) : .default, value: spinning)
         }
         .frame(width: size, height: size)
+        .offset(x: -8)
         .onAppear {
             isVisible = true
             pulse = true
@@ -3309,11 +3346,13 @@ struct GaugeRing<Center: View>: View {
 struct ToolInfoButton<Content: View>: View {
     let title: String
     @ViewBuilder var content: () -> Content
-    @State private var show = false
     @State private var isHovered = false
+    @EnvironmentObject private var modalCoordinator: AppModalCoordinator
 
     var body: some View {
-        Button { show.toggle() } label: {
+        Button {
+            modalCoordinator.present(title: title, subtitle: "Tool details") { content() }
+        } label: {
             HStack(spacing: 4) {
                 Image(systemName: "info.circle")
                     .font(.system(size: 11))
@@ -3321,11 +3360,11 @@ struct ToolInfoButton<Content: View>: View {
                     .animation(.spring(response: 0.25, dampingFraction: 0.6), value: isHovered)
                 Text("Details").font(.system(size: 11, weight: .medium))
             }
-            .foregroundStyle(show ? Color.accent : (isHovered ? Color.textSecondary : Color.textTertiary))
+            .foregroundStyle(isHovered ? Color.textSecondary : Color.textTertiary)
             .padding(.horizontal, 8).padding(.vertical, 4)
             .background(
                 RoundedRectangle(cornerRadius: 6)
-                    .fill(show ? Color.accent.opacity(0.1) : Color.surfaceSecondary.opacity(isHovered ? 0.9 : 0.6))
+                    .fill(Color.surfaceSecondary.opacity(isHovered ? 0.9 : 0.6))
                     .overlay(
                         RoundedRectangle(cornerRadius: 6)
                             .strokeBorder(isHovered ? Color.accent.opacity(0.3) : Color.borderSubtle, lineWidth: isHovered ? 1.5 : 1)
@@ -3339,20 +3378,6 @@ struct ToolInfoButton<Content: View>: View {
             withAnimation(.spring(response: 0.2, dampingFraction: 0.8)) {
                 isHovered = hovering
             }
-            if hovering { show = true }
-        }
-        .popover(isPresented: $show, arrowEdge: .bottom) {
-            VStack(alignment: .leading, spacing: 0) {
-                Text(title.uppercased())
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(Color.textTertiary)
-                    .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 6)
-                ScrollView(showsIndicators: false) {
-                    content().padding(.horizontal, 16).padding(.bottom, 16)
-                }
-            }
-            .frame(width: 340, height: 420)
-            .background(Color.surfacePrimary)
         }
     }
 }

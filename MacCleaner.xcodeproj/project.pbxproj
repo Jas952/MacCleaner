@@ -19,6 +19,7 @@
 		A008 /* DiskDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F008 /* DiskDetailView.swift */; };
 		A009 /* ProcessesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F009 /* ProcessesView.swift */; };
 		A010 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F010 /* Assets.xcassets */; };
+		A_RELEASE_NOTES /* ReleaseNotes.md in Resources */ = {isa = PBXBuildFile; fileRef = F_RELEASE_NOTES /* ReleaseNotes.md */; };
 		A011 /* DesignSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = F011DS /* DesignSystem.swift */; };
 		A012 /* ProcessTreeService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F012PT /* ProcessTreeService.swift */; };
 		A013 /* WindowsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F013WV /* WindowsView.swift */; };
@@ -144,6 +145,7 @@
 		F053_US /* UpdateService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateService.swift; sourceTree = "<group>"; };
 		F054_UV /* UpdateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateView.swift; sourceTree = "<group>"; };
 		F010 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		F_RELEASE_NOTES /* ReleaseNotes.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = ReleaseNotes.md; sourceTree = "<group>"; };
 		F011 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		F012 /* MacCleaner.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = MacCleaner.entitlements; sourceTree = "<group>"; };
 		PROD /* MacCleaner.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MacCleaner.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -178,6 +180,7 @@
 				G_SERVICES /* Services */,
 				G_VIEWS /* Views */,
 				F010 /* Assets.xcassets */,
+				F_RELEASE_NOTES /* ReleaseNotes.md */,
 				F011 /* Info.plist */,
 				F012 /* MacCleaner.entitlements */,
 			);
@@ -365,6 +368,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A010 /* Assets.xcassets in Resources */,
+				A_RELEASE_NOTES /* ReleaseNotes.md in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -571,7 +575,7 @@
 				CODE_SIGN_ENTITLEMENTS = MacCleaner/MacCleaner.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 3;
+				CURRENT_PROJECT_VERSION = 4;
 				ENABLE_HARDENED_RUNTIME = NO;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = MacCleaner/Info.plist;
@@ -580,7 +584,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
-				MARKETING_VERSION = 1.1;
+				MARKETING_VERSION = 1.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.maccleaner.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
@@ -598,7 +602,7 @@
 				CODE_SIGN_ENTITLEMENTS = MacCleaner/MacCleaner.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 3;
+				CURRENT_PROJECT_VERSION = 4;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = MacCleaner/Info.plist;
@@ -607,7 +611,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
-				MARKETING_VERSION = 1.1;
+				MARKETING_VERSION = 1.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.maccleaner.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;

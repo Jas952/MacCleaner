@@ -268,6 +268,17 @@ final class SimilarPhotoService: ObservableObject {
         resultMessage = nil
     }
 
+    func resetForNavigation() {
+        guard !isScanning, !isCleaning else { return }
+        groups = []
+        selectedPhotoIDs = []
+        status = .idle
+        scanWasLimited = false
+        skippedCloudFiles = 0
+        lastScanDuration = nil
+        resultMessage = nil
+    }
+
     var selectionKeepsOnePhotoPerGroup: Bool {
         groups.allSatisfy { group in
             group.photos.filter { selectedPhotoIDs.contains($0.id) }.count < group.photos.count

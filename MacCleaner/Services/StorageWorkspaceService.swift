@@ -39,4 +39,12 @@ final class StorageWorkspaceService: ObservableObject {
             || similarPhotos.isScanning || similarPhotos.isCleaning
             || cloudReclaim.isScanning || cloudReclaim.isEvicting
     }
+
+    func resetForNavigation() {
+        guard !isWorking else { return }
+        cleanupAdvisor.resetForNavigation()
+        duplicateFinder.resetForNavigation()
+        similarPhotos.resetForNavigation()
+        cloudReclaim.resetForNavigation()
+    }
 }

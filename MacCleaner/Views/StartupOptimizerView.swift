@@ -70,14 +70,28 @@ struct StartupOptimizerView: View {
 
             Button(action: openLoginItemsSettings) {
                 Label("GUI Login Items", systemImage: "gearshape")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Color.accentBlue)
+                    .padding(.horizontal, 11)
+                    .frame(height: 28)
+                    .background(Color.accentBlue.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 7))
+                    .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Color.accentBlue.opacity(0.26)))
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(.plain)
             .help("Open macOS Login Items & Extensions settings for app-managed login items")
 
             Button(action: service.startScan) {
                 Label("Refresh", systemImage: "arrow.clockwise")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Color.white)
+                    .padding(.horizontal, 12)
+                    .frame(height: 30)
+                    .background(Color.accentBlue)
+                    .clipShape(RoundedRectangle(cornerRadius: 7))
+                    .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Color.accentBlue.opacity(0.55)))
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(.plain)
             .disabled(service.isScanning || service.isMutating)
         }
         .padding(.horizontal, 16)
@@ -116,7 +130,13 @@ struct StartupOptimizerView: View {
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 480)
             Button("Open Login Items", action: openLoginItemsSettings)
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.plain)
+                .foregroundStyle(Color.white)
+                .padding(.horizontal, 14)
+                .frame(height: 30)
+                .background(Color.accentBlue)
+                .clipShape(RoundedRectangle(cornerRadius: 7))
+                .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Color.accentBlue.opacity(0.55)))
             if let message = service.resultMessage {
                 Text(message).font(.system(size: 10)).foregroundStyle(Color.textSecondaryLight)
             }
@@ -221,12 +241,18 @@ struct StartupOptimizerView: View {
             }
             if service.isMutating { ProgressView().controlSize(.small) }
             Button("Disable Selected") { showDisableConfirmation = true }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.plain)
+                .foregroundStyle(service.selectedItemIDs.isEmpty ? Color.textTertiaryLight : Color.white)
+                .padding(.horizontal, 14)
+                .frame(height: 30)
+                .background(service.selectedItemIDs.isEmpty ? Color.surfaceCardLight : Color.accentPurple)
+                .clipShape(RoundedRectangle(cornerRadius: 7))
+                .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(service.selectedItemIDs.isEmpty ? Color.borderLight : Color.accentPurple.opacity(0.55)))
                 .disabled(service.selectedItemIDs.isEmpty || service.isMutating || service.isScanning)
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .background(.ultraThinMaterial)
+        .frame(height: 52)
+        .background(Color.surfaceCardLight)
         .overlay(alignment: .top) { Divider() }
     }
 
@@ -365,7 +391,13 @@ private struct StartupAgentRow: View {
 
             if item.canRestore {
                 Button("Restore", action: onRestore)
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Color.accentGreen)
+                    .padding(.horizontal, 10)
+                    .frame(height: 26)
+                    .background(Color.accentGreen.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 7))
+                    .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Color.accentGreen.opacity(0.28)))
                     .disabled(isBusy)
             }
         }

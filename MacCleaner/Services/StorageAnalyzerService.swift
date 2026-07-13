@@ -60,7 +60,7 @@ enum JunkType: CaseIterable, Hashable {
         case .systemLogs:     return .gray
         case .browserCache:   return .cyan
         case .userLogs:       return .gray
-        case .unusedDMG:      return .secondary
+        case .unusedDMG:      return .teal
         case .trash:          return .gray
         case .downloads:      return .blue
         case .screenCaptures: return .purple
@@ -655,9 +655,10 @@ enum InternalStorageTool: String, CaseIterable {
     case duplicates  = "Exact Duplicates"
     case similarPhotos = "Similar Photos"
     case cloud       = "Cloud Reclaim"
+    case specialized = "Complete Analysis"
 
     static let coreTools: [InternalStorageTool] = [.junkFiles, .uninstaller, .largeFiles, .analyzer]
-    static let smartTools: [InternalStorageTool] = [.advisor, .duplicates, .similarPhotos, .cloud]
+    static let smartTools: [InternalStorageTool] = [.specialized]
 
     var icon: String {
         switch self {
@@ -665,6 +666,7 @@ enum InternalStorageTool: String, CaseIterable {
         case .duplicates:  return "doc.on.doc.fill"
         case .similarPhotos: return "photo.stack.fill"
         case .cloud:       return "icloud.and.arrow.down.fill"
+        case .specialized: return "scope"
         case .uninstaller: return "trash.fill"
         case .analyzer:    return "network"
         case .largeFiles:  return "doc.text.magnifyingglass"
@@ -678,6 +680,7 @@ enum InternalStorageTool: String, CaseIterable {
         case .duplicates: return "Verify byte-for-byte copies and safely keep at least one."
         case .similarPhotos: return "Find visually similar exported photos privately on this Mac."
         case .cloud: return "Free local iCloud space while preserving cloud originals."
+        case .specialized: return "Run Cleanup Advisor, duplicate, photo, and cloud analysis in one report."
         case .uninstaller: return "Completely remove apps and their hidden library files."
         case .analyzer:    return "Visualize your disk usage with an interactive network graph."
         case .largeFiles:  return "Find and delete the largest files taking up space."
@@ -691,6 +694,7 @@ enum InternalStorageTool: String, CaseIterable {
         case .duplicates:  return .purple
         case .similarPhotos: return .pink
         case .cloud:       return .cyan
+        case .specialized: return .accentBlue
         case .uninstaller: return .pink
         case .analyzer:    return .indigo
         case .largeFiles:  return .orange
@@ -704,6 +708,7 @@ enum InternalStorageTool: String, CaseIterable {
         case .duplicates: return "Duplicates"
         case .similarPhotos: return "Photos"
         case .cloud: return "Cloud"
+        case .specialized: return "Analysis"
         case .uninstaller: return "Remove"
         case .analyzer:    return "Disk Map"
         case .largeFiles:  return "Large"
@@ -772,6 +777,26 @@ class StorageAnalyzerService: ObservableObject {
         scanStateLock.lock()
         isCancelled = true
         scanStateLock.unlock()
+    }
+
+    @MainActor
+    func resetForNavigation() {
+        guard !isScanning, !isScanningJunk else { return }
+        rootNode = nil
+        currentNode = nil
+        navigationStack = []
+        largeFiles = []
+        packedCircles = []
+        junkCategories = []
+        scanProgress = 0
+        currentPath = ""
+        scanWasLimited = false
+        scannedEntryCount = 0
+        largeFileScanWasLimited = false
+        largeFileScannedEntryCount = 0
+        junkScanWasLimited = false
+        junkScannedEntryCount = 0
+        selectedDiskNodes = []
     }
 
     func scan(url: URL = FileManager.default.homeDirectoryForCurrentUser) {
@@ -886,6 +911,17 @@ class StorageAnalyzerService: ObservableObject {
                     break
                 }
                 guard budget.consumeEntry() else { break }
+                let now = Date()
+                if now.timeIntervalSince(lastProgressAt) >= 0.05 {
+                    lastProgressAt = now
+                    let entries = budget.consumedEntries
+                    let progress = min(0.99, Double(entries) / Double(mode.maximumEntries))
+                    DispatchQueue.main.async {
+                        self.currentPath = fileURL.path
+                        self.largeFileScannedEntryCount = entries
+                        self.scanProgress = progress
+                    }
+                }
                 guard let values = try? fileURL.resourceValues(forKeys: keys) else { continue }
                 if SafeDeletionService.isApplicationOwnedPath(fileURL, policy: protectionPolicy) {
                     if values.isDirectory == true { enumerator.skipDescendants() }
@@ -914,17 +950,6 @@ class StorageAnalyzerService: ObservableObject {
                     candidates = Array(candidates.sorted { $0.size > $1.size }.prefix(150))
                 }
 
-                let now = Date()
-                if now.timeIntervalSince(lastProgressAt) >= 0.25 {
-                    lastProgressAt = now
-                    let entries = budget.consumedEntries
-                    let progress = min(0.99, Double(entries) / Double(mode.maximumEntries))
-                    DispatchQueue.main.async {
-                        self.currentPath = fileURL.path
-                        self.largeFileScannedEntryCount = entries
-                        self.scanProgress = progress
-                    }
-                }
             }
 
             let result = Array(candidates.sorted { $0.size > $1.size }.prefix(150))
@@ -1131,6 +1156,7 @@ class StorageAnalyzerService: ObservableObject {
             self.junkCategories = []
             self.junkScanWasLimited = false
             self.junkScannedEntryCount = 0
+            self.currentPath = ""
         }
         DispatchQueue.global(qos: .utility).async {
             let fm = FileManager.default
@@ -1140,6 +1166,20 @@ class StorageAnalyzerService: ObservableObject {
                 maximumEntries: mode.maximumEntries,
                 maximumDuration: mode.maximumDuration
             )
+            var lastPathUpdate = Date.distantPast
+
+            func reportPath(_ url: URL) {
+                let now = Date()
+                guard now.timeIntervalSince(lastPathUpdate) >= 0.05 else { return }
+                lastPathUpdate = now
+                let entries = budget.consumedEntries
+                let progress = min(0.99, Double(entries) / Double(mode.maximumEntries))
+                DispatchQueue.main.async {
+                    self.currentPath = url.path
+                    self.junkScannedEntryCount = entries
+                    self.scanProgress = progress
+                }
+            }
             let protectionPolicy = SafeDeletionService.currentProtectionPolicy(home: home)
             let userCacheRoot = home.appendingPathComponent("Library/Caches", isDirectory: true)
             let browserRoots = [
@@ -1186,6 +1226,7 @@ class StorageAnalyzerService: ObservableObject {
                     }
                     guard budget.consumeEntry() else { break }
                     rootEntries += 1
+                    reportPath(fileURL)
                     let values = try? fileURL.resourceValues(forKeys: keys)
                     let isExcluded = excludedRoots.contains {
                         SafeDeletionService.isPath(fileURL.path, inside: $0.path)
@@ -1230,6 +1271,7 @@ class StorageAnalyzerService: ObservableObject {
                             budget.markLimited()
                             break
                         }
+                        reportPath(url)
                         guard predicate(url) else { continue }
                         let values = try? url.resourceValues(forKeys: [
                             .fileSizeKey, .fileAllocatedSizeKey, .totalFileAllocatedSizeKey,

@@ -243,6 +243,59 @@ extension Font {
     }
 }
 
+// MARK: - Storage scan hero
+
+struct StorageScanHero: View {
+    let icon: String
+    let color: Color
+    let title: String
+    let subtitle: String
+    let isRunning: Bool
+    var buttonTitle: String = "Start Scan"
+    var subtitleWidth: CGFloat = 580
+    let action: () -> Void
+
+    var body: some View {
+        VStack(spacing: 16) {
+            ZStack {
+                Circle().fill(color.opacity(0.07)).frame(width: 124, height: 124)
+                Circle().fill(color.opacity(0.12)).frame(width: 100, height: 100)
+                Image(systemName: icon)
+                    .font(.system(size: 42, weight: .semibold))
+                    .foregroundStyle(color)
+            }
+            .frame(width: 124, height: 124)
+
+            Text(title)
+                .font(.system(size: 21, weight: .bold))
+                .foregroundStyle(Color.textPrimary)
+                .lineLimit(1)
+                .frame(width: 620, height: 28)
+
+            Button(action: action) {
+                Label(
+                    isRunning ? "Cancel" : buttonTitle,
+                    systemImage: isRunning ? "xmark" : "magnifyingglass"
+                )
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Color.white)
+                .frame(width: 190, height: 38)
+                .background(isRunning ? Color.accentRed : color)
+                .clipShape(RoundedRectangle(cornerRadius: 9))
+            }
+            .buttonStyle(.plain)
+
+            Text(subtitle)
+                .font(.system(size: 13))
+                .foregroundStyle(Color.textSecondary)
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+                .frame(width: subtitleWidth, height: 48, alignment: .top)
+        }
+        .frame(width: 620, height: 286, alignment: .top)
+    }
+}
+
 // MARK: - Section label
 
 struct SectionLabel: View {
@@ -255,12 +308,204 @@ struct SectionLabel: View {
     }
 }
 
+// MARK: - Application modal overlay
+
+struct AppModalPresentation: Identifiable {
+    let id = UUID()
+    let title: String
+    let subtitle: String?
+    let content: AnyView
+}
+
+@MainActor
+final class AppModalCoordinator: ObservableObject {
+    @Published var presentation: AppModalPresentation?
+
+    func present<Content: View>(
+        title: String,
+        subtitle: String? = nil,
+        @ViewBuilder content: () -> Content
+    ) {
+        presentation = AppModalPresentation(title: title, subtitle: subtitle, content: AnyView(content()))
+    }
+
+    func dismiss() {
+        presentation = nil
+    }
+}
+
+struct AppModalOverlay<ModalContent: View>: View {
+    let title: String
+    let subtitle: String?
+    var width: CGFloat = 560
+    var height: CGFloat = 460
+    var scrollsContent: Bool = true
+    let onDismiss: () -> Void
+    @ViewBuilder let modalContent: () -> ModalContent
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.08)
+                .ignoresSafeArea()
+                .contentShape(Rectangle())
+                .onTapGesture(perform: onDismiss)
+
+            VStack(spacing: 0) {
+                HStack(alignment: .center, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(title)
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(Color.textPrimaryLight)
+                        if let subtitle {
+                            Text(subtitle)
+                                .font(.system(size: 11))
+                                .foregroundStyle(Color.textTertiaryLight)
+                        }
+                    }
+                    Spacer()
+                    Button(action: onDismiss) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(Color.textSecondaryLight)
+                            .frame(width: 30, height: 30)
+                            .background(Color.surfaceSecondary)
+                            .clipShape(Circle())
+                            .contentShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .keyboardShortcut(.cancelAction)
+                    .accessibilityLabel("Close")
+                }
+                .padding(.horizontal, 22)
+                .padding(.vertical, 16)
+
+                Rectangle().fill(Color.borderLight).frame(height: 1)
+
+                if scrollsContent {
+                    ScrollView(.vertical, showsIndicators: false) {
+                        modalContent()
+                            .padding(22)
+                            .frame(maxWidth: .infinity, alignment: .topLeading)
+                    }
+                } else {
+                    modalContent()
+                        .padding(22)
+                        .frame(
+                            maxWidth: .infinity,
+                            maxHeight: .infinity,
+                            alignment: .topLeading
+                        )
+                }
+            }
+            .frame(width: width, height: height)
+            .background(Color.surfaceLight)
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .strokeBorder(Color.borderLight, lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.20), radius: 22, y: 8)
+            .transition(.scale(scale: 0.96).combined(with: .opacity))
+        }
+        .zIndex(100)
+        .animation(.easeInOut(duration: 0.24), value: true)
+    }
+}
+
+// MARK: - Contrast-safe buttons
+
+struct AppSecondaryButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(Color.textPrimary)
+            .padding(.horizontal, 12)
+            .frame(minHeight: 30)
+            .background(Color(red: 0.90, green: 0.92, blue: 0.95))
+            .overlay(
+                RoundedRectangle(cornerRadius: 7)
+                    .strokeBorder(Color.black.opacity(0.16), lineWidth: 1)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 7))
+            .opacity(isEnabled ? (configuration.isPressed ? 0.72 : 1) : 0.45)
+    }
+}
+
+struct AppSegmentedControl<Value: Hashable>: View {
+    @Binding var selection: Value
+    let options: [Value]
+    let accentColor: Color
+    let title: (Value) -> String
+    @Environment(\.isEnabled) private var isEnabled
+
+    init(
+        selection: Binding<Value>,
+        options: [Value],
+        accentColor: Color = .accentGreen,
+        title: @escaping (Value) -> String
+    ) {
+        _selection = selection
+        self.options = options
+        self.accentColor = accentColor
+        self.title = title
+    }
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(options, id: \.self) { option in
+                let isSelected = selection == option
+                Button {
+                    selection = option
+                } label: {
+                    Text(title(option))
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(isSelected ? Color.white : Color.textPrimary)
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity, minHeight: 28)
+                        .background(isSelected ? accentColor : Color(red: 0.90, green: 0.92, blue: 0.95))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(2)
+        .background(Color(red: 0.84, green: 0.87, blue: 0.91))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(Color.black.opacity(0.14), lineWidth: 1)
+        )
+        .opacity(isEnabled ? 1 : 0.48)
+    }
+}
+
+struct AppPrimaryButtonStyle: ButtonStyle {
+    let color: Color
+    @Environment(\.isEnabled) private var isEnabled
+
+    init(color: Color = .accentBlue) {
+        self.color = color
+    }
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(Color.white)
+            .padding(.horizontal, 14)
+            .frame(minHeight: 30)
+            .background(color)
+            .clipShape(RoundedRectangle(cornerRadius: 7))
+            .opacity(isEnabled ? (configuration.isPressed ? 0.78 : 1) : 0.42)
+    }
+}
+
 // MARK: - App Footer
 
 struct AppFooter: View {
     let version: String
     @ObservedObject var updateService: UpdateService
-    @State private var showsUpdatePopover = false
+    let showUpdates: () -> Void
     
     var body: some View {
         HStack(spacing: 8) {
@@ -269,21 +514,23 @@ struct AppFooter: View {
                 .foregroundStyle(Color.textTertiaryLight)
 
             Button {
-                showsUpdatePopover.toggle()
+                showUpdates()
             } label: {
-                Image(systemName: "info.circle")
-                    .font(.system(size: 12))
-                    .foregroundStyle(Color.textSecondaryLight)
+                HStack(spacing: 5) {
+                    Image(systemName: "info.circle")
+                        .font(.system(size: 12))
+
+                    Text(updateService.status.footerText)
+                        .font(.system(size: 11, weight: updateService.status == .upToDate ? .regular : .medium))
+                }
+                .foregroundStyle(footerStatusColor)
+                .padding(.horizontal, 3)
+                .padding(.vertical, 2)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .help("About and Updates")
-            .popover(isPresented: $showsUpdatePopover, arrowEdge: .bottom) {
-                UpdatePopoverView(updateService: updateService)
-            }
-
-            Text(updateService.status.footerText)
-                .font(.system(size: 11, weight: updateService.status == .upToDate ? .regular : .medium))
-                .foregroundStyle(footerStatusColor)
+            .accessibilityLabel("About and Updates")
 
             Spacer()
         }

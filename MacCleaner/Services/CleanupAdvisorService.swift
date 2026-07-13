@@ -133,6 +133,14 @@ final class CleanupAdvisorService: ObservableObject {
         resultMessage = "Scan cancelled. No files were changed."
     }
 
+    func resetForNavigation() {
+        guard !isScanning, !isCleaning else { return }
+        recommendations = []
+        selectedIDs = []
+        lastScanAt = nil
+        resultMessage = nil
+    }
+
     func toggleSelection(_ recommendation: CleanupRecommendation) {
         if selectedIDs.contains(recommendation.id) {
             selectedIDs.remove(recommendation.id)

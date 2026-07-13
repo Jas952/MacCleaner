@@ -201,6 +201,17 @@ final class CloudReclaimService: ObservableObject {
         resultMessage = nil
     }
 
+    func resetForNavigation() {
+        guard !isScanning, !isEvicting else { return }
+        items = []
+        selectedIDs = []
+        scanProgress = CloudReclaimProgress(scannedFiles: 0, eligibleFiles: 0, currentPath: "")
+        scanWasLimited = false
+        skippedUnverified = 0
+        lastScanDuration = nil
+        resultMessage = nil
+    }
+
     func removeSelectedLocalCopies() {
         guard !isScanning, !isEvicting else { return }
         let selected = items.filter { selectedIDs.contains($0.id) }

@@ -7,6 +7,11 @@ struct DashboardView: View {
     @State private var lastRefreshTime: Date = .distantPast
     @State private var detailProcess: ProcessNode? = nil
 
+    private var dashboardProcesses: [ProcessNode] {
+        ProcessAggregator.aggregate(monitor.processNodes)
+            .sorted { $0.memoryBytes > $1.memoryBytes }
+    }
+
     var body: some View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 0) {
@@ -135,7 +140,7 @@ struct DashboardView: View {
                         SectionLabel(text: "Top Processes by Memory")
                             .foregroundStyle(Color.textSecondaryLight)
                         Spacer()
-                        Text("\(monitor.processNodes.count) running")
+                        Text("\(monitor.processNodes.count) processes · \(dashboardProcesses.count) groups")
                             .font(.system(size: 10))
                             .foregroundStyle(Color.textTertiaryLight)
                     }
@@ -158,10 +163,10 @@ struct DashboardView: View {
 
                     Rectangle().fill(Color.borderLight).frame(height: 1)
 
-                    let maxMemory = monitor.processNodes.max(by: { $0.memoryBytes < $1.memoryBytes })?.memoryBytes ?? 1
-                    ForEach(Array(monitor.processNodes.prefix(15).enumerated()), id: \.element.id) { idx, proc in
+                    let maxMemory = dashboardProcesses.max(by: { $0.memoryBytes < $1.memoryBytes })?.memoryBytes ?? 1
+                    ForEach(Array(dashboardProcesses.prefix(15).enumerated()), id: \.element.id) { idx, proc in
                         DashProcessRow(proc: proc, maxMem: maxMemory, onTap: { detailProcess = proc })
-                        if idx < 14 {
+                        if idx < min(14, dashboardProcesses.count - 1) {
                             Rectangle().fill(Color.borderLight.opacity(0.5)).frame(height: 1)
                                 .padding(.leading, 24)
                         }
@@ -890,7 +895,7 @@ struct DashProcessRow: View {
                 ProcessIconView(commandLine: proc.commandLine, size: 18)
 
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(proc.name)
+                    Text(proc.instanceCount > 1 ? "\(proc.name) ×\(proc.instanceCount)" : proc.name)
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(Color.textPrimaryLight)
                         .lineLimit(1)
@@ -903,7 +908,7 @@ struct DashProcessRow: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            Text("\(proc.id)")
+            Text(proc.instanceCount > 1 ? "group" : "\(proc.id)")
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(Color.textTertiaryLight)
                 .frame(width: 56, alignment: .trailing)

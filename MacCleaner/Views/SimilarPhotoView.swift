@@ -45,28 +45,28 @@ struct SimilarPhotoView: View {
             }
 
             Button("Choose…", action: chooseFolder)
-                .buttonStyle(.bordered)
+                .buttonStyle(AppSecondaryButtonStyle())
                 .disabled(service.isScanning || service.isCleaning)
 
             Spacer()
 
-            Picker("Mode", selection: $service.mode) {
-                ForEach(SimilarPhotoScanMode.allCases, id: \.self) { mode in
-                    Text(mode.rawValue).tag(mode)
-                }
-            }
-            .pickerStyle(.segmented)
+            AppSegmentedControl(
+                selection: $service.mode,
+                options: SimilarPhotoScanMode.allCases,
+                accentColor: .accentGreen,
+                title: \.rawValue
+            )
             .frame(width: 180)
             .disabled(service.isScanning || service.isCleaning)
 
             if service.isScanning {
                 Button("Cancel", action: service.cancelScan)
-                    .buttonStyle(.bordered)
+                    .buttonStyle(AppSecondaryButtonStyle())
             } else {
                 Button(action: service.startScan) {
                     Label(service.status.phase == .finished ? "Rescan" : "Scan", systemImage: "photo.stack")
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(AppPrimaryButtonStyle(color: .pink))
                 .keyboardShortcut("r", modifiers: [.command, .shift])
                 .disabled(service.isCleaning)
             }
@@ -108,7 +108,7 @@ struct SimilarPhotoView: View {
             color: .pink,
             title: service.status.phase == .finished ? "No conservative matches found" : "Find visually similar photos locally",
             subtitle: emptySubtitle,
-            actionTitle: "Scan \(service.mode.rawValue.lowercased())",
+            actionTitle: "Scan",
             actionIcon: "photo.stack",
             details: [
                 "Read image dimensions without decoding originals",
@@ -123,7 +123,7 @@ struct SimilarPhotoView: View {
     private var resultsView: some View {
         VStack(spacing: 0) {
             summary
-            if service.scanWasLimited || service.skippedCloudFiles > 0 || service.resultMessage != nil {
+            if service.skippedCloudFiles > 0 || (service.resultMessage != nil && !service.scanWasLimited) {
                 notice
             }
             ScrollView {
@@ -174,7 +174,7 @@ struct SimilarPhotoView: View {
     private var cleanupBar: some View {
         HStack(spacing: 12) {
             Button("Select lower-resolution variants", action: service.selectLowerResolutionVariants)
-                .buttonStyle(.bordered)
+                .buttonStyle(AppSecondaryButtonStyle())
                 .disabled(service.isCleaning)
             if !service.selectedPhotoIDs.isEmpty {
                 Button("Clear", action: service.clearSelection)
@@ -192,7 +192,7 @@ struct SimilarPhotoView: View {
             }
             if service.isCleaning { ProgressView().controlSize(.small) }
             Button("Move to Trash") { showCleanupConfirmation = true }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(AppPrimaryButtonStyle(color: .accentRed))
                 .disabled(service.selectedPhotoIDs.isEmpty || service.isCleaning || !service.selectionKeepsOnePhotoPerGroup)
         }
         .padding(.horizontal, 20)

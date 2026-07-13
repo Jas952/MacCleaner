@@ -22,14 +22,19 @@ struct DiskDetailView: View {
 
             Rectangle().fill(Color.borderLight).frame(height: 1)
 
-            ScrollView(showsIndicators: false) {
-                VStack(spacing: 16) {
-                    ForEach(monitor.disks.filter { $0.mountPoint == "/" }) { disk in
-                        DiskVolumeCard(disk: disk)
+            GeometryReader { geometry in
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: 16) {
+                        ForEach(monitor.disks.filter { $0.mountPoint == "/" }) { disk in
+                            DiskVolumeCard(
+                                disk: disk,
+                                minimumHeight: max(0, geometry.size.height - 40)
+                            )
+                        }
                     }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 20)
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 20)
             }
         }
         .background(Color.surfaceLight)
@@ -40,6 +45,7 @@ struct DiskDetailView: View {
 
 struct DiskVolumeCard: View {
     let disk: DiskInfo
+    var minimumHeight: CGFloat = 0
 
     private var accent: Color {
         disk.usedPercent > 0.9 ? .accentRed
@@ -61,7 +67,7 @@ struct DiskVolumeCard: View {
     ]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 0) {
 
             // Volume title
             HStack(spacing: 10) {
@@ -85,8 +91,12 @@ struct DiskVolumeCard: View {
                 }
             }
 
+            Spacer(minLength: 14)
+
             // Stable capacity bar — NO .animation modifier to avoid constant flicker
             DiskCapacityBar(usedFraction: disk.usedPercent, color: accent)
+
+            Spacer(minLength: 14)
 
             // Stat strip
             HStack(spacing: 0) {
@@ -100,6 +110,8 @@ struct DiskVolumeCard: View {
             .background(Color.surfaceCardLight)
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.borderLight))
+
+            Spacer(minLength: 14)
 
             // Storage pressure badge
             HStack(spacing: 8) {
@@ -116,6 +128,8 @@ struct DiskVolumeCard: View {
             .background(accent.opacity(0.07))
             .clipShape(RoundedRectangle(cornerRadius: 7))
             .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(accent.opacity(0.2)))
+
+            Spacer(minLength: 14)
 
             // Estimated space breakdown
             VStack(alignment: .leading, spacing: 8) {
@@ -150,6 +164,8 @@ struct DiskVolumeCard: View {
             .background(Color.surfaceCardLight)
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.borderLight))
+
+            Spacer(minLength: 14)
 
             // Key metrics
             VStack(alignment: .leading, spacing: 6) {
@@ -191,6 +207,7 @@ struct DiskVolumeCard: View {
             .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.borderLight))
         }
         .padding(16)
+        .frame(minHeight: minimumHeight, alignment: .top)
         .background(Color.surfaceCardLight)
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.borderLight))

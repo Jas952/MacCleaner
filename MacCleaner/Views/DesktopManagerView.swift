@@ -195,6 +195,7 @@ struct DesktopManagerView: View {
     @State private var newFolderName = ""
     @State private var showMovePanel = false
     @State private var dropTargetID: UUID? = nil
+    @EnvironmentObject private var modalCoordinator: AppModalCoordinator
 
     private var isWorking: Bool {
         operationActive || service.isScanning || organizeInProgress
@@ -204,11 +205,23 @@ struct DesktopManagerView: View {
         VStack(spacing: 0) {
             // ── Header (always visible, never rebuilds) ──
             headerBar
-            Divider()
+            Rectangle()
+                .fill(Color.borderLight)
+                .frame(height: 1)
 
-            HSplitView {
-                sidebarPanel.frame(minWidth: 200, maxWidth: 230)
+            // NSSplitView briefly redraws its native divider in black while a
+            // system alert is being dismissed. Desktop does not need a resizable
+            // sidebar, so keep the geometry stable with an app-owned separator.
+            HStack(spacing: 0) {
+                sidebarPanel
+                    .frame(width: 220)
+
+                Rectangle()
+                    .fill(Color.borderLight)
+                    .frame(width: 1)
+
                 filesContent
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .onAppear {
@@ -226,7 +239,12 @@ struct DesktopManagerView: View {
         .sheet(isPresented: $showRenameSheet) { renameSheet }
         .sheet(isPresented: $showNewFolderSheet) { newFolderSheet }
         .alert("Auto-Organize Desktop", isPresented: $showAutoOrganizeAlert) {
-            Button("Organize", role: .destructive) { runAutoOrganize() }
+            Button("Organize", role: .destructive) {
+                // Let the native alert finish its dismissal transaction first.
+                // Starting the operation inside that transaction briefly animates
+                // the desktop view's strokes with the alert's dark appearance.
+                DispatchQueue.main.async { runAutoOrganize() }
+            }
             Button("Cancel", role: .cancel) { }
         } message: {
             Text("Files will be moved into subfolders by type on your Desktop. Undoable via Trash.")
@@ -375,17 +393,6 @@ struct DesktopManagerView: View {
                         }
                     }.padding(.horizontal, 8).padding(.bottom, 10)
 
-                    if service.desktopSummaryWasLimited {
-                        Label(
-                            "Partial low-load scan · \(service.desktopSummaryScannedEntries.formatted()) entries",
-                            systemImage: "gauge.with.dots.needle.67percent"
-                        )
-                        .font(.system(size: 8, weight: .medium))
-                        .foregroundStyle(Color.accentAmber)
-                        .padding(.horizontal, 12)
-                        .padding(.bottom, 8)
-                    }
-
                     Rectangle().fill(Color.borderLight).frame(height: 1).padding(.horizontal, 12)
 
                     sectionHeader("SORT BY")
@@ -517,24 +524,11 @@ struct DesktopManagerView: View {
 
     private var toolbar: some View {
         HStack(spacing: 8) {
-            // Quick Select — меню вместо чипов
-            Menu {
-                ForEach(FileGroup.allCases, id: \.self) { group in
-                    let count = service.files.filter { group.categories.contains($0.category) }.count
-                    if count > 0 {
-                        Button(action: { service.selectByCategories(group.categories) }) {
-                            Label("\(group.rawValue) (\(count))", systemImage: group.icon)
-                        }
-                    }
-                }
-                Divider()
-                Button(action: { service.selectAll() }) { Label("Select All", systemImage: "checkmark.circle") }
-                Button(action: { service.deselectAll() }) { Label("Deselect All", systemImage: "circle") }
-            } label: {
+            Button(action: presentQuickSelect) {
                 HStack(spacing: 5) {
                     Image(systemName: "checkmark.circle.badge.questionmark")
                     Text("Select")
-                    Image(systemName: "chevron.down").font(.system(size: 9))
+                    Image(systemName: "rectangle.on.rectangle").font(.system(size: 9))
                 }
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(Color.textSecondaryLight)
@@ -542,7 +536,7 @@ struct DesktopManagerView: View {
                 .background(Color.surfaceCardLight)
                 .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.borderLight, lineWidth: 1))
                 .clipShape(RoundedRectangle(cornerRadius: 7))
-            }.menuStyle(.borderlessButton).fixedSize()
+            }.buttonStyle(.plain).fixedSize()
 
             // Move to… button (visible when files selected)
             if !service.selectedFiles.isEmpty {
@@ -623,6 +617,39 @@ struct DesktopManagerView: View {
         .padding(.horizontal, 14).padding(.vertical, 8)
         .background(Color.surfaceLight)
         .animation(.easeInOut(duration: 0.2), value: service.selectedFiles.count)
+    }
+
+    private func presentQuickSelect() {
+        modalCoordinator.present(title: "Select Desktop Files", subtitle: "Choose a category or update the complete selection") {
+            VStack(spacing: 8) {
+                ForEach(FileGroup.allCases, id: \.self) { group in
+                    let count = service.files.filter { group.categories.contains($0.category) }.count
+                    if count > 0 {
+                        Button {
+                            service.selectByCategories(group.categories)
+                            modalCoordinator.dismiss()
+                        } label: {
+                            HStack {
+                                Image(systemName: group.icon).foregroundStyle(group.color).frame(width: 22)
+                                Text(group.rawValue).font(.system(size: 12, weight: .medium))
+                                Spacer()
+                                Text(count.formatted()).font(.system(size: 11, design: .monospaced)).foregroundStyle(Color.textTertiaryLight)
+                            }
+                            .foregroundStyle(Color.textPrimaryLight)
+                            .padding(.horizontal, 14).frame(height: 40)
+                            .background(Color.surfaceCardLight)
+                            .overlay(Rectangle().strokeBorder(Color.borderLight))
+                        }.buttonStyle(.plain)
+                    }
+                }
+                HStack(spacing: 8) {
+                    Button("Select All") { service.selectAll(); modalCoordinator.dismiss() }
+                    Button("Deselect All") { service.deselectAll(); modalCoordinator.dismiss() }
+                }
+                .buttonStyle(AppSecondaryButtonStyle())
+                .padding(.top, 6)
+            }
+        }
     }
 
     @ViewBuilder
@@ -856,13 +883,30 @@ struct DesktopManagerView: View {
     }
 
     private func runAutoOrganize() {
-        operationActive = true
-        organizeInProgress = true; autoOrganizeResult = nil
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            operationActive = true
+            organizeInProgress = true
+            autoOrganizeResult = nil
+        }
+
         service.autoOrganize { moved in
-            operationActive = false
-            organizeInProgress = false
-            withAnimation { autoOrganizeResult = "Moved \(moved) files" }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3) { withAnimation { autoOrganizeResult = nil } }
+            var completionTransaction = Transaction()
+            completionTransaction.disablesAnimations = true
+            withTransaction(completionTransaction) {
+                operationActive = false
+                organizeInProgress = false
+            }
+
+            withAnimation(.easeOut(duration: 0.16)) {
+                autoOrganizeResult = "Moved \(moved) files"
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                withAnimation(.easeOut(duration: 0.16)) {
+                    autoOrganizeResult = nil
+                }
+            }
         }
     }
 }

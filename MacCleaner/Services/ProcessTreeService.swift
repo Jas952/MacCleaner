@@ -29,8 +29,8 @@ struct ProcessNode: Identifiable {
     let id: Int32
     let name: String
     let commandLine: String
-    let cpuUsage: Double
-    let cpuTime: String
+    var cpuUsage: Double
+    var cpuTime: String
     var memoryBytes: UInt64
     var diskRead: UInt64 = 0
     var diskWritten: UInt64 = 0
@@ -38,6 +38,73 @@ struct ProcessNode: Identifiable {
     let isBackgroundAgent: Bool
     var children: [ProcessNode] = []
     var windows: [WindowInfo] = []
+    var instanceCount: Int = 1
+    var groupedInstances: [ProcessNode] = []
+}
+
+enum ProcessAggregator {
+    static func aggregate(_ processes: [ProcessNode]) -> [ProcessNode] {
+        Dictionary(grouping: deduplicated(processes), by: groupingKey)
+            .values
+            .compactMap(makeGroup)
+    }
+
+    static func deduplicated(_ processes: [ProcessNode]) -> [ProcessNode] {
+        var seen = Set<Int32>()
+        return processes.filter { seen.insert($0.id).inserted }
+    }
+
+    private static func groupingKey(_ process: ProcessNode) -> String {
+        let command = process.commandLine.trimmingCharacters(in: .whitespacesAndNewlines)
+        let identity: String
+        if let appRange = command.range(of: #"\.app(?:/|$)"#, options: [.regularExpression, .caseInsensitive]) {
+            identity = String(command[..<appRange.upperBound])
+        } else {
+            identity = command.split(whereSeparator: { $0.isWhitespace }).first.map(String.init) ?? command
+        }
+        let foldedName = process.name.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+        let foldedIdentity = identity.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+        return foldedName + "|" + foldedIdentity
+    }
+
+    private static func makeGroup(_ instances: [ProcessNode]) -> ProcessNode? {
+        let members = instances.sorted { $0.id < $1.id }
+        guard var aggregate = members.first else { return nil }
+        aggregate.instanceCount = members.count
+        aggregate.groupedInstances = members.count > 1 ? members : []
+        aggregate.cpuUsage = members.reduce(0) { $0 + $1.cpuUsage }
+        aggregate.cpuTime = formatCPUTime(members.reduce(0) { $0 + parseCPUTime($1.cpuTime) })
+        aggregate.memoryBytes = members.reduce(0) { $0 &+ $1.memoryBytes }
+        aggregate.diskRead = members.reduce(0) { $0 &+ $1.diskRead }
+        aggregate.diskWritten = members.reduce(0) { $0 &+ $1.diskWritten }
+        aggregate.windows = members.flatMap(\.windows)
+        return aggregate
+    }
+
+    static func parseCPUTime(_ value: String) -> TimeInterval {
+        let dayParts = value.split(separator: "-", maxSplits: 1).map(String.init)
+        let clock = (dayParts.count == 2 ? dayParts[1] : dayParts[0])
+            .split(separator: ":").compactMap { Double($0) }
+        guard clock.count >= 2 else { return 0 }
+        let seconds: Double
+        if clock.count == 3 {
+            seconds = clock[0] * 3600 + clock[1] * 60 + clock[2]
+        } else {
+            seconds = clock[0] * 60 + clock[1]
+        }
+        return seconds + (dayParts.count == 2 ? (Double(dayParts[0]) ?? 0) * 86_400 : 0)
+    }
+
+    static func formatCPUTime(_ interval: TimeInterval) -> String {
+        let total = max(0, Int(interval.rounded()))
+        let days = total / 86_400
+        let hours = (total % 86_400) / 3600
+        let minutes = (total % 3600) / 60
+        let seconds = total % 60
+        if days > 0 { return String(format: "%d-%02d:%02d:%02d", days, hours, minutes, seconds) }
+        if hours > 0 { return String(format: "%d:%02d:%02d", hours, minutes, seconds) }
+        return String(format: "%d:%02d", minutes, seconds)
+    }
 }
 
 struct WindowInfo: Identifiable {
@@ -214,6 +281,9 @@ final class ProcessTreeService {
     }
 
     static func isProtected(_ node: ProcessNode) -> Bool {
+        if !node.groupedInstances.isEmpty {
+            return node.groupedInstances.contains(where: isProtected)
+        }
         if node.id <= 1 { return true }
         if node.id == ProcessInfo.processInfo.processIdentifier { return true }
         if protectedProcessNames.contains(node.name) { return true }
@@ -225,6 +295,28 @@ final class ProcessTreeService {
     @discardableResult
     static func killProcess(_ node: ProcessNode) -> KillResult {
         sendSignal(SIGTERM, to: node)
+    }
+
+    @discardableResult
+    static func killProcessGroup(_ node: ProcessNode) -> KillResult {
+        let members = node.groupedInstances.isEmpty ? [node] : node.groupedInstances
+
+        if let protectedMember = members.first(where: isProtected) {
+            return .protected(
+                reason: "\"\(protectedMember.name)\" (PID \(protectedMember.id)) is protected, so the process group was not terminated."
+            )
+        }
+
+        var failures: [String] = []
+        for member in members {
+            if case .failed(let reason) = sendSignal(SIGTERM, to: member) {
+                failures.append("PID \(member.id): \(reason)")
+            }
+        }
+
+        return failures.isEmpty
+            ? .success
+            : .failed(reason: "Some processes could not be terminated: \(failures.joined(separator: "; "))")
     }
 
     @discardableResult

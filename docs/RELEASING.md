@@ -13,7 +13,7 @@ The corresponding Sparkle public key is embedded in `MacCleaner/Info.plist`. Nev
 ## Publish a release
 
 1. Update `MARKETING_VERSION` and increment `CURRENT_PROJECT_VERSION` in the Xcode project.
-2. Update `docs/release-notes.md`.
+2. Update `MacCleaner/ReleaseNotes.md`. This is the single source used by the in-app Updates window, the GitHub Release body, and the Sparkle appcast.
 3. Merge the release commit into `main`.
 4. Create and push the matching tag, for example `git tag v1.1 && git push origin v1.1`.
 5. Verify the `Release MacCleaner` workflow, GitHub Release asset, and updated `appcast.xml`.
