@@ -459,7 +459,7 @@ final class SafetyPolicyTests: XCTestCase {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
         let icon = projectRoot.appendingPathComponent("MacCleaner/Assets.xcassets/AppIcon.appiconset/icon_512x512.png")
-        let different = projectRoot.appendingPathComponent("docs/images/overview.png")
+        let different = projectRoot.appendingPathComponent("docs/readme-media/hero-v2.png")
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("MacCleanerSimilarDistanceTests-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
