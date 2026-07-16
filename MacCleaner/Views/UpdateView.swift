@@ -55,10 +55,10 @@ struct UpdateWindowContent: View {
                                 .controlSize(.small)
                                 .tint(.white)
                         } else {
-                            Image(systemName: "arrow.triangle.2.circlepath")
+                            Image(systemName: updateActionIcon)
                                 .font(.system(size: 11, weight: .semibold))
                         }
-                        Text(updateService.status == .checking ? "Checking…" : "Check for Updates")
+                        Text(updateActionTitle)
                     }
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(Color.white)
@@ -70,7 +70,7 @@ struct UpdateWindowContent: View {
                 .disabled(!updateService.canCheckForUpdates || updateService.status == .checking)
                 .opacity(updateService.canCheckForUpdates ? 1 : 0.50)
 
-                Toggle("Automatically check", isOn: automaticUpdatesBinding)
+                Toggle("Download and install automatically", isOn: automaticUpdatesBinding)
                     .toggleStyle(GreenCheckboxToggleStyle())
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(Color.textPrimaryLight)
@@ -145,6 +145,21 @@ struct UpdateWindowContent: View {
             get: { updateService.automaticallyUpdates },
             set: { updateService.automaticallyUpdates = $0 }
         )
+    }
+
+    private var updateActionTitle: String {
+        switch updateService.status {
+        case .checking: return "Checking…"
+        case .available: return "Install Update"
+        default: return "Check for Updates"
+        }
+    }
+
+    private var updateActionIcon: String {
+        if case .available = updateService.status {
+            return "arrow.down.circle.fill"
+        }
+        return "arrow.triangle.2.circlepath"
     }
 
     private var statusText: String {

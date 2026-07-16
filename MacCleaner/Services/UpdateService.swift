@@ -41,7 +41,6 @@ final class UpdateService: NSObject, ObservableObject, SPUUpdaterDelegate {
     private var manualCheckInProgress = false
     private var statusResetTask: Task<Void, Never>?
 
-    private static let automaticUpdatesKey = "MacCleanerAutomaticUpdatesEnabled"
     private static let pendingVersionKey = "MacCleanerPendingUpdateVersion"
     private var updaterObservation: NSKeyValueObservation?
 
@@ -52,9 +51,11 @@ final class UpdateService: NSObject, ObservableObject, SPUUpdaterDelegate {
     )
 
     var automaticallyUpdates: Bool {
-        get { UserDefaults.standard.object(forKey: Self.automaticUpdatesKey) as? Bool ?? true }
+        get {
+            controller.updater.automaticallyChecksForUpdates &&
+                controller.updater.automaticallyDownloadsUpdates
+        }
         set {
-            UserDefaults.standard.set(newValue, forKey: Self.automaticUpdatesKey)
             controller.updater.automaticallyChecksForUpdates = newValue
             controller.updater.automaticallyDownloadsUpdates = newValue
             objectWillChange.send()
@@ -64,8 +65,6 @@ final class UpdateService: NSObject, ObservableObject, SPUUpdaterDelegate {
     override private init() {
         super.init()
         let updater = controller.updater
-        updater.automaticallyChecksForUpdates = automaticallyUpdates
-        updater.automaticallyDownloadsUpdates = automaticallyUpdates
         updaterObservation = updater.observe(\.canCheckForUpdates, options: [.initial, .new]) { [weak self] updater, _ in
             Task { @MainActor in self?.canCheckForUpdates = updater.canCheckForUpdates }
         }
@@ -89,12 +88,7 @@ final class UpdateService: NSObject, ObservableObject, SPUUpdaterDelegate {
         statusResetTask?.cancel()
         manualCheckInProgress = true
         status = .checking
-        controller.updater.checkForUpdatesInBackground()
-    }
-
-    func checkInBackground() {
-        guard automaticallyUpdates else { return }
-        controller.updater.checkForUpdatesInBackground()
+        controller.updater.checkForUpdates()
     }
 
     func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {

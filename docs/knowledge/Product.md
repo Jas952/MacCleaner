@@ -41,7 +41,7 @@ Tools также является персональной локальной ut
 - Fan control зависит от Mac и доступности AppleSMC; на Apple Silicon данные могут быть ограничены.
 - Advanced SSD зависит от установленного `smartctl`, thermal power — от прав администратора.
 - Pake Apps и LLM Library зависят от внешних CLI `pake` и `llmfit`.
-- Локальная DMG-сборка ad-hoc signed и не заменяет Developer ID signing и notarization.
+- GitHub DMG и обновления Sparkle используют бесплатную EdDSA-проверку и могут устанавливаться без Developer ID, когда MacCleaner скопирован в `/Applications`; ad-hoc подпись не отменяет предупреждение Gatekeeper при первой установке и не заменяет Developer ID signing/notarization.
 
 ## Целевая платформа
 

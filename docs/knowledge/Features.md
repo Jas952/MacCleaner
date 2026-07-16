@@ -60,7 +60,7 @@
 - Модульный menu bar: выбираемые CPU/RAM/GPU/temperature/battery gauges представлены draggable tiles с ведущей handle вместо стрелок; системный preview переносит всю плитку без смещения, а список анимированно раздвигается при hover. Общий режим `Battery / Values`, текущие значения, сохраняемый left-to-right order и индивидуальные однобуквенные форматы остаются независимыми настройками; quick tools занимают полную ширину секции и включаются нативными checkbox слева от названия.
 - В status item режим `Battery` показывает выровненные вертикальные indicators с load/heat fill, semantic green/orange/red, temperature thermometer и окрашенный тем же semantic color compact format marker (`%/C`, `%/G`, `%/°`, `C/F`, `%/clock`). Режим `Values` заменяет battery на непосредственные проценты или числа с единицей измерения. Оба режима используют одинаковые `CPU`, `RAM`, `GPU`, `TEMP`, `BAT` labels, dividers, accessibility values и live preview в Settings. При отключении всех gauges остаётся настоящий значок приложения MacCleaner.
 - Menu bar modules визуально разделены тонкими dividers; short labels увеличены до сопоставимого с battery кегля, а термометр стоит после temperature battery.
-- Updates: Sparkle, signed appcast, background/manual checks и общий About & Updates overlay.
+- Updates: Sparkle, подписанный EdDSA appcast, шестичасовые автоматические проверки и общий About & Updates overlay. Ручная команда открывает штатный сценарий Download → Install → Relaunch; автоматический режим управляет одновременно проверкой и фоновой загрузкой без отдельного дублирующего `UserDefaults`.
 
 ### UI и качество
 

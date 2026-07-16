@@ -276,9 +276,6 @@ struct ContentView: View {
             }
         }
         .onAppear {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-                updateService.checkInBackground()
-            }
             guard !storageViewPrepared else { return }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
                 storageViewPrepared = true
