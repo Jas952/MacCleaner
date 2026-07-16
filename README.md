@@ -17,14 +17,27 @@
   </a>
 </p>
 
-## What It Does
+MacCleaner is a native macOS utility for understanding what is happening on your Mac and acting on it from one place. It combines live system monitoring, storage analysis, safe cleanup, process inspection, AI workload visibility, and practical diagnostics.
 
-| Need | MacCleaner |
-| --- | --- |
-| Understand the system | CPU, memory, disks, network, GPU, battery, thermals, processes, and windows |
-| Recover storage | Large files, junk, exact duplicates, similar photos, app leftovers, and local iCloud copies |
-| See AI workload | Agent processes, memory use, MCP servers, skills, profiles, components, and local indexes |
-| Maintain the Mac | Startup items, Desktop tools, fans, keyboard, speakers, APFS, SMART, and network diagnostics |
+It does not treat cleanup as a one-click promise. MacCleaner shows what it found, keeps potentially destructive choices visible, and uses bounded, cancellable scans so deeper analysis does not turn into uncontrolled full-disk work.
+
+## Understand, Clean, and Maintain
+
+### System overview
+
+The Dashboard brings together CPU, memory, disks, network, GPU, battery, temperatures, and top processes. Separate process and window views make it easier to see which apps are using resources and which individual instances are active.
+
+### Storage and cleanup
+
+Storage tools find large files, junk, exact duplicates, similar photos, app leftovers, and reclaimable local iCloud copies. Cleanup Advisor ranks opportunities by size, risk, and recovery cost, while Complete Analysis combines the main storage checks into one workflow.
+
+### AI workload
+
+MacCleaner treats local AI tools as part of the system workload. It connects supported agents with their active processes, memory use, MCP servers, skills, profiles, components, and local indexes.
+
+### Utilities and diagnostics
+
+The remaining tools cover startup items, Desktop organization, fans and thermals, keyboard and speaker checks, APFS and SMART diagnostics, network checks, Pake Apps, and local model fit.
 
 ## Verified Facts
 
@@ -57,6 +70,8 @@ Both modes are bounded and cancellable. Thorough expands coverage; it is not an 
 
 ## Local AI Workload
 
+The Agents view answers two practical questions: which tools are active, and what local footprint belongs to them. Everything is inspected on the Mac and shown only when the related tool or data is available.
+
 <p align="center">
   <img src="./docs/readme-media/agents-showcase.png" alt="MacCleaner agent workload overview" width="100%" />
 </p>
@@ -79,12 +94,7 @@ Both modes are bounded and cancellable. Thorough expands coverage; it is not an 
 
 > The current build is not notarized. If macOS blocks the first launch, right-click the app, choose **Open**, and confirm once.
 
-| Requirement or limit | Current status |
-| --- | --- |
-| macOS | 13.0 or newer |
-| File access | Some locations may require Full Disk Access |
-| Fans and sensors | Coverage depends on Mac hardware |
-| Optional tools | SMART, Pake Apps, and LLM Library require their corresponding local CLI |
+MacCleaner requires macOS 13.0 or newer. Some locations may require Full Disk Access; fan and sensor coverage depends on the Mac. SMART, Pake Apps, and LLM Library use their corresponding optional local CLI tools.
 
 <p align="center">
   <img alt="Codex helped with development" src="https://img.shields.io/badge/Helped_by-Codex-111827?style=flat-square&logo=openai&logoColor=white" />
