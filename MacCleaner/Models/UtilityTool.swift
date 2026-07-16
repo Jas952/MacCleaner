@@ -160,7 +160,7 @@ enum MenuBarGaugeDisplayStyle: String, CaseIterable, Codable, Identifiable {
     var icon: String {
         switch self {
         case .battery: return "battery.75percent"
-        case .value: return "percent"
+        case .value: return "textformat.123"
         }
     }
 
@@ -231,6 +231,21 @@ enum MenuBarGauge: String, CaseIterable, Identifiable {
             return .text(format == .fahrenheit ? "F" : "C")
         case .battery:
             return format == .time ? .symbol("clock") : .text("%")
+        }
+    }
+
+    func formatIcon(for format: MenuBarGaugeValueFormat) -> String {
+        switch self {
+        case .cpu:
+            return format == .cores ? "cpu" : "percent"
+        case .ram:
+            return format == .value ? "memorychip" : "percent"
+        case .gpu:
+            return format == .temperature ? "thermometer.medium" : "percent"
+        case .temperature:
+            return format == .fahrenheit ? "f.circle" : "c.circle"
+        case .battery:
+            return format == .time ? "clock" : "percent"
         }
     }
 }

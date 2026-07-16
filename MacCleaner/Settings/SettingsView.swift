@@ -101,29 +101,8 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 18) {
                 SettingsHeader(
                     title: "Menu bar",
-                    subtitle: "Choose battery indicators or direct values, then select which modules appear and how each value is formatted. Order below matches the macOS menu bar."
+                    subtitle: "Choose which modules appear, then set each module's indicator style and value format. Order below matches the macOS menu bar."
                 )
-
-                GroupBox("Display style") {
-                    HStack(spacing: 16) {
-                        Picker("Display style", selection: $settings.menuBarGaugeDisplayStyle) {
-                            ForEach(MenuBarGaugeDisplayStyle.allCases) { style in
-                                Label(style.title, systemImage: style.icon)
-                                    .tag(style)
-                            }
-                        }
-                        .labelsHidden()
-                        .pickerStyle(.segmented)
-                        .frame(width: 280)
-
-                        Text(settings.menuBarGaugeDisplayStyle.detail)
-                            .font(.caption)
-                            .foregroundStyle(Color.textSecondaryLight)
-
-                        Spacer(minLength: 0)
-                    }
-                    .padding(.vertical, 4)
-                }
 
                 GroupBox("Live preview") {
                     HStack {
@@ -138,16 +117,16 @@ struct SettingsView: View {
                                     gauge: gauge,
                                     monitor: monitor,
                                     format: settings.valueFormat(for: gauge),
-                                    displayStyle: settings.menuBarGaugeDisplayStyle
+                                    displayStyle: settings.displayStyle(for: gauge)
                                 )
                             }
                         }
                         if settings.menuBarGaugeIDs.isEmpty {
-                            Image(systemName: "bolt.circle.fill")
-                                .foregroundStyle(Color.accentBlue)
-                            Text("MacCleaner icon only")
-                                .font(.caption)
-                                .foregroundStyle(Color.textSecondaryLight)
+                            Image(nsImage: NSApplication.shared.applicationIconImage)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: 18, height: 18)
+                                .help("MacCleaner icon")
                         }
                         Spacer()
                     }
@@ -228,7 +207,7 @@ struct SettingsView: View {
                         gauge: gauge,
                         monitor: monitor,
                         format: settings.valueFormat(for: gauge),
-                        displayStyle: settings.menuBarGaugeDisplayStyle
+                        displayStyle: settings.displayStyle(for: gauge)
                     )
                 } else {
                     Text("Hidden")
@@ -238,13 +217,28 @@ struct SettingsView: View {
             }
             .frame(width: 126, alignment: .leading)
 
+            Picker("Indicator style", selection: Binding(
+                get: { settings.displayStyle(for: gauge) },
+                set: { settings.setDisplayStyle($0, for: gauge) }
+            )) {
+                ForEach(MenuBarGaugeDisplayStyle.allCases) { style in
+                    Image(systemName: style.icon)
+                        .accessibilityLabel(style.title)
+                        .tag(style)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.segmented)
+            .frame(width: 72)
+            .help("Indicator style: \(settings.displayStyle(for: gauge).title)")
+
             Picker("Format", selection: Binding(
                 get: { settings.valueFormat(for: gauge) },
                 set: { settings.setValueFormat($0, for: gauge) }
             )) {
                 ForEach(gauge.valueFormats) { format in
-                    Text(format.compactTitle)
-                        .help(format.accessibilityTitle)
+                    Image(systemName: gauge.formatIcon(for: format))
+                        .accessibilityLabel(format.accessibilityTitle)
                         .tag(format)
                 }
             }

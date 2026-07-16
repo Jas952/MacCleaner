@@ -316,7 +316,6 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
         let title = NSMutableAttributedString()
         var accessibilityParts: [String] = []
         let gauges = settings.menuBarGaugeIDs.compactMap(MenuBarGauge.init(rawValue:))
-        let displayStyle = settings.menuBarGaugeDisplayStyle
 
         if gauges.isEmpty {
             button.image = applicationStatusIcon()
@@ -329,6 +328,7 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
         for (index, gauge) in gauges.enumerated() {
             let reading = reading(for: gauge)
             let format = settings.valueFormat(for: gauge)
+            let displayStyle = settings.displayStyle(for: gauge)
             if index > 0 {
                 title.append(NSAttributedString(
                     string: "   │   ",
@@ -628,13 +628,20 @@ struct MenuBarLabel: View {
             Text(gauge.shortTitle)
                 .font(.system(size: 11, weight: .semibold, design: .rounded))
                 .foregroundStyle(.primary)
-            MenuBarBatteryIndicator(progress: data.progress, color: data.color)
-            if gauge == .temperature {
-                Image(systemName: "thermometer.medium")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(.primary)
+            if settings.displayStyle(for: gauge) == .battery {
+                MenuBarBatteryIndicator(progress: data.progress, color: data.color)
+                if gauge == .temperature {
+                    Image(systemName: "thermometer.medium")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.primary)
+                }
+                MenuBarFormatMarker(marker: gauge.formatMarker(for: settings.valueFormat(for: gauge)))
+            } else {
+                Text(data.value)
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .monospacedDigit()
+                    .foregroundStyle(data.color)
             }
-            MenuBarFormatMarker(marker: gauge.formatMarker(for: settings.valueFormat(for: gauge)))
         }
         .frame(height: 18, alignment: .center)
         .fixedSize()

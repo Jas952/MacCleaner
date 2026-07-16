@@ -776,19 +776,22 @@ final class SafetyPolicyTests: XCTestCase {
         XCTAssertEqual(MenuBarGaugeDisplayStyle.value.title, "Values")
     }
 
-    func testMenuBarDisplayStylePersists() throws {
+    func testMenuBarDisplayStyleMigratesAndPersistsPerGauge() throws {
         let suiteName = "MacCleanerMenuBarStyleTests-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
         defaults.removePersistentDomain(forName: suiteName)
         defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(MenuBarGaugeDisplayStyle.value.rawValue, forKey: "menuBarGaugeDisplayStyle")
 
         let first = SettingsManager(defaults: defaults)
-        XCTAssertEqual(first.menuBarGaugeDisplayStyle, .battery)
+        XCTAssertTrue(MenuBarGauge.allCases.allSatisfy { first.displayStyle(for: $0) == .value })
 
-        first.menuBarGaugeDisplayStyle = .value
+        first.setDisplayStyle(.battery, for: .cpu)
 
         let reloaded = SettingsManager(defaults: defaults)
-        XCTAssertEqual(reloaded.menuBarGaugeDisplayStyle, .value)
+        XCTAssertEqual(reloaded.displayStyle(for: .cpu), .battery)
+        XCTAssertEqual(reloaded.displayStyle(for: .ram), .value)
+        XCTAssertEqual(reloaded.displayStyle(for: .gpu), .value)
     }
 
     func testMenuBarGaugeDragOrderPersists() throws {

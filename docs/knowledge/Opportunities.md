@@ -59,7 +59,7 @@
 | IMP-053 | Добавить поддержку Charge Limit                           | Определять capability; для macOS Tahoe 26.4+ и Apple silicon открывать системную настройку 80–100%; не писать private SMC keys без отдельного safety-решения                                | Высокий     | Отложено         | [Charge Limit](../utility-tools-and-menu-bar-analysis.md#8-порог-зарядки)                                                        |
 | IMP-054 | Добавить модульные menu bar gauges                        | Сделать компактные вертикальные CPU/GPU/RAM indicators по референсу, с порядком/скрытием, semantic colors, accessibility и без повышения sampling cadence                                   | Высокий     | Выполнено        | [Menu bar gauges](../utility-tools-and-menu-bar-analysis.md#9-компактные-индикаторы-menu-bar)                                    |
 
-- [x] IMP-054: Menu bar gauges поддерживают переключаемые `Battery / Values`: battery-shaped indicators имеют динамическое заполнение, semantic green/orange/red и отдельный знак термометра, а direct-value режим показывает выбранные проценты или числа; оба сохраняют accessibility values.
+- [x] IMP-054: Каждый menu bar gauge независимо переключает `Battery / Values` и формат компактными icon-only controls в своей строке; battery-shaped indicators имеют динамическое заполнение, semantic green/orange/red и отдельный знак термометра, а direct-value режим показывает выбранные проценты или числа. Настройки мигрируют с прежнего общего стиля и сохраняют accessibility values.
 
 ### Внешние ориентиры
 
@@ -81,7 +81,7 @@
 - [ ] IMP-051: Screen Text удалён из runtime-каталога как некорректно работающий; нужен отдельный ScreenCaptureKit/Vision lifecycle и повторная продуктовая проверка.
 - [ ] IMP-052: Awake Profiles удалены из runtime-каталога после UX-аудита; возвращать только как самостоятельный, понятный сценарий, не пересекающийся с Physical Maintenance.
 - [ ] IMP-053: Charge Limit временно убран из runtime и оставлен в Settings с пометкой beta.
-- [x] IMP-054: реализованы выбираемые CPU/RAM/GPU/temperature/battery gauges со стабильными строками настройки, drag-handle вместо стрелок, сохраняемым порядком, общим стилем `Battery / Values` и индивидуальным однобуквенным форматом без отдельного sampler.
+- [x] IMP-054: реализованы выбираемые CPU/RAM/GPU/temperature/battery gauges со стабильными строками настройки, drag-handle вместо стрелок, сохраняемым порядком и индивидуальными icon-only выборами `Battery / Values` и формата без отдельного sampler.
 
 Дополнительно реализованы единый каталог инструментов, ручное включение в отдельном Settings window, раздельная настройка Tools и quick actions, pointer-drag для left-to-right порядка menu bar и полноразмерная sidebar/detail-композиция Tools с вводным интерактивным экраном.
 

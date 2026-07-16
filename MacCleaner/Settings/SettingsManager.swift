@@ -17,8 +17,8 @@ class SettingsManager: ObservableObject {
     @Published private(set) var menuBarGaugeFormats: [String: String] {
         didSet { defaults.set(menuBarGaugeFormats, forKey: Keys.menuBarGaugeFormats) }
     }
-    @Published var menuBarGaugeDisplayStyle: MenuBarGaugeDisplayStyle {
-        didSet { defaults.set(menuBarGaugeDisplayStyle.rawValue, forKey: Keys.menuBarGaugeDisplayStyle) }
+    @Published private(set) var menuBarGaugeDisplayStyles: [String: String] {
+        didSet { defaults.set(menuBarGaugeDisplayStyles, forKey: Keys.menuBarGaugeDisplayStyles) }
     }
     @Published var clipboardHistoryInMenuBar: Bool {
         didSet { defaults.set(clipboardHistoryInMenuBar, forKey: Keys.clipboardHistoryInMenuBar) }
@@ -30,7 +30,8 @@ class SettingsManager: ObservableObject {
         static let menuBarTools = "menuBarUtilityTools"
         static let menuBarGauges = "menuBarGaugeOrder"
         static let menuBarGaugeFormats = "menuBarGaugeFormats"
-        static let menuBarGaugeDisplayStyle = "menuBarGaugeDisplayStyle"
+        static let menuBarGaugeDisplayStyles = "menuBarGaugeDisplayStyles"
+        static let legacyMenuBarGaugeDisplayStyle = "menuBarGaugeDisplayStyle"
         static let clipboardHistoryInMenuBar = "clipboardHistoryInMenuBar"
     }
     
@@ -56,8 +57,13 @@ class SettingsManager: ObservableObject {
             let stored = storedFormats[gauge.rawValue]
             return (gauge.rawValue, stored.flatMap { validFormats.contains($0) ? $0 : nil } ?? gauge.valueFormats[0].rawValue)
         })
-        menuBarGaugeDisplayStyle = defaults.string(forKey: Keys.menuBarGaugeDisplayStyle)
+        let storedStyles = defaults.dictionary(forKey: Keys.menuBarGaugeDisplayStyles) as? [String: String] ?? [:]
+        let legacyStyle = defaults.string(forKey: Keys.legacyMenuBarGaugeDisplayStyle)
             .flatMap(MenuBarGaugeDisplayStyle.init(rawValue:)) ?? .battery
+        menuBarGaugeDisplayStyles = Dictionary(uniqueKeysWithValues: MenuBarGauge.allCases.map { gauge in
+            let stored = storedStyles[gauge.rawValue].flatMap(MenuBarGaugeDisplayStyle.init(rawValue:))
+            return (gauge.rawValue, (stored ?? legacyStyle).rawValue)
+        })
         clipboardHistoryInMenuBar = defaults.object(forKey: Keys.clipboardHistoryInMenuBar) as? Bool ?? true
     }
 
@@ -120,5 +126,14 @@ class SettingsManager: ObservableObject {
     func setValueFormat(_ format: MenuBarGaugeValueFormat, for gauge: MenuBarGauge) {
         guard gauge.valueFormats.contains(format) else { return }
         menuBarGaugeFormats[gauge.rawValue] = format.rawValue
+    }
+
+    func displayStyle(for gauge: MenuBarGauge) -> MenuBarGaugeDisplayStyle {
+        let rawValue = menuBarGaugeDisplayStyles[gauge.rawValue]
+        return rawValue.flatMap(MenuBarGaugeDisplayStyle.init(rawValue:)) ?? .battery
+    }
+
+    func setDisplayStyle(_ style: MenuBarGaugeDisplayStyle, for gauge: MenuBarGauge) {
+        menuBarGaugeDisplayStyles[gauge.rawValue] = style.rawValue
     }
 }
