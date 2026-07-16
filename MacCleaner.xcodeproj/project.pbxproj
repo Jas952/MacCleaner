@@ -69,6 +69,10 @@
 		A035_LIV /* LaunchIntroView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F035LIV /* LaunchIntroView.swift */; };
 		A053_US /* UpdateService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F053_US /* UpdateService.swift */; };
 		A054_UV /* UpdateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F054_UV /* UpdateView.swift */; };
+		A055_UTM /* UtilityTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = F055_UTM /* UtilityTool.swift */; };
+		A056_UTS /* UtilityToolServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = F056_UTS /* UtilityToolServices.swift */; };
+		A057_UTV /* UtilityToolsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F057_UTV /* UtilityToolsView.swift */; };
+		A058_CHS /* ClipboardHistoryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F058_CHS /* ClipboardHistoryService.swift */; };
 		A_SPARKLE /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = P_SPARKLE /* Sparkle */; };
 /* End PBXBuildFile section */
 
@@ -144,6 +148,10 @@
 		F035LIV /* LaunchIntroView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchIntroView.swift; sourceTree = "<group>"; };
 		F053_US /* UpdateService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateService.swift; sourceTree = "<group>"; };
 		F054_UV /* UpdateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateView.swift; sourceTree = "<group>"; };
+		F055_UTM /* UtilityTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UtilityTool.swift; sourceTree = "<group>"; };
+		F056_UTS /* UtilityToolServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UtilityToolServices.swift; sourceTree = "<group>"; };
+		F057_UTV /* UtilityToolsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UtilityToolsView.swift; sourceTree = "<group>"; };
+		F058_CHS /* ClipboardHistoryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardHistoryService.swift; sourceTree = "<group>"; };
 		F010 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		F_RELEASE_NOTES /* ReleaseNotes.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = ReleaseNotes.md; sourceTree = "<group>"; };
 		F011 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -202,6 +210,7 @@
 				F020AIM /* AIWorkload.swift */,
 				F023AII /* AIIndexStore.swift */,
 				F025LFIM /* LLMFitModels.swift */,
+				F055_UTM /* UtilityTool.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -232,6 +241,8 @@
 				F051SRB /* ScanResourceBudget.swift */,
 				F052SWS /* StorageWorkspaceService.swift */,
 				F053_US /* UpdateService.swift */,
+				F056_UTS /* UtilityToolServices.swift */,
+				F058_CHS /* ClipboardHistoryService.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -268,6 +279,7 @@
 				F048SPV /* SimilarPhotoView.swift */,
 				F050SOV /* StartupOptimizerView.swift */,
 				F054_UV /* UpdateView.swift */,
+				F057_UTV /* UtilityToolsView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -445,6 +457,10 @@
 				A035_LIV /* LaunchIntroView.swift in Sources */,
 				A053_US /* UpdateService.swift in Sources */,
 				A054_UV /* UpdateView.swift in Sources */,
+				A055_UTM /* UtilityTool.swift in Sources */,
+				A056_UTS /* UtilityToolServices.swift in Sources */,
+				A057_UTV /* UtilityToolsView.swift in Sources */,
+				A058_CHS /* ClipboardHistoryService.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -575,7 +591,7 @@
 				CODE_SIGN_ENTITLEMENTS = MacCleaner/MacCleaner.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 4;
+				CURRENT_PROJECT_VERSION = 5;
 				ENABLE_HARDENED_RUNTIME = NO;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = MacCleaner/Info.plist;
@@ -584,7 +600,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
-				MARKETING_VERSION = 1.2;
+				MARKETING_VERSION = 1.3;
 				PRODUCT_BUNDLE_IDENTIFIER = com.maccleaner.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
@@ -602,7 +618,7 @@
 				CODE_SIGN_ENTITLEMENTS = MacCleaner/MacCleaner.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 4;
+				CURRENT_PROJECT_VERSION = 5;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = MacCleaner/Info.plist;
@@ -611,7 +627,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
-				MARKETING_VERSION = 1.2;
+				MARKETING_VERSION = 1.3;
 				PRODUCT_BUNDLE_IDENTIFIER = com.maccleaner.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;

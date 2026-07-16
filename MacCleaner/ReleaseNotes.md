@@ -1,9 +1,9 @@
-# MacCleaner 1.2
+# MacCleaner 1.3
 
-- Redesigned Storage workflows with consistent scan screens, progress logs, selection controls, and cleanup actions.
-- Added actionable Complete Analysis results with safe selection and unified cleanup summaries.
-- Improved Junk Files, Large Files, Disk Map, duplicate detection, similar photos, cloud reclaim, and startup optimization.
-- Expanded process groups with aggregate metrics, per-PID details, and individual or group Quit controls.
-- Refined the About & Updates window and synchronized its release notes with GitHub Releases and Sparkle.
-- Improved Desktop auto-organization, disk and fan layouts, navigation controls, and visual stability.
-- Improved AI agent attribution, background scanning performance, and general application reliability.
+- Redesigned Tools as a scalable sidebar workspace with separate controls for enabled utilities and menu bar quick actions.
+- Added Floating Drop Shelf and session-only Clipboard History with global shortcuts, keyboard navigation, and pasteboard format preservation.
+- Added native Color Picker and safe Homebrew maintenance workflows with review and confirmation before changes.
+- Rebuilt menu bar monitoring with configurable CPU, RAM, GPU, temperature, and battery modules, ordering, formats, and display styles.
+- Expanded hardware and input diagnostics, including compact keyboard, pointer, speaker, storage health, and network test layouts.
+- Added a new static product website and refreshed project documentation around implemented features, limitations, and future work.
+- Improved native macOS window behavior, visual consistency, accessibility, and general application reliability.

@@ -46,7 +46,7 @@ The remaining tools cover startup items, Desktop organization, fans and thermals
 | Permanent-delete fallback | **0** | If Trash fails, cleanup stops |
 | Scan modes | **2** | Efficient for speed; Thorough for wider coverage |
 | Exact-duplicate verification | **3 stages** | Metadata → 128 KB sample → full SHA-256 |
-| Safety and policy tests | **39 passing** | Current XCTest suite passed on July 14, 2026 |
+| Safety and policy tests | **46 passing** | Current XCTest suite passed on July 16, 2026 |
 | Automatic update checks | **Every 6 hours** | HTTPS appcast with EdDSA verification |
 | Performance benchmark | **Pending** | Percentages require the same corpus and Mac |
 

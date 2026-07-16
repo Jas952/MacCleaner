@@ -675,11 +675,9 @@ struct NetworkTestPanel: View {
     @ObservedObject private var service: NetworkDiagnosticService
     @State private var testMode: NetworkDiagnosticService.TestMode = .quick
     @EnvironmentObject private var modalCoordinator: AppModalCoordinator
-    private let minimumContentHeight: CGFloat
 
-    init(service: NetworkDiagnosticService, minimumContentHeight: CGFloat = 400) {
+    init(service: NetworkDiagnosticService) {
         self._service = ObservedObject(wrappedValue: service)
-        self.minimumContentHeight = minimumContentHeight
     }
 
     var body: some View {
@@ -692,12 +690,9 @@ struct NetworkTestPanel: View {
         ) {
             VStack(alignment: .leading, spacing: 14) {
                 speedConsole
-                Spacer(minLength: 0)
                 latencyStrip
-                Spacer(minLength: 0)
                 networkProfile
             }
-            .frame(minHeight: minimumContentHeight, alignment: .top)
         }
     }
 

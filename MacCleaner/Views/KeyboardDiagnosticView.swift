@@ -134,9 +134,8 @@ struct KeyboardDiagnosticSection: View {
                     activeKeyCodes: service.activeKeyCodes,
                     testedKeyCodes: service.testedKeyCodes
                 )
-                .frame(height: 354)
+                .frame(height: 284)
                 .padding(.horizontal, 16)
-                .padding(.top, 8)
 
                 diagnosticsFooter
             }
@@ -368,7 +367,7 @@ private struct MacBookKeyboardMap: View {
                 keyRow(MacBookKeyboardLayout.shiftRow, unit: unit, gap: gap, height: keyHeight)
                 bottomRow(unit: unit, gap: gap, height: keyHeight)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+            .frame(maxWidth: .infinity, alignment: .top)
         }
     }
 

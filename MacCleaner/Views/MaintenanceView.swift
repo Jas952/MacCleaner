@@ -691,7 +691,7 @@ private struct InfoPanel<Pickers: View>: View {
 
 // MARK: - Card 1: Screen Dim
 
-private struct ScreenDimCard: View {
+struct ScreenDimCard: View {
     @ObservedObject var svc: MaintenanceService
     let cardHeight: CGFloat
 
@@ -744,7 +744,7 @@ private struct ScreenDimCard: View {
 
 // MARK: - Card 2: Keyboard Lock
 
-private struct KeyboardLockCard: View {
+struct KeyboardLockCard: View {
     @ObservedObject var svc: MaintenanceService
     let cardHeight: CGFloat
 
@@ -788,7 +788,7 @@ private struct KeyboardLockCard: View {
 
 // MARK: - Card 3: Both
 
-private struct BothCard: View {
+struct BothCard: View {
     @ObservedObject var svc: MaintenanceService
     let cardHeight: CGFloat
 
@@ -1094,15 +1094,10 @@ struct MaintenanceView: View {
     }
 
     private var networkTestPane: some View {
-        GeometryReader { geo in
-            ScrollView(showsIndicators: false) {
-                NetworkTestPanel(
-                    service: networkDiagnosticService,
-                    minimumContentHeight: max(400, geo.size.height - 98)
-                )
+        ScrollView(showsIndicators: false) {
+            NetworkTestPanel(service: networkDiagnosticService)
                 .padding(.horizontal, 28)
                 .padding(.vertical, 10)
-            }
         }
     }
 

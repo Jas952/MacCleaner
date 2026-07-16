@@ -1,6 +1,6 @@
 # MacCleaner Knowledge Base
 
-Актуальная карта проекта MacCleaner. Состояние сверено с рабочим деревом 2026-07-13.
+Актуальная карта проекта MacCleaner. Состояние сверено с рабочим деревом 2026-07-16.
 
 ## Проект
 
@@ -8,17 +8,17 @@
 - [[Architecture|Архитектура]]
 - [[Features|Реализованные возможности]]
 - [[Decisions|Технические решения]]
-- [[Backlog|Задачи и ограничения]]
+- [[Opportunities|Единый план улучшений и задач]]
 
 ## Текущее состояние
 
-- Версия приложения: `1.1`, build `3`.
+- Версия приложения: `1.3`, build `5`.
 - Платформа: macOS 13+, Swift 5, SwiftUI.
 - Основная внешняя зависимость: Sparkle `2.9.4`.
-- В проекте 60 Swift-файлов основного target.
-- В `SafetyPolicyTests.swift` находится 39 XCTest-тестов.
-- Проверка 2026-07-13: `xcodebuild test` завершилась с `TEST SUCCEEDED`.
-- Рабочее дерево содержит незакоммиченные изменения v1.1.1; эта база описывает именно их текущее состояние, а не только последний commit.
+- В проекте 59 Swift-файлов основного target.
+- В `SafetyPolicyTests.swift` находится 46 XCTest-тестов.
+- Проверка 2026-07-16: `xcodebuild test` завершилась с `TEST SUCCEEDED`.
+- База знаний описывает текущую версию 1.3 и фактическое состояние рабочего дерева.
 
 ## Основные области
 
@@ -38,7 +38,7 @@
 - [x] Описана актуальная архитектура
 - [x] Подтверждены реализованные функции
 - [x] Зафиксированы ключевые технические решения
-- [x] Составлен подтверждённый backlog
+- [x] Составлен единый реестр улучшений и задач
 
 ## Источники
 
@@ -48,6 +48,7 @@
 - `MacCleaner/Services/`
 - `MacCleaner/Models/`
 - `MacCleanerTests/SafetyPolicyTests.swift`
-- `docs/v1.1.1-completion-audit.md`
-- `docs/maccleaner-v1.1-technical-report.md`
-
+- `docs/effectiveness-measurement-report.md`
+- `docs/maximum-effectiveness-and-memory-compression-report.md`
+- `docs/thermal-load-notification-analysis.md`
+- `docs/background-suspension-analysis.md`

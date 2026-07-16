@@ -222,7 +222,7 @@ struct ContentView: View {
                     case .aiAgents: AIAgentsView(monitor: monitor)
                     case .aiIndexes: AILoadView(monitor: monitor)
                     case .aiLibrary: AILibraryView()
-                    case .maintenance: MaintenanceView()
+                    case .maintenance: UtilityToolsView(monitor: monitor)
                     }
 
                     if storageViewPrepared {

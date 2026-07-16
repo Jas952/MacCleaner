@@ -1,4 +1,6 @@
 import Darwin
+import AppKit
+import Combine
 import CoreGraphics
 import SwiftUI
 
@@ -19,6 +21,9 @@ struct MacCleanerApp: App {
                     maxHeight: 760,
                     alignment: .topLeading
                 )
+                .background {
+                    StatusBarSceneBridge(monitor: sharedMonitor, appDelegate: appDelegate)
+                }
         }
         .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentSize)
@@ -44,21 +49,39 @@ struct MacCleanerApp: App {
         }
         
         Settings {
-            SettingsView()
+            SettingsView(monitor: sharedMonitor)
         }
-
-        MenuBarExtra {
-            MenuBarPopover(monitor: sharedMonitor)
-                .frame(width: 420)
-        } label: {
-            MenuBarLabel(monitor: sharedMonitor)
-        }
-        .menuBarExtraStyle(.window)
     }
 }
 
 class AppDelegate: NSObject, NSApplicationDelegate {
+    private var statusBarController: StatusBarController?
+    private var utilityHotKeys: GlobalUtilityHotKeyController?
+
+    @MainActor
+    func configureStatusBar(
+        monitor: SystemMonitor,
+        openMain: @escaping () -> Void,
+        openShelf: @escaping () -> Void,
+        openSettings: @escaping () -> Void
+    ) {
+        if let statusBarController {
+            statusBarController.updateActions(openMain: openMain, openShelf: openShelf, openSettings: openSettings)
+        } else {
+            statusBarController = StatusBarController(
+                monitor: monitor,
+                openMain: openMain,
+                openShelf: openShelf,
+                openSettings: openSettings
+            )
+        }
+        installUtilityRuntime()
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
+        Task { @MainActor [weak self] in
+            self?.installUtilityRuntime()
+        }
         #if DEBUG
         if ProcessInfo.processInfo.environment["MACCLEANER_MAINTENANCE_SELFTEST"] == "screenDimCmdQ" {
             Task { @MainActor in
@@ -66,6 +89,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         #endif
+    }
+
+    @MainActor
+    private func installUtilityRuntime() {
+        _ = ClipboardHistoryService.shared
+        guard utilityHotKeys == nil else { return }
+        utilityHotKeys = GlobalUtilityHotKeyController(
+            openShelf: { ShelfPanelController.shared.show() },
+            openClipboard: { ClipboardHistoryPanelController.shared.show() }
+        )
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -85,6 +118,406 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         MaintenanceService.shared.exitAll()
+    }
+}
+
+private struct StatusBarSceneBridge: View {
+    @ObservedObject var monitor: SystemMonitor
+    let appDelegate: AppDelegate
+
+    @ViewBuilder
+    var body: some View {
+        if #available(macOS 14.0, *) {
+            ModernStatusBarSceneBridge(monitor: monitor, appDelegate: appDelegate)
+        } else {
+            LegacyStatusBarSceneBridge(monitor: monitor, appDelegate: appDelegate)
+        }
+    }
+}
+
+@available(macOS 14.0, *)
+private struct ModernStatusBarSceneBridge: View {
+    @ObservedObject var monitor: SystemMonitor
+    let appDelegate: AppDelegate
+    @Environment(\.openWindow) private var openWindow
+    @Environment(\.openSettings) private var openSettings
+
+    var body: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .onAppear {
+                appDelegate.configureStatusBar(
+                    monitor: monitor,
+                    openMain: {
+                        openWindow(id: "main")
+                        NSApp.activate(ignoringOtherApps: true)
+                    },
+                    openShelf: {
+                        ShelfPanelController.shared.show()
+                    },
+                    openSettings: {
+                        openSettings()
+                        NSApp.activate(ignoringOtherApps: true)
+                    }
+                )
+            }
+    }
+}
+
+private struct LegacyStatusBarSceneBridge: View {
+    @ObservedObject var monitor: SystemMonitor
+    let appDelegate: AppDelegate
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .onAppear {
+                appDelegate.configureStatusBar(
+                    monitor: monitor,
+                    openMain: {
+                        openWindow(id: "main")
+                        NSApp.activate(ignoringOtherApps: true)
+                    },
+                    openShelf: {
+                        ShelfPanelController.shared.show()
+                    },
+                    openSettings: {
+                        NSApp.sendAction(Selector(("showPreferencesWindow:")), to: nil, from: nil)
+                        NSApp.activate(ignoringOtherApps: true)
+                    }
+                )
+            }
+    }
+}
+
+@MainActor
+final class StatusBarController: NSObject, NSPopoverDelegate {
+    private let monitor: SystemMonitor
+    private let settings = SettingsManager.shared
+    private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+    private let popover = NSPopover()
+    private var cancellables: Set<AnyCancellable> = []
+    private var outsideClickMonitor: Any?
+    private var openMain: () -> Void
+    private var openShelf: () -> Void
+    private var openSettings: () -> Void
+
+    init(
+        monitor: SystemMonitor,
+        openMain: @escaping () -> Void,
+        openShelf: @escaping () -> Void,
+        openSettings: @escaping () -> Void
+    ) {
+        self.monitor = monitor
+        self.openMain = openMain
+        self.openShelf = openShelf
+        self.openSettings = openSettings
+        super.init()
+        configureStatusItem()
+        configurePopover()
+        observeUpdates()
+        updateStatusItem()
+    }
+
+    deinit {
+        if let outsideClickMonitor {
+            NSEvent.removeMonitor(outsideClickMonitor)
+        }
+        NSStatusBar.system.removeStatusItem(statusItem)
+    }
+
+    func updateActions(
+        openMain: @escaping () -> Void,
+        openShelf: @escaping () -> Void,
+        openSettings: @escaping () -> Void
+    ) {
+        self.openMain = openMain
+        self.openShelf = openShelf
+        self.openSettings = openSettings
+        configurePopover()
+    }
+
+    private func configureStatusItem() {
+        guard let button = statusItem.button else { return }
+        button.image = applicationStatusIcon()
+        button.imagePosition = .imageOnly
+        button.target = self
+        button.action = #selector(togglePopover)
+        button.sendAction(on: [.leftMouseUp])
+    }
+
+    private func configurePopover() {
+        popover.delegate = self
+        popover.behavior = .transient
+        popover.animates = true
+        popover.contentSize = NSSize(width: 420, height: 430)
+        popover.contentViewController = NSHostingController(
+            rootView: MenuBarPopover(
+                monitor: monitor,
+                openMain: openMain,
+                openShelf: openShelf,
+                openSettings: openSettings
+            )
+            .frame(width: 420)
+        )
+    }
+
+    func popoverWillShow(_ notification: Notification) {
+        guard outsideClickMonitor == nil else { return }
+        outsideClickMonitor = NSEvent.addGlobalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+        ) { [weak self] _ in
+            DispatchQueue.main.async {
+                self?.popover.performClose(nil)
+            }
+        }
+    }
+
+    func popoverDidClose(_ notification: Notification) {
+        guard let outsideClickMonitor else { return }
+        NSEvent.removeMonitor(outsideClickMonitor)
+        self.outsideClickMonitor = nil
+    }
+
+    private func observeUpdates() {
+        settings.objectWillChange
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                DispatchQueue.main.async { self?.updateStatusItem() }
+            }
+            .store(in: &cancellables)
+
+        monitor.objectWillChange
+            .debounce(for: .milliseconds(200), scheduler: RunLoop.main)
+            .sink { [weak self] _ in
+                DispatchQueue.main.async { self?.updateStatusItem() }
+            }
+            .store(in: &cancellables)
+
+        NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.updateStatusItem() }
+            .store(in: &cancellables)
+    }
+
+    @objc private func togglePopover() {
+        guard let button = statusItem.button else { return }
+        if popover.isShown {
+            popover.performClose(nil)
+        } else {
+            configurePopover()
+            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        }
+    }
+
+    private func updateStatusItem() {
+        guard let button = statusItem.button else { return }
+        let title = NSMutableAttributedString()
+        var accessibilityParts: [String] = []
+        let gauges = settings.menuBarGaugeIDs.compactMap(MenuBarGauge.init(rawValue:))
+        let displayStyle = settings.menuBarGaugeDisplayStyle
+
+        if gauges.isEmpty {
+            button.image = applicationStatusIcon()
+            button.imagePosition = .imageOnly
+        } else {
+            button.image = nil
+            button.imagePosition = .noImage
+        }
+
+        for (index, gauge) in gauges.enumerated() {
+            let reading = reading(for: gauge)
+            let format = settings.valueFormat(for: gauge)
+            if index > 0 {
+                title.append(NSAttributedString(
+                    string: "   │   ",
+                    attributes: [
+                        .foregroundColor: NSColor.separatorColor,
+                        .font: NSFont.systemFont(ofSize: 11, weight: .regular),
+                        .baselineOffset: 1
+                    ]
+                ))
+            }
+            title.append(NSAttributedString(
+                string: "\(gauge.shortTitle) ",
+                attributes: [
+                    .foregroundColor: NSColor.labelColor,
+                    .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
+                    .baselineOffset: 1
+                ]
+            ))
+
+            switch displayStyle {
+            case .battery:
+                title.append(imageAttachment(
+                    batteryIndicatorImage(progress: reading.progress, color: reading.color),
+                    baselineOffset: -3
+                ))
+                if gauge == .temperature {
+                    title.append(NSAttributedString(string: " "))
+                    title.append(symbolAttachment(named: "thermometer.medium", accessibilityDescription: "Temperature"))
+                }
+                title.append(NSAttributedString(string: " "))
+                appendFormatMarker(
+                    gauge.formatMarker(for: format),
+                    color: reading.color,
+                    to: title
+                )
+            case .value:
+                title.append(NSAttributedString(
+                    string: reading.value,
+                    attributes: [
+                        .foregroundColor: reading.color,
+                        .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .semibold),
+                        .baselineOffset: 1
+                    ]
+                ))
+            }
+            accessibilityParts.append("\(gauge.title) \(reading.value)")
+        }
+
+        button.attributedTitle = title
+        button.setAccessibilityLabel(accessibilityParts.isEmpty ? "MacCleaner" : accessibilityParts.joined(separator: ", "))
+        statusItem.length = max(26, button.intrinsicContentSize.width + 6)
+    }
+
+    private func reading(for gauge: MenuBarGauge) -> (value: String, progress: Double, color: NSColor) {
+        let format = settings.valueFormat(for: gauge)
+        switch gauge {
+        case .cpu:
+            let value = format == .cores ? "\(monitor.cpu.processorCount)C" : String(format: "%.0f%%", monitor.cpu.totalUsage * 100)
+            return (value, monitor.cpu.totalUsage, loadColor(monitor.cpu.totalUsage))
+        case .ram:
+            let value = format == .percent
+                ? String(format: "%.0f%%", monitor.memory.usedPercent * 100)
+                : String(format: "%.1fG", Double(monitor.memory.used) / 1_073_741_824)
+            return (value, monitor.memory.usedPercent, loadColor(monitor.memory.usedPercent))
+        case .gpu:
+            let temperature = monitor.thermal.gpuTemp
+            let showsTemperature = format == .temperature
+            let value = format == .temperature
+                ? (temperature > 0 ? String(format: "%.0f°", temperature) : "—")
+                : (monitor.gpuUsage > 0 ? String(format: "%.0f%%", monitor.gpuUsage * 100) : "—")
+            let progress = showsTemperature ? temperatureProgress(temperature) : monitor.gpuUsage
+            let color = showsTemperature
+                ? temperatureColor(temperature)
+                : (monitor.gpuUsage > 0 ? loadColor(monitor.gpuUsage) : .secondaryLabelColor)
+            return (value, progress, color)
+        case .temperature:
+            let temperature = monitor.thermal.socTemp > 0 ? monitor.thermal.socTemp : monitor.thermal.cpuTemp
+            let value = format == .fahrenheit
+                ? (temperature > 0 ? String(format: "%.0fF", temperature * 9 / 5 + 32) : "—")
+                : (temperature > 0 ? String(format: "%.0fC", temperature) : "—")
+            return (value, temperatureProgress(temperature), temperatureColor(temperature))
+        case .battery:
+            let charge = monitor.battery.chargePercent
+            let minutes = monitor.battery.timeRemaining
+            let value = format == .time
+                ? (minutes > 0 ? String(format: "%dh%02d", minutes / 60, minutes % 60) : "—")
+                : (charge > 0 ? "\(charge)%" : "—")
+            let progress = Double(charge) / 100
+            return (value, progress, charge > 0 && charge < 20 ? .systemRed : .systemGreen)
+        }
+    }
+
+    private func temperatureProgress(_ temperature: Double) -> Double {
+        guard temperature > 0 else { return 0 }
+        return min(max((temperature - 35) / 65, 0), 1)
+    }
+
+    private func temperatureColor(_ temperature: Double) -> NSColor {
+        guard temperature > 0 else { return .secondaryLabelColor }
+        if temperature > 85 { return .systemRed }
+        if temperature > 70 { return .systemOrange }
+        return .systemGreen
+    }
+
+    private func applicationStatusIcon() -> NSImage? {
+        guard let image = NSApp.applicationIconImage?.copy() as? NSImage else { return nil }
+        image.size = NSSize(width: 18, height: 18)
+        image.isTemplate = false
+        image.accessibilityDescription = "MacCleaner"
+        return image
+    }
+
+    private func symbolAttachment(
+        named name: String,
+        accessibilityDescription: String
+    ) -> NSAttributedString {
+        let configuration = NSImage.SymbolConfiguration(pointSize: 9, weight: .semibold)
+        guard let image = NSImage(systemSymbolName: name, accessibilityDescription: accessibilityDescription)?
+            .withSymbolConfiguration(configuration)
+        else { return NSAttributedString() }
+        image.isTemplate = true
+        return imageAttachment(image, baselineOffset: -1)
+    }
+
+    private func imageAttachment(_ image: NSImage, baselineOffset: CGFloat = 0) -> NSAttributedString {
+        let attachment = NSTextAttachment()
+        attachment.image = image
+        attachment.bounds = NSRect(
+            x: 0,
+            y: baselineOffset,
+            width: image.size.width,
+            height: image.size.height
+        )
+        return NSAttributedString(attachment: attachment)
+    }
+
+    private func appendFormatMarker(
+        _ marker: MenuBarGaugeFormatMarker,
+        color: NSColor,
+        to title: NSMutableAttributedString
+    ) {
+        switch marker {
+        case .text(let value):
+            title.append(NSAttributedString(
+                string: value,
+                attributes: [
+                    .foregroundColor: color,
+                    .font: NSFont.systemFont(ofSize: 8, weight: .semibold),
+                    .baselineOffset: 1
+                ]
+            ))
+        case .symbol(let name):
+            title.append(symbolAttachment(
+                named: name,
+                accessibilityDescription: "Time remaining"
+            ))
+        }
+    }
+
+    private func batteryIndicatorImage(progress: Double, color: NSColor) -> NSImage {
+        let clampedProgress = min(max(progress, 0), 1)
+        let size = NSSize(width: 10, height: 16)
+        let image = NSImage(size: size, flipped: false) { _ in
+            let bodyRect = NSRect(x: 1.25, y: 0.5, width: 7.5, height: 13)
+            let outline = NSBezierPath(roundedRect: bodyRect, xRadius: 2, yRadius: 2)
+            outline.lineWidth = 1
+            NSColor.labelColor.withAlphaComponent(0.72).setStroke()
+            outline.stroke()
+
+            let terminal = NSBezierPath(roundedRect: NSRect(x: 3.25, y: 14, width: 3.5, height: 1.5), xRadius: 0.7, yRadius: 0.7)
+            NSColor.labelColor.withAlphaComponent(0.72).setFill()
+            terminal.fill()
+
+            if clampedProgress > 0 {
+                let fillHeight = max(1.5, 10 * clampedProgress)
+                let fill = NSBezierPath(roundedRect: NSRect(x: 2.75, y: 2, width: 4.5, height: fillHeight), xRadius: 1, yRadius: 1)
+                color.setFill()
+                fill.fill()
+            }
+            return true
+        }
+        image.isTemplate = false
+        return image
+    }
+
+    private func loadColor(_ value: Double) -> NSColor {
+        if value > 0.85 { return .systemRed }
+        if value > 0.65 { return .systemOrange }
+        return .systemGreen
     }
 }
 
@@ -144,7 +577,7 @@ struct MenuBarLabel: View {
     }
 
     private var currentRamStr: String {
-        if settings.menuBarRAMFormat == .percent {
+        if settings.valueFormat(for: .ram) == .percent {
             return String(format: "%.0f%%", monitor.memory.usedPercent * 100)
         }
 
@@ -165,19 +598,20 @@ struct MenuBarLabel: View {
 
     var body: some View {
         HStack(spacing: 7) {
-            metric(
-                icon: "memorychip.fill",
-                value: currentRamStr,
-                color: ramColor,
-                statusDot: statusDot(for: severity(forLoad: monitor.memory.usedPercent))
-            )
-
-            metric(
-                icon: "cpu",
-                value: currentCPUValue,
-                color: loadColor,
-                statusDot: statusDot(for: severity(forLoad: monitor.cpu.totalUsage))
-            )
+            if settings.menuBarGaugeIDs.isEmpty {
+                Image(systemName: "bolt.circle.fill")
+                    .symbolRenderingMode(.hierarchical)
+            }
+            ForEach(Array(settings.menuBarGaugeIDs.enumerated()), id: \.element) { index, rawValue in
+                if let gauge = MenuBarGauge(rawValue: rawValue) {
+                    if index > 0 {
+                        Divider()
+                            .frame(height: 14)
+                            .opacity(0.55)
+                    }
+                    gaugeView(gauge)
+                }
+            }
         }
             .font(.system(size: 12, weight: .semibold, design: .rounded))
             .monospacedDigit()
@@ -187,36 +621,66 @@ struct MenuBarLabel: View {
             .accessibilityLabel(accessibilitySummary)
     }
 
-    private var loadColor: Color {
-        color(for: severity(forLoad: monitor.cpu.totalUsage))
+    @ViewBuilder
+    private func gaugeView(_ gauge: MenuBarGauge) -> some View {
+        let data = gaugeData(gauge)
+        HStack(alignment: .center, spacing: 2) {
+            Text(gauge.shortTitle)
+                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .foregroundStyle(.primary)
+            MenuBarBatteryIndicator(progress: data.progress, color: data.color)
+            if gauge == .temperature {
+                Image(systemName: "thermometer.medium")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.primary)
+            }
+            MenuBarFormatMarker(marker: gauge.formatMarker(for: settings.valueFormat(for: gauge)))
+        }
+        .frame(height: 18, alignment: .center)
+        .fixedSize()
+        .help("\(gauge.title): \(data.value)")
     }
 
-    private func metric(icon: String, value: String, color: Color, statusDot: String) -> some View {
-        HStack(spacing: 2) {
-            Image(systemName: icon)
-                .symbolRenderingMode(.hierarchical)
-                .foregroundStyle(color)
-
-            Text(value)
-                .foregroundStyle(.primary)
-
-            Text(statusDot)
-                .font(.system(size: 6))
+    private func gaugeData(_ gauge: MenuBarGauge) -> (value: String, progress: Double, color: Color, icon: String) {
+        switch gauge {
+        case .cpu:
+            let value = settings.valueFormat(for: .cpu) == .cores ? "\(monitor.cpu.processorCount)C" : currentCPUValue
+            return (value, monitor.cpu.totalUsage, color(for: severity(forLoad: monitor.cpu.totalUsage)), "cpu")
+        case .ram:
+            return (currentRamStr, monitor.memory.usedPercent, ramColor, "memorychip.fill")
+        case .gpu:
+            let showsTemperature = settings.valueFormat(for: .gpu) == .temperature
+            let value = settings.valueFormat(for: .gpu) == .temperature
+                ? (monitor.thermal.gpuTemp > 0 ? String(format: "%.0f°", monitor.thermal.gpuTemp) : "—")
+                : (monitor.gpuUsage > 0 ? String(format: "%.0f%%", monitor.gpuUsage * 100) : "—")
+            let progress = showsTemperature ? temperatureProgress(monitor.thermal.gpuTemp) : monitor.gpuUsage
+            let gaugeColor = showsTemperature
+                ? color(for: severity(forTemperature: monitor.thermal.gpuTemp))
+                : color(for: severity(forLoad: monitor.gpuUsage))
+            return (value, progress, gaugeColor, "rectangle.3.group")
+        case .temperature:
+            let value = settings.valueFormat(for: .temperature) == .fahrenheit
+                ? (keyTemp > 0 ? String(format: "%.0fF", keyTemp * 9 / 5 + 32) : "—")
+                : (keyTemp > 0 ? String(format: "%.0fC", keyTemp) : "—")
+            return (value, temperatureProgress(keyTemp), tempColor, "thermometer.medium")
+        case .battery:
+            let value = Double(monitor.battery.chargePercent) / 100
+            let display = settings.valueFormat(for: .battery) == .time ? batteryTime : "\(monitor.battery.chargePercent)%"
+            return (display, value, value < 0.2 ? Color.accentRed : Color.accentGreen, "battery.75percent")
         }
+    }
+
+    private func temperatureProgress(_ temperature: Double) -> Double {
+        guard temperature > 0 else { return 0 }
+        return min(max((temperature - 35) / 65, 0), 1)
     }
 
     private var accessibilitySummary: String {
-        var parts = [
-            "Memory \(currentRamStr)"
-        ]
-
-        parts.append("CPU load \(currentCPUValue)")
-
-        if keyTemp > 0 {
-            parts.append(String(format: "CPU temperature %.0f degrees", keyTemp))
+        let parts = settings.menuBarGaugeIDs.compactMap { rawValue -> String? in
+            guard let gauge = MenuBarGauge(rawValue: rawValue) else { return nil }
+            return "\(gauge.title) \(gaugeData(gauge).value)"
         }
-
-        return parts.joined(separator: ", ")
+        return parts.isEmpty ? "MacCleaner" : parts.joined(separator: ", ")
     }
 
     private func severity(forLoad value: Double) -> MenuBarMetricSeverity {
@@ -239,12 +703,10 @@ struct MenuBarLabel: View {
         }
     }
 
-    private func statusDot(for severity: MenuBarMetricSeverity) -> String {
-        switch severity {
-        case .normal: return "🟢"
-        case .warning: return "🟠"
-        case .critical: return "🔴"
-        }
+    private var batteryTime: String {
+        let minutes = monitor.battery.timeRemaining
+        guard minutes > 0 else { return "—" }
+        return String(format: "%dh%02d", minutes / 60, minutes % 60)
     }
 
 }
@@ -255,11 +717,150 @@ private enum MenuBarMetricSeverity: Int {
     case critical
 }
 
+struct MenuBarGaugeChip: View {
+    let gauge: MenuBarGauge
+    @ObservedObject var monitor: SystemMonitor
+    let format: MenuBarGaugeValueFormat
+    let displayStyle: MenuBarGaugeDisplayStyle
+
+    private var keyTemperature: Double {
+        monitor.thermal.socTemp > 0 ? monitor.thermal.socTemp : monitor.thermal.cpuTemp
+    }
+
+    private var reading: (value: String, progress: Double, color: Color) {
+        switch gauge {
+        case .cpu:
+            let value = format == .cores ? "\(monitor.cpu.processorCount)C" : String(format: "%.0f%%", monitor.cpu.totalUsage * 100)
+            return (value, monitor.cpu.totalUsage, loadColor(monitor.cpu.totalUsage))
+        case .ram:
+            let value = format == .percent
+                ? String(format: "%.0f%%", monitor.memory.usedPercent * 100)
+                : String(format: "%.1fG", Double(monitor.memory.used) / 1_073_741_824)
+            return (value, monitor.memory.usedPercent, loadColor(monitor.memory.usedPercent))
+        case .gpu:
+            let value = format == .temperature
+                ? (monitor.thermal.gpuTemp > 0 ? String(format: "%.0f°", monitor.thermal.gpuTemp) : "—")
+                : (monitor.gpuUsage > 0 ? String(format: "%.0f%%", monitor.gpuUsage * 100) : "—")
+            let progress = format == .temperature ? temperatureProgress(monitor.thermal.gpuTemp) : monitor.gpuUsage
+            let color = format == .temperature ? temperatureColor(monitor.thermal.gpuTemp) : (monitor.gpuUsage > 0 ? loadColor(monitor.gpuUsage) : .secondary)
+            return (value, progress, color)
+        case .temperature:
+            let color: Color = keyTemperature > 85 ? .accentRed : (keyTemperature > 70 ? .accentAmber : .accentGreen)
+            let value = format == .fahrenheit
+                ? (keyTemperature > 0 ? String(format: "%.0fF", keyTemperature * 9 / 5 + 32) : "—")
+                : (keyTemperature > 0 ? String(format: "%.0fC", keyTemperature) : "—")
+            return (value, temperatureProgress(keyTemperature), keyTemperature > 0 ? color : .secondary)
+        case .battery:
+            let charge = monitor.battery.chargePercent
+            let minutes = monitor.battery.timeRemaining
+            let value = format == .time
+                ? (minutes > 0 ? String(format: "%dh%02d", minutes / 60, minutes % 60) : "—")
+                : (charge > 0 ? "\(charge)%" : "—")
+            return (value, Double(charge) / 100, charge > 0 && charge < 20 ? .accentRed : .accentGreen)
+        }
+    }
+
+    var body: some View {
+        let current = reading
+        HStack(alignment: .center, spacing: 2) {
+            Text(gauge.shortTitle)
+                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .foregroundStyle(.primary)
+
+            if displayStyle == .battery {
+                MenuBarBatteryIndicator(progress: current.progress, color: current.color)
+                if gauge == .temperature {
+                    Image(systemName: "thermometer.medium")
+                        .font(.system(size: 9, weight: .semibold))
+                }
+                MenuBarFormatMarker(marker: gauge.formatMarker(for: format))
+            } else {
+                Text(current.value)
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .monospacedDigit()
+                    .foregroundStyle(current.color)
+            }
+        }
+        .frame(height: 18, alignment: .center)
+        .fixedSize()
+        .help("\(gauge.title): \(current.value)")
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(gauge.title) \(current.value)")
+    }
+
+    private func loadColor(_ value: Double) -> Color {
+        if value > 0.85 { return .accentRed }
+        if value > 0.65 { return .accentAmber }
+        return .accentGreen
+    }
+
+    private func temperatureProgress(_ temperature: Double) -> Double {
+        guard temperature > 0 else { return 0 }
+        return min(max((temperature - 35) / 65, 0), 1)
+    }
+
+    private func temperatureColor(_ temperature: Double) -> Color {
+        guard temperature > 0 else { return .secondary }
+        if temperature > 85 { return .accentRed }
+        if temperature > 70 { return .accentAmber }
+        return .accentGreen
+    }
+}
+
+private struct MenuBarFormatMarker: View {
+    let marker: MenuBarGaugeFormatMarker
+
+    var body: some View {
+        Group {
+            switch marker {
+            case .text(let value):
+                Text(value)
+            case .symbol(let name):
+                Image(systemName: name)
+            }
+        }
+        .font(.system(size: 8, weight: .semibold, design: .rounded))
+        .foregroundStyle(.secondary)
+        .frame(minWidth: 7)
+        .frame(height: 16, alignment: .center)
+        .accessibilityHidden(true)
+    }
+}
+
+private struct MenuBarBatteryIndicator: View {
+    let progress: Double
+    let color: Color
+
+    private var clampedProgress: Double { min(max(progress, 0), 1) }
+
+    var body: some View {
+        VStack(spacing: 1) {
+            Capsule()
+                .fill(.primary.opacity(0.72))
+                .frame(width: 3.5, height: 1.5)
+            ZStack(alignment: .bottom) {
+                RoundedRectangle(cornerRadius: 2)
+                    .stroke(.primary.opacity(0.72), lineWidth: 1)
+                RoundedRectangle(cornerRadius: 1)
+                    .fill(color)
+                    .frame(width: 4.5, height: max(clampedProgress > 0 ? 1.5 : 0, 10 * clampedProgress))
+                    .padding(.bottom, 1.5)
+            }
+            .frame(width: 8, height: 13)
+        }
+        .frame(width: 10, height: 16)
+    }
+}
+
 // MARK: - Menu Bar Popover
 
 struct MenuBarPopover: View {
     @ObservedObject var monitor: SystemMonitor
+    @ObservedObject private var settings = SettingsManager.shared
     @State private var selectedTab: PopoverTab = .overview
+    let openMain: () -> Void
+    let openShelf: () -> Void
+    let openSettings: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
@@ -280,6 +881,64 @@ struct MenuBarPopover: View {
             overviewTab
         case .details:
             detailsTab
+        case .tools:
+            toolsTab
+        }
+    }
+
+    private var toolsTab: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Quick Tools").font(.headline)
+                ForEach(UtilityToolID.configurableCases.filter { settings.isEnabled($0) && settings.isInMenuBar($0) }) { tool in
+                    Button { runQuickTool(tool) } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: tool.icon).foregroundStyle(Color.accentBlue).frame(width: 22)
+                            VStack(alignment: .leading, spacing: 1) { Text(tool.title).fontWeight(.medium); Text(tool.subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
+                            Spacer()
+                            Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+                        }
+                        .padding(10).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 9))
+                    }.buttonStyle(.plain)
+                }
+                if settings.clipboardHistoryInMenuBar {
+                    Button { ClipboardHistoryPanelController.shared.show() } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: "doc.on.clipboard").foregroundStyle(Color.accentBlue).frame(width: 22)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text("Clipboard History").fontWeight(.medium)
+                                Text("Reuse recent text, images and files · ⌥C").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+                        }
+                        .padding(10).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 9))
+                    }.buttonStyle(.plain)
+                }
+                if settings.menuBarToolIDs.isEmpty && !settings.clipboardHistoryInMenuBar {
+                    VStack(spacing: 8) {
+                        Image(systemName: "menubar.rectangle").font(.title).foregroundStyle(.secondary)
+                        Text("No Quick Tools").font(.headline)
+                        Text("Choose tools in Settings.").font(.caption).foregroundStyle(.secondary)
+                    }.frame(maxWidth: .infinity).frame(height: 220)
+                }
+                Spacer(minLength: 4)
+                HStack {
+                    Button("Open MacCleaner") {
+                        openMain()
+                    }
+                    Spacer()
+                    Button("Settings…", action: openSettings)
+                }
+            }
+        }
+    }
+
+    private func runQuickTool(_ tool: UtilityToolID) {
+        switch tool {
+        case .shelf: openShelf()
+        case .colorPicker: ColorPickerService.shared.sample()
+        default: openMain()
         }
     }
 
@@ -377,7 +1036,7 @@ struct MenuBarPopover: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .frame(width: 126)
+            .frame(width: 188)
 
             Spacer(minLength: 12)
 
@@ -438,6 +1097,7 @@ struct MenuBarPopover: View {
 private enum PopoverTab: String, CaseIterable, Identifiable {
     case overview
     case details
+    case tools
 
     var id: String { rawValue }
 
@@ -445,6 +1105,7 @@ private enum PopoverTab: String, CaseIterable, Identifiable {
         switch self {
         case .overview: return "Overview"
         case .details: return "Details"
+        case .tools: return "Tools"
         }
     }
 }

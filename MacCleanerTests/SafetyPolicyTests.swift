@@ -728,6 +728,116 @@ final class SafetyPolicyTests: XCTestCase {
         withExtendedLifetime(cancellable) {}
     }
 
+    @MainActor
+    func testMediaCompressorNeverKeepsALargerCandidate() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("MacCleanerCompressorTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let source = directory.appendingPathComponent("sample.png")
+        let image = NSImage(size: NSSize(width: 32, height: 32))
+        image.lockFocus()
+        NSColor.systemBlue.setFill()
+        NSBezierPath(rect: NSRect(x: 0, y: 0, width: 32, height: 32)).fill()
+        image.unlockFocus()
+        let bitmap = try XCTUnwrap(NSBitmapImageRep(data: try XCTUnwrap(image.tiffRepresentation)))
+        try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(to: source, options: .atomic)
+
+        let result = try MediaCompressorService.compressFile(source, quality: 0.72, removeMetadata: true)
+        if let output = result.output {
+            XCTAssertLessThan(result.candidateBytes, result.originalBytes)
+            XCTAssertTrue(FileManager.default.fileExists(atPath: output.path))
+            XCTAssertTrue(output.lastPathComponent.contains("-compressed"))
+        } else {
+            XCTAssertGreaterThanOrEqual(result.candidateBytes, result.originalBytes)
+            XCTAssertEqual(result.savedBytes, 0)
+        }
+    }
+
+    func testBetaUtilitiesStayOutOfTheToolsWorkspace() {
+        let betaTools: Set<UtilityToolID> = [.mediaCompressor, .audioMixer, .chargeLimit]
+
+        XCTAssertEqual(Set(UtilityToolID.configurableCases.filter(\.isBeta)), betaTools)
+        XCTAssertTrue(betaTools.isDisjoint(with: Set(UtilityToolID.availableCases)))
+        XCTAssertTrue(UtilityToolID.availableCases.allSatisfy(\.isAvailableInTools))
+    }
+
+    func testEveryMenuBarGaugeHasTwoCompactValueFormats() {
+        for gauge in MenuBarGauge.allCases {
+            XCTAssertEqual(gauge.valueFormats.count, 2)
+            XCTAssertTrue(gauge.valueFormats.allSatisfy { $0.compactTitle.count == 1 })
+        }
+    }
+
+    func testMenuBarOffersBatteryAndDirectValueDisplayStyles() {
+        XCTAssertEqual(MenuBarGaugeDisplayStyle.allCases, [.battery, .value])
+        XCTAssertEqual(MenuBarGaugeDisplayStyle.battery.title, "Battery")
+        XCTAssertEqual(MenuBarGaugeDisplayStyle.value.title, "Values")
+    }
+
+    func testMenuBarDisplayStylePersists() throws {
+        let suiteName = "MacCleanerMenuBarStyleTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let first = SettingsManager(defaults: defaults)
+        XCTAssertEqual(first.menuBarGaugeDisplayStyle, .battery)
+
+        first.menuBarGaugeDisplayStyle = .value
+
+        let reloaded = SettingsManager(defaults: defaults)
+        XCTAssertEqual(reloaded.menuBarGaugeDisplayStyle, .value)
+    }
+
+    func testMenuBarGaugeDragOrderPersists() throws {
+        let suiteName = "MacCleanerMenuBarOrderTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let settings = SettingsManager(defaults: defaults)
+        settings.setGaugeEnabled(true, gauge: .gpu)
+        XCTAssertEqual(settings.menuBarGaugeIDs, ["cpu", "ram", "gpu"])
+
+        settings.moveGauge("cpu", to: "gpu")
+        XCTAssertEqual(settings.menuBarGaugeIDs, ["ram", "gpu", "cpu"])
+
+        let reloaded = SettingsManager(defaults: defaults)
+        XCTAssertEqual(reloaded.menuBarGaugeIDs, ["ram", "gpu", "cpu"])
+    }
+
+    @MainActor
+    func testPasteboardPayloadPreservesEveryRepresentation() throws {
+        let source = NSPasteboard(name: NSPasteboard.Name("MacCleanerTests.source.\(UUID().uuidString)"))
+        let destination = NSPasteboard(name: NSPasteboard.Name("MacCleanerTests.destination.\(UUID().uuidString)"))
+        let item = NSPasteboardItem()
+        let plainText = "Styled clipboard text"
+        let rtf = Data("{\\rtf1\\ansi Styled clipboard text}".utf8)
+        let html = Data("<strong>Styled clipboard text</strong>".utf8)
+        let fileURL = URL(fileURLWithPath: "/tmp/MacCleaner Clipboard Test.txt").absoluteString
+
+        XCTAssertTrue(item.setString(plainText, forType: .string))
+        XCTAssertTrue(item.setData(rtf, forType: .rtf))
+        XCTAssertTrue(item.setData(html, forType: .html))
+        XCTAssertTrue(item.setString(fileURL, forType: .fileURL))
+        source.clearContents()
+        XCTAssertTrue(source.writeObjects([item]))
+
+        let payload = PasteboardPayload(pasteboard: source)
+        XCTAssertTrue(payload.write(to: destination))
+        XCTAssertEqual(destination.string(forType: .string), plainText)
+        XCTAssertEqual(destination.data(forType: .rtf), rtf)
+        XCTAssertEqual(destination.data(forType: .html), html)
+        XCTAssertEqual(destination.string(forType: .fileURL), fileURL)
+
+        let providers = payload.makeItemProviders()
+        XCTAssertEqual(providers.count, 1)
+        XCTAssertTrue(Set(item.types.map(\.rawValue))
+            .isSubset(of: Set(try XCTUnwrap(providers.first).registeredTypeIdentifiers)))
+    }
+
     private func jpegData(from url: URL, compression: Double) throws -> Data {
         let image = try XCTUnwrap(NSImage(contentsOf: url))
         let tiff = try XCTUnwrap(image.tiffRepresentation)

@@ -10,6 +10,54 @@
 
 Связанные файлы: `MacCleaner/MacCleanerApp.swift`, `MacCleaner/Views/`, `MacCleaner/Services/`.
 
+## Единый каталог включаемых инструментов
+
+Статус: принято
+
+Решение: доступность Tools, быстрых menu bar actions и menu bar gauges хранится в `SettingsManager`, а метаданные инструментов — в `UtilityToolID`. Tools использует левую selection-driven навигацию; Settings остаётся отдельным системным окном.
+
+Обоснование: большой фиксированный набор горизонтальных переключателей перестал масштабироваться. Единый каталог исключает расхождение между основным окном, Settings и menu bar и позволяет пользователю не загружать интерфейс ненужными функциями.
+
+Последствия: выключенный инструмент исчезает из Tools и быстрого доступа, но его локальные настройки не удаляются. Вводный пункт остаётся всегда. Media Compressor, App Audio Report и Charge Limit помечены `BETA / In development` без переключателя и не попадают в workspace даже при наличии старого persisted ID.
+
+Связанные файлы: `MacCleaner/Models/UtilityTool.swift`, `MacCleaner/Settings/SettingsManager.swift`, `MacCleaner/Views/UtilityToolsView.swift`.
+
+## AppKit status item для модульного menu bar
+
+Статус: принято
+
+Решение: фактический элемент системной строки создаётся через AppKit `NSStatusItem`, а содержимое popover остаётся на SwiftUI. `StatusBarController` собирает attributed label в одном из двух глобальных стилей. `Battery` использует подписанные вертикальные gauge images: заполнение снизу вверх отражает load/heat, semantic color — severity, а compact marker (`%/C`, `%/G`, `%/°`, `C/F`, `%/clock`) делает выбранный формат видимым и наследует semantic color показателя. `Values` выводит рядом с той же короткой подписью непосредственное процентное или числовое значение monospaced шрифтом. Тонкие системные разделители отделяют модули; AppKit attachments имеют явный baseline offset. Точные значения сохраняются в accessibility/popover. Settings использует ту же выбранную композицию и правила цвета, а порядок включённых модулей меняется pointer-drag за отдельную ведущую handle и сохраняется в `SettingsManager`. Если пользователь отключил все gauges, status item использует bundle icon приложения через `NSApplication.applicationIconImage`.
+
+Обоснование: SwiftUI `MenuBarExtra` обрезал динамическую составную подпись до первого модуля, хотя preview настроек показывал все модули. AppKit-мост сохраняет нативное поведение и даёт предсказуемый контроль реальной ширины status item.
+
+Последствия: контроллер наблюдает общий `SystemMonitor` и `SettingsManager`, поэтому отдельный sampler не создаётся. Сам клик по status item показывает transient popover без активации приложения и не поднимает главное окно. Для закрытия по клику в другом приложении используется временный глобальный mouse monitor, который не перехватывает события и удаляется делегатом сразу после закрытия popover. Открытие главного окна, Shelf и Settings передаётся в SwiftUI popover отдельными явными действиями; только действия, которым действительно нужно окно приложения, вызывают его активацию.
+
+Связанные файлы: `MacCleaner/MacCleanerApp.swift`, `MacCleaner/Settings/SettingsView.swift`.
+
+## Capability-gated системные инструменты
+
+Статус: принято
+
+Решение: Media Compressor, per-app audio и Charge Limit временно не являются доступными Tools. Они остаются в каталоге Settings как beta-задел без переключателя. До отдельного продуктового возврата существующие реализации не заявляются как пользовательская возможность.
+
+Обоснование: восстановление аудиомаршрута и управление зарядом являются hardware/OS-dependent операциями с риском системного побочного эффекта.
+
+Последствия: Screen Text и Awake Profiles удалены из пользовательского каталога; Media Compressor, App Audio Report и Charge Limit видны только как `In development`.
+
+Связанные файлы: `MacCleaner/Views/UtilityToolsView.swift`, `MacCleaner/Services/UtilityToolServices.swift`, `docs/utility-tools-and-menu-bar-analysis.md`.
+
+## Session-only clipboard и глобальные utility hotkeys
+
+Статус: принято
+
+Решение: Clipboard History хранит максимум 12 уникальных элементов только в памяти процесса и наблюдает `NSPasteboard.changeCount`. `⌥C` и `⌥S` регистрируются при запуске процесса через Carbon по физическим key codes; это даёт одинаковое поведение для английской и русской раскладок без глобального перехвата всех нажатий. Clipboard History и Drop Shelf показываются самостоятельными nonactivating `NSPanel`, не активируют главное окно и доступны, пока MacCleaner работает в menu bar или фоне. История использует системный `NSVisualEffectView` (`.popover`, `.behindWindow`) без фиксированной цветовой заливки и видимых action-кнопок. Floating level Drop Shelf меняется узким `NSViewRepresentable`-мостом.
+
+Обоснование: SwiftUI scene API не даёт одновременно глобальные layout-independent hotkeys, borderless transient panel с keyboard routing и управляемый `NSWindow.Level`. AppKit используется только на этой границе; данные и выбор остаются SwiftUI/ObservableObject.
+
+Последствия: clipboard не персистится и очищается при завершении MacCleaner. История материализует все доступные representations каждого `NSPasteboardItem`; восстановление и Shelf drag-out сохраняют исходный набор форматов, а не только preview text/image/file URL. History panel закрывается после выбора или клика вне panel; локальный `NSPanel.keyDown` обрабатывает стрелки, Enter, Escape и `⌘1–4`, а selection model синхронизирует AppKit-команды со SwiftUI-выделением и автопрокруткой. Mouse monitors не перехватывают клавиатуру и не требуют Input Monitoring для hotkeys.
+
+Связанные файлы: `MacCleaner/Services/ClipboardHistoryService.swift`, `MacCleaner/Views/UtilityToolsView.swift`, `MacCleaner/MacCleanerApp.swift`.
+
 ## Долгоживущие feature services
 
 Статус: принято
@@ -124,8 +172,20 @@ Release Notes хранятся в единственном файле `MacCleane
 
 Связанные файлы: `MacCleaner/Services/UpdateService.swift`, `MacCleaner/Info.plist`, `MacCleaner/ReleaseNotes.md`, `.github/workflows/release.yml`, `MacCleaner.xcodeproj/project.pbxproj`.
 
+## Статический промо-сайт без runtime-зависимостей
+
+Статус: принято
+
+Решение: хранить продуктовый сайт в `website/` как самодостаточные HTML, CSS и vanilla JavaScript; для продуктовых превью использовать полные снимки реального интерфейса приложения, а не приближённую HTML/CSS demo-модель. Окружение macOS и корпус MacBook остаются CSS-слоем, чтобы снимок приложения показывался обычным окном с menu bar, Dock и traffic-light controls.
+
+Обоснование: сайту не нужен backend или сложный UI runtime; статическая реализация быстро загружается, легко публикуется и не добавляет зависимости в Swift-проект.
+
+Последствия: данные сайта не синхронизируются с app target автоматически; при изменении версии, системных требований, продуктовых ограничений или интерфейса текст и снимки необходимо обновлять явно. Hero использует системный захват окна без указателя мыши; все 11 кадров нормализуются до `2600 × 1576` и отображаются в общей геометрии без изменения пропорций. Служебный индикатор Screen Recording маскируется нейтральной областью native window chrome, после чего traffic-light controls восстанавливаются CSS-слоем. Перед публичной публикацией снимки необходимо отдельно проверить на допустимость показанных локальных значений и идентификаторов. Интерактив остаётся на vanilla JavaScript и не выполняет действий внутри приложения.
+
+Связанные файлы: `website/index.html`, `website/styles.css`, `website/script.js`.
+
 ## Связанные материалы
 
 - [[Architecture]]
 - [[Features]]
-- [[Backlog]]
+- [[Opportunities]]
