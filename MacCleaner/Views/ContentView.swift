@@ -1815,6 +1815,8 @@ struct LargeFilesView: View {
     @State private var isDeleting = false
     @State private var showError = false
     @State private var errorMessage = ""
+    @State private var showAdministratorDeleteConfirmation = false
+    @State private var pendingAdministratorFiles: [FSNode] = []
     @State private var hasDeletedItems = false
     
     var body: some View {
@@ -1829,6 +1831,14 @@ struct LargeFilesView: View {
             Button("OK", role: .cancel) { }
         } message: {
             Text(errorMessage)
+        }
+        .alert("Разрешить удаление с правами администратора?", isPresented: $showAdministratorDeleteConfirmation) {
+            Button("Отмена", role: .cancel) { pendingAdministratorFiles.removeAll() }
+            Button("Разрешить в macOS", role: .destructive) {
+                retryAdministratorDeletion()
+            }
+        } message: {
+            Text("Некоторые выбранные файлы принадлежат другому пользователю или защищены правами macOS. Откроется системный запрос пароля. Будут обработаны только \(pendingAdministratorFiles.count) ранее выбранных файлов; пароль MacCleaner не получает и не сохраняет.")
         }
     }
 
@@ -2089,6 +2099,7 @@ struct LargeFilesView: View {
         let dispatchGroup = DispatchGroup()
         var successfullyDeleted: Set<UUID> = []
         var errors: [String] = []
+        var permissionDenied: [FSNode] = []
         
         for file in filesToDelete {
             dispatchGroup.enter()
@@ -2097,6 +2108,9 @@ struct LargeFilesView: View {
                     successfullyDeleted.insert(file.id)
                 } else if let errorMsg = errorMsg {
                     errors.append("\(file.name): \(errorMsg)")
+                    if errorMsg.localizedCaseInsensitiveContains("permission") || errorMsg.localizedCaseInsensitiveContains("access") {
+                        permissionDenied.append(file)
+                    }
                 }
                 dispatchGroup.leave()
             }
@@ -2113,10 +2127,46 @@ struct LargeFilesView: View {
                     hasDeletedItems = true
                 }
                 
-                if !errors.isEmpty {
+                if !permissionDenied.isEmpty {
+                    pendingAdministratorFiles = permissionDenied
+                    showAdministratorDeleteConfirmation = true
+                } else if !errors.isEmpty {
                     self.errorMessage = errors.joined(separator: "\n")
                     self.showError = true
                 }
+            }
+        }
+    }
+
+    private func retryAdministratorDeletion() {
+        let files = pendingAdministratorFiles
+        pendingAdministratorFiles.removeAll()
+        guard !files.isEmpty else { return }
+        isDeleting = true
+        operationActive = true
+        let group = DispatchGroup()
+        var deleted: Set<UUID> = []
+        var errors: [String] = []
+        for file in files {
+            group.enter()
+            service.trashItemAsAdministrator(url: file.url) { success, error in
+                if success { deleted.insert(file.id) }
+                else {
+                    let detail = error ?? "Не удалось переместить файл в корзину"
+                    errors.append("\(file.name): \(detail)")
+                }
+                group.leave()
+            }
+        }
+        group.notify(queue: .main) {
+            service.largeFiles.removeAll { deleted.contains($0.id) }
+            selectedFileIds.subtract(deleted)
+            hasDeletedItems = hasDeletedItems || !deleted.isEmpty
+            isDeleting = false
+            operationActive = false
+            if !errors.isEmpty {
+                errorMessage = errors.joined(separator: "\n")
+                showError = true
             }
         }
     }
@@ -2149,23 +2199,37 @@ private enum _CVJunkType: CaseIterable, Hashable {
 struct JunkFilesView: View {
     @ObservedObject var service: StorageAnalyzerService
     @Binding var operationActive: Bool
-    @State private var selectedTypes: Set<JunkType> = []
+    @State private var selectedIDs: Set<String> = []
     @State private var isDeleting = false
     @State private var showError = false
     @State private var errorMessage = ""
     @State private var cleanupNotice: String?
     @State private var hasDeletedItems = false
+    @State private var showProtectedCleanupConfirmation = false
+    @State private var pendingCleanupIDs: Set<String> = []
+    @State private var protectedCleanupMessage = ""
+    @State private var protectedCleanupHasBrowsers = false
+    @State private var confirmedCleanupIDs: Set<String> = []
+    @State private var expandedIDs: Set<String> = []
+    @State private var selectionInitializedForScan = false
+    @State private var showProtectedCategories = false
     private let junkAccent = Color(red: 0.42, green: 0.40, blue: 0.56)
 
+    private var visibleCategories: [JunkCategory] {
+        showProtectedCategories
+            ? service.junkCategories
+            : service.junkCategories.filter { $0.safety != .protected }
+    }
+
     private var selectedSize: UInt64 {
-        service.junkCategories.filter { selectedTypes.contains($0.type) }.reduce(UInt64(0)) { $0 + $1.size }
+        service.junkCategories.filter { selectedIDs.contains($0.id) && $0.safety != .protected }.reduce(UInt64(0)) { $0 + $1.size }
     }
     private var totalSize: UInt64 {
-        service.junkCategories.reduce(UInt64(0)) { $0 + $1.size }
+        visibleCategories.reduce(UInt64(0)) { $0 + $1.size }
     }
     private var allSelected: Bool {
-        let safeTypes = Set(service.junkCategories.filter(\.isSelectedByDefault).map { $0.type })
-        return !safeTypes.isEmpty && safeTypes.isSubset(of: selectedTypes)
+        let safeIDs = Set(service.junkCategories.filter(\.isSelectedByDefault).map(\.id))
+        return !safeIDs.isEmpty && safeIDs.isSubset(of: selectedIDs)
     }
 
     var body: some View {
@@ -2180,6 +2244,36 @@ struct JunkFilesView: View {
             Button("OK", role: .cancel) { }
         } message: {
             Text(errorMessage)
+        }
+        .alert("Нужно подтверждение", isPresented: $showProtectedCleanupConfirmation) {
+            Button("Отмена", role: .cancel) { pendingCleanupIDs.removeAll() }
+            Button(protectedCleanupHasBrowsers ? "Закрыть браузеры и очистить" : "Подтвердить очистку", role: .destructive) {
+                let names = selectedBrowserNames
+                for app in NSWorkspace.shared.runningApplications where names.contains(app.localizedName ?? "") {
+                    app.terminate()
+                }
+                let ids = pendingCleanupIDs
+                pendingCleanupIDs.removeAll()
+                confirmedCleanupIDs = ids
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                    let categories = service.junkCategories.filter { ids.contains($0.id) }
+                    performDeletion(categories)
+                }
+            }
+        } message: {
+            Text(protectedCleanupMessage)
+        }
+        .onChange(of: service.junkCategories.map(\.id)) { ids in
+            if ids.isEmpty {
+                selectedIDs.removeAll()
+                expandedIDs.removeAll()
+                selectionInitializedForScan = false
+                showProtectedCategories = false
+            } else if !selectionInitializedForScan {
+                selectedIDs = Set(service.junkCategories.filter(\.isSelectedByDefault).map(\.id))
+                selectionInitializedForScan = true
+            }
+            selectedIDs = selectedIDs.intersection(Set(service.junkCategories.filter { $0.safety != .protected }.map(\.id)))
         }
     }
 
@@ -2264,11 +2358,31 @@ struct JunkFilesView: View {
                     Text("Scan Complete")
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(Color.textPrimary)
-                    Text("\(service.junkCategories.count) categories found")
+                    Text("\(visibleCategories.count) categories found")
                         .font(.mono(11))
                         .foregroundStyle(Color.textTertiary)
                 }
                 Spacer()
+                let protectedCount = service.junkCategories.filter { $0.safety == .protected }.count
+                if protectedCount > 0 {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            showProtectedCategories.toggle()
+                        }
+                    } label: {
+                        Label(
+                            showProtectedCategories ? "Скрыть защищённые" : "Показать защищённые (\(protectedCount))",
+                            systemImage: showProtectedCategories ? "eye.slash" : "lock"
+                        )
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Color.textSecondary)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 7)
+                        .background(Color.surfaceSecondary)
+                        .clipShape(RoundedRectangle(cornerRadius: 7))
+                    }
+                    .buttonStyle(.plain)
+                }
             }
             .padding(.horizontal, 24)
             .padding(.top, 20)
@@ -2279,17 +2393,30 @@ struct JunkFilesView: View {
             // Category rows — fills remaining space
             ScrollView {
                 VStack(spacing: 1) {
-                    ForEach(service.junkCategories) { category in
-                        let isSelected = selectedTypes.contains(category.type)
+                    ForEach(visibleCategories) { category in
+                        let isSelected = selectedIDs.contains(category.id)
                         let ratio = totalSize > 0 ? CGFloat(category.size) / CGFloat(totalSize) : 0
-                        Button(action: {
-                            withAnimation(.easeInOut(duration: 0.15)) {
-                                if isSelected { selectedTypes.remove(category.type) }
-                                else { selectedTypes.insert(category.type) }
-                            }
-                        }) {
-                            VStack(spacing: 0) {
+                        VStack(spacing: 0) {
+                            Button(action: {
+                                guard category.safety != .protected else { return }
+                                withAnimation(.easeInOut(duration: 0.15)) {
+                                    if isSelected { selectedIDs.remove(category.id) }
+                                    else { selectedIDs.insert(category.id) }
+                                }
+                            }) {
                                 HStack(spacing: 14) {
+                                    Button(action: {
+                                        withAnimation(.easeInOut(duration: 0.15)) {
+                                            if expandedIDs.contains(category.id) { expandedIDs.remove(category.id) }
+                                            else { expandedIDs.insert(category.id) }
+                                        }
+                                    }) {
+                                        Image(systemName: expandedIDs.contains(category.id) ? "chevron.down" : "chevron.right")
+                                            .font(.system(size: 10, weight: .bold))
+                                            .foregroundStyle(Color.textTertiary)
+                                            .frame(width: 14, height: 24)
+                                    }
+                                    .buttonStyle(.plain)
                                     // Checkbox
                                     ZStack {
                                         RoundedRectangle(cornerRadius: 4)
@@ -2317,23 +2444,36 @@ struct JunkFilesView: View {
                                     // Name + bar
 	                                    VStack(alignment: .leading, spacing: 6) {
 	                                        HStack(spacing: 6) {
-	                                            Text(category.name)
+                                            Text(category.displayName)
 	                                                .font(.system(size: 13, weight: .medium))
 	                                                .foregroundStyle(Color.textPrimary)
-	                                            if category.type == .xcodeJunk {
-	                                                Text("Rebuildable")
+                                            if category.type == .xcodeJunk {
+                                                Text("Rebuildable")
 	                                                    .font(.system(size: 9, weight: .bold))
 	                                                    .foregroundStyle(Color.accentBlue)
 	                                                    .padding(.horizontal, 6)
 	                                                    .padding(.vertical, 2)
 	                                                    .background(Color.accentBlue.opacity(0.12))
-	                                                    .clipShape(Capsule())
-	                                            }
-	                                        }
-	                                        Text(category.type.detail)
+                                                    .clipShape(Capsule())
+                                            }
+                                            Text(category.safety.label)
+                                                .font(.system(size: 9, weight: .semibold))
+                                                .foregroundStyle(category.safety == .review ? Color.accentAmber : Color.textSecondary)
+                                                .padding(.horizontal, 6)
+                                                .padding(.vertical, 2)
+                                                .background((category.safety == .review ? Color.accentAmber : Color.textSecondary).opacity(0.10))
+                                                .clipShape(Capsule())
+                                        }
+                                        Text(category.explanation)
 	                                            .font(.system(size: 10))
 	                                            .foregroundStyle(Color.textTertiary)
-	                                            .lineLimit(1)
+                                            .lineLimit(1)
+                                        if let blockedReason = category.blockedReason {
+                                            Text("⚠️ \(blockedReason) — потребуется подтверждение")
+                                                .font(.system(size: 10, weight: .medium))
+                                                .foregroundStyle(Color.accentAmber)
+                                                .lineLimit(1)
+                                        }
 	                                        GeometryReader { geo in
                                             ZStack(alignment: .leading) {
                                                 RoundedRectangle(cornerRadius: 2)
@@ -2362,9 +2502,28 @@ struct JunkFilesView: View {
                             }
                             .background(isSelected ? category.color.opacity(0.06) : Color.clear)
                             .contentShape(Rectangle())
+                            .buttonStyle(.plain)
+                            .disabled(isDeleting)
+
+                            if expandedIDs.contains(category.id) {
+                                if category.entries.isEmpty {
+                                    Text("Путь не удалось раскрыть: \(category.cleanupRoots.first?.path ?? "нет данных")")
+                                        .font(.system(size: 11, design: .monospaced))
+                                        .foregroundStyle(Color.textTertiary)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .padding(.leading, 78)
+                                        .padding(.vertical, 10)
+                                } else {
+                                    VStack(spacing: 0) {
+                                        ForEach(category.entries) { entry in
+                                            junkEntryRow(entry, category: category)
+                                            Divider().padding(.leading, 78)
+                                        }
+                                    }
+                                    .padding(.bottom, 4)
+                                }
+                            }
                         }
-                        .buttonStyle(.plain)
-                        .disabled(isDeleting)
 
                         Divider().padding(.horizontal, 20)
                     }
@@ -2396,7 +2555,7 @@ struct JunkFilesView: View {
 	                }
 	                HStack(spacing: 16) {
                     HStack(spacing: 4) {
-                        if selectedTypes.isEmpty {
+                        if selectedIDs.isEmpty {
                             Text("Select items to clean")
                                 .font(.system(size: 13))
                                 .foregroundStyle(Color.textTertiary)
@@ -2404,7 +2563,7 @@ struct JunkFilesView: View {
                             Text(MemoryInfo.formatted(selectedSize))
                                 .font(.system(size: 15, weight: .semibold))
                                 .foregroundStyle(Color.textPrimary)
-                            Text("· \(selectedTypes.count) selected · will be moved to Trash")
+                            Text("· \(selectedIDs.count) selected · will be moved to Trash")
                                 .font(.system(size: 13))
                                 .foregroundStyle(Color.textTertiary)
                         }
@@ -2427,9 +2586,9 @@ struct JunkFilesView: View {
                         Button(action: {
                             withAnimation(.easeInOut(duration: 0.15)) {
                                 if allSelected {
-                                    selectedTypes.removeAll()
+                                    selectedIDs.removeAll()
                                 } else {
-                                    selectedTypes = Set(service.junkCategories.filter(\.isSelectedByDefault).map { $0.type })
+                                    selectedIDs = Set(service.junkCategories.filter(\.isSelectedByDefault).map(\.id))
                                 }
                             }
                         }) {
@@ -2458,18 +2617,18 @@ struct JunkFilesView: View {
 
                                 HStack(spacing: 8) {
                                     Image(systemName: "sparkles")
-                                    Text(selectedTypes.isEmpty ? "Select items" : "Clean \(MemoryInfo.formatted(selectedSize))")
+                                    Text(selectedIDs.isEmpty ? "Select items" : "Clean \(MemoryInfo.formatted(selectedSize))")
                                 }
                                 .opacity(isDeleting ? 0 : 1)
                             }
                             .font(.system(size: 13, weight: .semibold))
                             .frame(width: 160, height: 34)
-                            .background(selectedTypes.isEmpty ? Color.surfaceSecondary : Color.accent)
-                            .foregroundStyle(selectedTypes.isEmpty ? Color.textTertiary : .white)
+                            .background(selectedIDs.isEmpty ? Color.surfaceSecondary : Color.accent)
+                            .foregroundStyle(selectedIDs.isEmpty ? Color.textTertiary : .white)
                             .clipShape(RoundedRectangle(cornerRadius: 8))
                         }
                         .buttonStyle(.plain)
-                        .disabled(isDeleting || selectedTypes.isEmpty)
+                        .disabled(isDeleting || selectedIDs.isEmpty)
                     }
                 }
                 .padding(.horizontal, 24)
@@ -2479,26 +2638,128 @@ struct JunkFilesView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
+
+    private func junkEntryRow(_ entry: JunkEntry, category: JunkCategory) -> some View {
+        // Entry selection follows the parent category. Cleanup policy still
+        // decides whether protected data can actually be removed.
+        let isSelected = selectedIDs.contains(category.id)
+        return HStack(spacing: 10) {
+            Image(systemName: isSelected ? "checkmark.square.fill" : "square")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(isSelected ? Color.accent : Color.borderSubtle)
+                .frame(width: 18)
+            Image(systemName: entry.isDirectory ? "folder.fill" : "doc.fill")
+                .font(.system(size: 13))
+                .foregroundStyle(category.color)
+                .frame(width: 18)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(entry.name)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Color.textPrimary)
+                    if entry.isAggregate {
+                        Text("\(entry.itemCount) элементов")
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundStyle(Color.textTertiary)
+                    }
+                }
+                Text(entry.path)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(Color.textTertiary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            Spacer(minLength: 8)
+            Text(MemoryInfo.formatted(entry.size))
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Color.textSecondary)
+        }
+        .padding(.leading, 58)
+        .padding(.trailing, 20)
+        .padding(.vertical, 8)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            guard category.safety != .protected else { return }
+            withAnimation(.easeInOut(duration: 0.15)) {
+                if selectedIDs.contains(category.id) { selectedIDs.remove(category.id) }
+                else { selectedIDs.insert(category.id) }
+            }
+        }
+    }
     
 	    private func deleteSelected() {
-	        let categoriesToClean = service.junkCategories.filter { selectedTypes.contains($0.type) }
+        let categoriesToClean = service.junkCategories.filter { selectedIDs.contains($0.id) && $0.safety != .protected }
 	        guard !categoriesToClean.isEmpty else { return }
+
+        let browserNames = categoriesToClean.compactMap { category -> String? in
+            guard category.type == .browserCache else { return nil }
+            return browserName(for: category)
+        }
+        let runningNames = browserNames.filter { name in
+            NSWorkspace.shared.runningApplications.contains { $0.localizedName == name && !$0.isTerminated }
+        }
+        if !runningNames.isEmpty {
+            pendingCleanupIDs = Set(categoriesToClean.map(\.id))
+            protectedCleanupHasBrowsers = true
+            protectedCleanupMessage = "\(runningNames.joined(separator: ", ")) сейчас открыты. MacCleaner попросит их закрыться обычным способом, чтобы удалить их временный кэш. Несохранённые данные браузера должны быть сохранены вами до подтверждения."
+            showProtectedCleanupConfirmation = true
+            return
+        }
+
+        let dirtyProjects = categoriesToClean.compactMap { category -> String? in
+            guard let project = category.projectRoot,
+                  StorageAnalyzerService.projectHasUncommittedChanges(project) else { return nil }
+            return category.ownerName ?? project.lastPathComponent
+        }
+        if !dirtyProjects.isEmpty {
+            pendingCleanupIDs = Set(categoriesToClean.map(\.id))
+            protectedCleanupHasBrowsers = false
+            protectedCleanupMessage = "В проектах \(dirtyProjects.joined(separator: ", ")) есть незакоммиченные изменения Git. Их исходный код не будет удалён, но выбранные артефакты могут быть связаны с текущей работой. Подтвердите очистку только если готовы пересобрать их."
+            showProtectedCleanupConfirmation = true
+            return
+        }
+
+
+        performDeletion(categoriesToClean)
+    }
+
+    private var selectedBrowserNames: [String] {
+        service.junkCategories
+            .filter { selectedIDs.contains($0.id) && $0.type == .browserCache }
+            .compactMap { browserName(for: $0) }
+            .filter { name in NSWorkspace.shared.runningApplications.contains { $0.localizedName == name && !$0.isTerminated } }
+    }
+
+    private func browserName(for category: JunkCategory) -> String? {
+        guard let owner = category.ownerName else { return nil }
+        return owner.replacingOccurrences(of: " cache", with: "")
+    }
+
+    private func performDeletion(_ categoriesToClean: [JunkCategory]) {
+        guard !categoriesToClean.isEmpty else { return }
         
         isDeleting = true
         operationActive = true
         
 	        let dispatchGroup = DispatchGroup()
-	        var successfullyDeletedTypes: Set<JunkType> = []
+	        var successfullyDeletedIDs: Set<String> = []
 	        var errors: [String] = []
 	        var skippedMessages: [String] = []
 	        var removedTotal = 0
+	        var alreadyAbsentTotal = 0
 	        
 	        for category in categoriesToClean {
 	            dispatchGroup.enter()
-	            service.cleanJunkCategory(category) { result in
+                service.cleanJunkCategory(
+                    category,
+                    allowUncommittedProject: confirmedCleanupIDs.contains(category.id)
+                ) { result in
 	                removedTotal += result.removedCount
+	                alreadyAbsentTotal += result.alreadyAbsentCount
 	                if result.success {
-	                    successfullyDeletedTypes.insert(category.type)
+                    if result.removedCount > 0 || result.alreadyAbsentCount > 0 {
+                        successfullyDeletedIDs.insert(category.id)
+                    }
 	                    if result.skippedCount > 0 {
 	                        skippedMessages.append("\(category.name): \(result.skippedCount) protected items skipped")
 	                    }
@@ -2511,11 +2772,12 @@ struct JunkFilesView: View {
 
         dispatchGroup.notify(queue: .main) {
             withAnimation {
-                if !successfullyDeletedTypes.isEmpty {
+                if !successfullyDeletedIDs.isEmpty {
                     hasDeletedItems = true
                 }
-                service.junkCategories.removeAll { successfullyDeletedTypes.contains($0.type) }
-                selectedTypes.subtract(successfullyDeletedTypes)
+                service.junkCategories.removeAll { successfullyDeletedIDs.contains($0.id) }
+                selectedIDs.subtract(successfullyDeletedIDs)
+                confirmedCleanupIDs.subtract(successfullyDeletedIDs)
                 isDeleting = false
 	                operationActive = false
 
@@ -2528,6 +2790,8 @@ struct JunkFilesView: View {
 	                    self.cleanupNotice = "Cleaned \(removedTotal) items. \(skipped). Protected Apple caches are left intact by macOS."
 	                } else if removedTotal > 0 {
 	                    self.cleanupNotice = "Cleaned \(removedTotal) items."
+	                } else if alreadyAbsentTotal > 0 {
+	                    self.cleanupNotice = "Nothing remained to clean. \(alreadyAbsentTotal) items had already been removed by macOS or another process."
 	                }
 	            }
 	        }

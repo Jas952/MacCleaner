@@ -1,26 +1,74 @@
 import Foundation
 import SwiftUI
 import CoreGraphics
+import AppKit
 
 // MARK: - Junk Models
 
+struct JunkEntry: Identifiable {
+    let id: String
+    let url: URL
+    let name: String
+    let path: String
+    let size: UInt64
+    let itemCount: Int
+    let isDirectory: Bool
+    let isAggregate: Bool
+    let safety: JunkSafety
+}
+
 struct JunkCategory: Identifiable {
-    let id = UUID()
+    var id: String { "\(String(describing: type)):\(ownerID)" }
     let type: JunkType
+    var ownerID: String = "system"
+    var ownerName: String? = nil
+    var ownerDescription: String? = nil
+    var safety: JunkSafety = .review
+    var blockedReason: String? = nil
+    var projectRoot: URL? = nil
     var size: UInt64
     var files: [URL]
     var cleanupRoots: [URL] = []
     var fileCount: Int? = nil
+    var entries: [JunkEntry] = []
 
     var name: String { type.name }
     var icon: String { type.icon }
     var color: Color { type.color }
     var itemCount: Int { fileCount ?? files.count }
-    var isSelectedByDefault: Bool { type.isSelectedByDefault }
+    var isSelectedByDefault: Bool {
+        type.isSelectedByDefault || safety == .safe || safety == .rebuild || safety == .redownload
+    }
+    var displayName: String { ownerName ?? name }
+    var explanation: String { ownerDescription ?? type.detail }
+}
+
+enum JunkSafety: String, Sendable {
+    case safe, rebuild, redownload, review, protected
+
+    var label: String {
+        switch self {
+        case .safe: return "Safe to clean"
+        case .rebuild: return "Rebuilds later"
+        case .redownload: return "Downloads again"
+        case .review: return "Review first"
+        case .protected: return "Protected"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .safe: return "checkmark.shield.fill"
+        case .rebuild: return "hammer.fill"
+        case .redownload: return "arrow.down.circle.fill"
+        case .review: return "exclamationmark.triangle.fill"
+        case .protected: return "lock.fill"
+        }
+    }
 }
 
 enum JunkType: CaseIterable, Hashable {
-    case userCache, systemCache, xcodeJunk, systemLogs, browserCache, userLogs, unusedDMG, trash, downloads, screenCaptures
+    case userCache, systemCache, xcodeJunk, systemLogs, browserCache, userLogs, unusedDMG, trash, downloads, screenCaptures, developerOwner
 
     var name: String {
         switch self {
@@ -34,6 +82,7 @@ enum JunkType: CaseIterable, Hashable {
         case .trash:          return "Trash"
         case .downloads:      return "Downloads"
         case .screenCaptures: return "Screen Captures"
+        case .developerOwner: return "Developer Tool"
         }
     }
 
@@ -49,6 +98,7 @@ enum JunkType: CaseIterable, Hashable {
         case .trash:          return "trash.fill"
         case .downloads:      return "arrow.down.circle.fill"
         case .screenCaptures: return "camera.viewfinder"
+        case .developerOwner: return "wrench.and.screwdriver.fill"
         }
     }
 
@@ -64,6 +114,7 @@ enum JunkType: CaseIterable, Hashable {
         case .trash:          return .gray
         case .downloads:      return .blue
         case .screenCaptures: return .purple
+        case .developerOwner: return .accentPurple
         }
     }
 
@@ -87,6 +138,8 @@ enum JunkType: CaseIterable, Hashable {
             return "Disk images that are usually safe after installation."
         case .screenCaptures:
             return "Screen captures from common save locations."
+        case .developerOwner:
+            return "Generated files belonging to one developer tool or project."
         }
     }
 
@@ -94,7 +147,7 @@ enum JunkType: CaseIterable, Hashable {
         switch self {
         case .userCache, .browserCache:
             return true
-        case .systemCache, .xcodeJunk, .systemLogs, .userLogs, .unusedDMG, .trash, .downloads, .screenCaptures:
+        case .systemCache, .xcodeJunk, .systemLogs, .userLogs, .unusedDMG, .trash, .downloads, .screenCaptures, .developerOwner:
             return false
         }
     }
@@ -103,11 +156,205 @@ enum JunkType: CaseIterable, Hashable {
 struct JunkCleanResult {
     let success: Bool
     let removedCount: Int
+    let alreadyAbsentCount: Int
     let skippedCount: Int
     let failedCount: Int
     let message: String?
 
     var hasFailures: Bool { failedCount > 0 }
+}
+
+struct DeveloperOwnerCandidate {
+    let id: String
+    let name: String
+    let url: URL
+    let description: String
+    let safety: JunkSafety
+    let projectRoot: URL?
+
+    init(id: String, name: String, url: URL, description: String, safety: JunkSafety, projectRoot: URL? = nil) {
+        self.id = id
+        self.name = name
+        self.url = url
+        self.description = description
+        self.safety = safety
+        self.projectRoot = projectRoot
+    }
+}
+
+extension StorageAnalyzerService {
+    static func developerOwnerRoots(home: URL) -> [DeveloperOwnerCandidate] {
+        var candidates = [
+            DeveloperOwnerCandidate(id: "xcode-archives", name: "Xcode · Archives", url: home.appendingPathComponent("Library/Developer/Xcode/Archives"), description: "Saved distribution builds and debug symbols. Keep archives needed for crash symbolication or release history.", safety: .review),
+            DeveloperOwnerCandidate(id: "xcode-device-support", name: "Xcode · Device Support", url: home.appendingPathComponent("Library/Developer/Xcode/iOS DeviceSupport"), description: "Debug symbols for iPhone/iPad versions connected to this Mac. Old versions can be downloaded again, but review the devices you still support.", safety: .review),
+            DeveloperOwnerCandidate(id: "xcode-simulator-devices", name: "Xcode · Simulator data", url: home.appendingPathComponent("Library/Developer/CoreSimulator/Devices"), description: "Virtual device data, installed test apps and simulator state. Use Simulator or simctl to erase individual devices when possible.", safety: .review),
+            DeveloperOwnerCandidate(id: "xcode-simulator-runtimes", name: "Xcode · Simulator runtimes", url: URL(fileURLWithPath: "/Library/Developer/CoreSimulator/Profiles/Runtimes"), description: "Installed iOS/watchOS/tvOS simulator operating systems. A runtime can occupy several GB and should be removed only when its version is no longer needed.", safety: .review),
+            DeveloperOwnerCandidate(id: "swiftpm", name: "Swift Package Manager", url: home.appendingPathComponent("Library/Caches/org.swift.swiftpm"), description: "Downloaded Swift packages and metadata. SwiftPM resolves them again when a project needs them.", safety: .redownload),
+            DeveloperOwnerCandidate(id: "cocoapods", name: "CocoaPods", url: home.appendingPathComponent("Library/Caches/CocoaPods"), description: "Downloaded iOS/macOS pod specifications and archives. Active projects remain intact; missing downloads are restored by CocoaPods.", safety: .redownload),
+            DeveloperOwnerCandidate(id: "carthage", name: "Carthage", url: home.appendingPathComponent("Library/Caches/org.carthage.CarthageKit"), description: "Carthage download and build cache. Dependencies may be downloaded and rebuilt again.", safety: .redownload),
+            DeveloperOwnerCandidate(id: "homebrew", name: "Homebrew", url: home.appendingPathComponent("Library/Caches/Homebrew"), description: "Downloaded installers and bottles. Installed Homebrew packages are not removed; a future install may download them again.", safety: .redownload),
+            DeveloperOwnerCandidate(id: "npm", name: "npm", url: home.appendingPathComponent(".npm/_cacache"), description: "npm's content-addressed download cache. It is not the source code of a project.", safety: .redownload),
+            DeveloperOwnerCandidate(id: "yarn", name: "Yarn", url: home.appendingPathComponent("Library/Caches/Yarn"), description: "Downloaded JavaScript packages kept by Yarn.", safety: .redownload),
+            DeveloperOwnerCandidate(id: "pnpm", name: "pnpm", url: home.appendingPathComponent("Library/pnpm/store"), description: "Shared content-addressed JavaScript package store used by pnpm.", safety: .redownload),
+            DeveloperOwnerCandidate(id: "pip", name: "Python / pip", url: home.appendingPathComponent("Library/Caches/pip"), description: "Downloaded Python wheels and source archives. Installed virtual environments are not targeted.", safety: .redownload),
+            DeveloperOwnerCandidate(id: "uv", name: "Python / uv", url: home.appendingPathComponent("Library/Caches/uv"), description: "uv's downloaded Python package and interpreter cache.", safety: .redownload),
+            DeveloperOwnerCandidate(id: "gradle", name: "Gradle / Android", url: home.appendingPathComponent(".gradle/caches"), description: "Downloaded Android/Java dependencies and build metadata. The next build may download them again.", safety: .redownload),
+            DeveloperOwnerCandidate(id: "android-studio-cache", name: "Android Studio cache", url: home.appendingPathComponent("Library/Caches/Google/AndroidStudio"), description: "Android Studio indexes and temporary IDE data. The exact versioned cache may differ between Android Studio releases.", safety: .rebuild),
+            DeveloperOwnerCandidate(id: "android-emulators", name: "Android emulators", url: home.appendingPathComponent(".android/avd"), description: "Virtual Android device images. They can contain installed apps and test data, so review individual emulators before removing them.", safety: .review),
+            DeveloperOwnerCandidate(id: "maven", name: "Maven", url: home.appendingPathComponent(".m2/repository"), description: "Local Java/Kotlin dependency repository. Review before cleaning because offline builds may depend on it.", safety: .review),
+            DeveloperOwnerCandidate(id: "cargo", name: "Rust / Cargo", url: home.appendingPathComponent(".cargo/registry/cache"), description: "Downloaded Rust crates. Cargo can fetch them again, but offline builds may fail until it does.", safety: .redownload),
+            DeveloperOwnerCandidate(id: "go-build", name: "Go", url: home.appendingPathComponent("Library/Caches/go-build"), description: "Compiled Go build cache. It is recreated by the Go toolchain.", safety: .rebuild),
+            DeveloperOwnerCandidate(id: "jetbrains", name: "JetBrains IDEs", url: home.appendingPathComponent("Library/Caches/JetBrains"), description: "Indexes and temporary IDE data. JetBrains recreates indexes, but the next opening may be slower.", safety: .rebuild),
+            DeveloperOwnerCandidate(id: "blender-cache", name: "Blender cache", url: home.appendingPathComponent("Library/Caches/org.blenderfoundation.blender"), description: "Blender shader and temporary cache. Blender recreates it, but the first render may compile shaders again.", safety: .rebuild),
+            DeveloperOwnerCandidate(id: "claude-cache", name: "Claude cache", url: home.appendingPathComponent("Library/Application Support/Claude/Cache"), description: "Temporary web/UI cache used by the Claude desktop app. Conversation history and workspace data are outside this path.", safety: .rebuild),
+            DeveloperOwnerCandidate(id: "cursor-cache", name: "Cursor cache", url: home.appendingPathComponent("Library/Application Support/Cursor/Cache"), description: "Temporary editor cache. Cursor recreates it; settings and project source are outside this path.", safety: .rebuild),
+            DeveloperOwnerCandidate(id: "vscode-cache", name: "Visual Studio Code cache", url: home.appendingPathComponent("Library/Application Support/Code/Cache"), description: "Temporary editor cache. Extensions, settings and project source are outside this path.", safety: .rebuild),
+            DeveloperOwnerCandidate(id: "huggingface", name: "Hugging Face models", url: home.appendingPathComponent(".cache/huggingface"), description: "Downloaded AI datasets and model files. These are potentially valuable and are protected from bulk cleanup.", safety: .protected),
+            DeveloperOwnerCandidate(id: "ollama", name: "Ollama models", url: home.appendingPathComponent(".ollama/models"), description: "Local AI model weights. These are not ordinary caches and are protected from bulk cleanup.", safety: .protected),
+            DeveloperOwnerCandidate(id: "docker", name: "Docker Desktop data", url: home.appendingPathComponent("Library/Containers/com.docker.docker"), description: "Docker images, build cache, containers and volumes. Volumes may contain databases or source data; use Docker's own prune commands after review.", safety: .protected)
+        ]
+        let googleCache = home.appendingPathComponent("Library/Caches/Google", isDirectory: true)
+        if let entries = try? FileManager.default.contentsOfDirectory(at: googleCache, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles]) {
+            for entry in entries where entry.lastPathComponent.hasPrefix("AndroidStudio") {
+                candidates.append(DeveloperOwnerCandidate(
+                    id: "android-studio-\(entry.lastPathComponent.lowercased())",
+                    name: "Android Studio · \(entry.lastPathComponent)",
+                    url: entry,
+                    description: "Android Studio indexes and temporary IDE data. The cache is recreated; project source and SDKs are outside this path.",
+                    safety: .rebuild
+                ))
+            }
+        }
+        return candidates
+    }
+
+    static func browserDisplayName(for root: URL) -> String {
+        switch root.lastPathComponent.lowercased() {
+        case "chrome": return "Google Chrome"
+        case "com.apple.safari": return "Safari"
+        case "com.mozilla.firefox": return "Firefox"
+        case "com.microsoft.edgemac": return "Microsoft Edge"
+        case "com.brave.browser": return "Brave"
+        default: return root.lastPathComponent
+        }
+    }
+
+    static func projectArtifactCandidates(home: URL) -> [DeveloperOwnerCandidate] {
+        let roots = ["Projects", "Developer", "Code", "src", "Documents"].map {
+            home.appendingPathComponent($0, isDirectory: true)
+        }
+        let artifactNames: [(String, String, JunkSafety)] = [
+            ("node_modules", "JavaScript dependencies copied for this project.", .redownload),
+            (".next", "Next.js build output that is recreated by the next build.", .rebuild),
+            ("dist", "Compiled web output. It can be regenerated from the source project.", .rebuild),
+            ("build", "Generated build output. It can be regenerated from the source project.", .rebuild),
+            ("Pods", "CocoaPods dependencies stored inside this project.", .redownload),
+            (".build", "Swift Package Manager build output.", .rebuild),
+            ("target", "Rust compiled artifacts for this project.", .rebuild),
+            (".venv", "Python virtual environment. It is rebuildable, but may contain custom packages.", .review),
+            ("__pycache__", "Python bytecode cache.", .rebuild),
+            ("Library", "Unity imported assets and generated cache. Rebuilding can take a long time.", .review),
+            ("Intermediate", "Unreal Engine intermediate build data.", .rebuild),
+            (".godot", "Godot editor import cache and generated metadata.", .rebuild)
+        ]
+        var result: [DeveloperOwnerCandidate] = []
+        let fm = FileManager.default
+        for root in roots where fm.fileExists(atPath: root.path) {
+            guard let projects = try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles]) else { continue }
+            for project in projects.prefix(80) {
+                guard (try? project.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { continue }
+                let hasProjectMarker = fm.fileExists(atPath: project.appendingPathComponent(".git").path)
+                    || fm.fileExists(atPath: project.appendingPathComponent("Package.swift").path)
+                    || fm.fileExists(atPath: project.appendingPathComponent("package.json").path)
+                    || fm.fileExists(atPath: project.appendingPathComponent("pubspec.yaml").path)
+                guard hasProjectMarker else { continue }
+                let dirty = Self.projectHasUncommittedChanges(project)
+                for (artifact, detail, safety) in artifactNames {
+                    let artifactURL = project.appendingPathComponent(artifact, isDirectory: true)
+                    guard fm.fileExists(atPath: artifactURL.path) else { continue }
+                    let bytes = Self.boundedDirectorySize(artifactURL)
+                    guard bytes >= 10 * 1_048_576 else { continue }
+                    result.append(DeveloperOwnerCandidate(
+                        id: "project-\(project.path.replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: " ", with: "_"))-\(artifact)",
+                        name: "\(project.lastPathComponent) · \(artifact)",
+                        url: artifactURL,
+                        description: dirty ? "\(detail) Git reports uncommitted changes in this project; review before cleaning." : detail,
+                        safety: dirty ? .review : safety,
+                        projectRoot: project
+                    ))
+                }
+            }
+        }
+        return result
+    }
+
+    static func projectHasUncommittedChanges(_ project: URL) -> Bool {
+        guard FileManager.default.fileExists(atPath: project.appendingPathComponent(".git").path) else { return false }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.arguments = ["-C", project.path, "status", "--porcelain", "--untracked-files=normal"]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+            process.waitUntilExit()
+            return !pipe.fileHandleForReading.readDataToEndOfFile().isEmpty
+        } catch {
+            return false
+        }
+    }
+
+    static func boundedDirectorySize(_ root: URL) -> UInt64 {
+        let keys: Set<URLResourceKey> = [.isRegularFileKey, .totalFileAllocatedSizeKey, .fileAllocatedSizeKey, .fileSizeKey]
+        var total: UInt64 = 0
+        var count = 0
+        guard let enumerator = FileManager.default.enumerator(at: root, includingPropertiesForKeys: Array(keys), options: [.skipsHiddenFiles], errorHandler: { _, _ in true }) else { return 0 }
+        while let url = enumerator.nextObject() as? URL, count < 8_000 {
+            count += 1
+            guard (try? url.resourceValues(forKeys: keys).isRegularFile) == true else { continue }
+            let values = try? url.resourceValues(forKeys: keys)
+            total &+= UInt64(max(values?.totalFileAllocatedSize ?? values?.fileAllocatedSize ?? values?.fileSize ?? 0, 0))
+        }
+        return total
+    }
+
+    /// Builds a compact, user-facing preview of a cleanup root. Individual
+    /// large children are shown by path; the tail is represented by one folder
+    /// row so thousands of tiny files do not turn the result into noise.
+    static func previewEntries(at root: URL, safety: JunkSafety, limit: Int = 12) -> [JunkEntry] {
+        let fm = FileManager.default
+        guard let children = try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: [.isDirectoryKey, .isRegularFileKey, .fileSizeKey, .totalFileAllocatedSizeKey, .fileAllocatedSizeKey], options: []) else {
+            return []
+        }
+        let rows: [(url: URL, size: UInt64, isDirectory: Bool)] = children.compactMap { url in
+            guard let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .fileSizeKey, .totalFileAllocatedSizeKey, .fileAllocatedSizeKey]) else { return nil }
+            let directory = values.isDirectory == true
+            let size: UInt64 = directory
+                ? boundedDirectorySize(url)
+                : UInt64(max(values.totalFileAllocatedSize ?? values.fileAllocatedSize ?? values.fileSize ?? 0, 0))
+            return (url, size, directory)
+        }.sorted { $0.size > $1.size }
+        guard !rows.isEmpty else { return [] }
+
+        let visibleCount = min(limit, rows.count)
+        var result = rows.prefix(visibleCount).map { row in
+            JunkEntry(id: row.url.path, url: row.url, name: row.url.lastPathComponent,
+                      path: row.url.path, size: row.size, itemCount: 1,
+                      isDirectory: row.isDirectory, isAggregate: false, safety: safety)
+        }
+        if rows.count > visibleCount {
+            let rest = rows.dropFirst(visibleCount)
+            let restSize = rest.reduce(UInt64(0)) { $0 &+ $1.size }
+            result.append(JunkEntry(
+                id: "aggregate:\(root.path)", url: root,
+                name: "Остальные файлы в \(root.lastPathComponent)", path: root.path,
+                size: restSize, itemCount: rest.count, isDirectory: true,
+                isAggregate: true, safety: safety
+            ))
+        }
+        return result
+    }
 }
 
 // MARK: - Cleanup Statistics
@@ -379,6 +626,7 @@ final class CleanupStatsStore: ObservableObject {
         case .browserCache: return .browserCache
         case .trash: return .trash
         case .downloads, .unusedDMG, .screenCaptures: return .downloads
+        case .developerOwner: return .developerCache
         }
     }
 
@@ -1189,7 +1437,8 @@ class StorageAnalyzerService: ObservableObject {
                 home.appendingPathComponent("Library/Caches/com.microsoft.edgemac"),
                 home.appendingPathComponent("Library/Caches/com.brave.Browser")
             ]
-            let userCacheExclusions: [URL] = browserRoots.compactMap { root in
+            let ownerRoots = Self.developerOwnerRoots(home: home)
+            let userCacheExclusions: [URL] = (browserRoots + ownerRoots.map(\.url)).compactMap { root in
                 let relative = root.path.dropFirst(userCacheRoot.path.count)
                     .split(separator: "/", omittingEmptySubsequences: true)
                 guard let first = relative.first else { return nil }
@@ -1300,20 +1549,81 @@ class StorageAnalyzerService: ObservableObject {
             )
             if userCacheSize > 0 { categories.append(JunkCategory(type: .userCache, size: userCacheSize, files: userCacheFiles, cleanupRoots: [userCacheRoot], fileCount: userCacheCount)) }
 
-            var browserSize: UInt64 = 0
-            var browserCount = 0
-            var existingBrowserRoots: [URL] = []
             for root in browserRoots where fm.fileExists(atPath: root.path) {
                 let result = scanPath(root, collectFiles: false)
-                browserSize += result.0
-                browserCount += result.2
-                existingBrowserRoots.append(root)
+                if result.0 > 0 {
+                    let browserName = Self.browserDisplayName(for: root)
+                    categories.append(JunkCategory(
+                        type: .browserCache,
+                        ownerID: "browser-\(browserName.lowercased().replacingOccurrences(of: " ", with: "-"))",
+                        ownerName: "\(browserName) cache",
+                        ownerDescription: "Temporary pages, images and scripts kept by \(browserName). They are recreated while browsing; open \(browserName) must be closed before cleaning.",
+                        safety: .rebuild,
+                        size: result.0,
+                        files: [],
+                        cleanupRoots: [root],
+                        fileCount: result.2
+                    ))
+                }
             }
-            if browserSize > 0 { categories.append(JunkCategory(type: .browserCache, size: browserSize, files: [], cleanupRoots: existingBrowserRoots, fileCount: browserCount)) }
 
             let xcodeRoot = home.appendingPathComponent("Library/Developer/Xcode/DerivedData")
             let (xcodeSize, xcodeFiles, xcodeCount) = scanPath(xcodeRoot, collectFiles: false)
-            if xcodeSize > 0 { categories.append(JunkCategory(type: .xcodeJunk, size: xcodeSize, files: xcodeFiles, cleanupRoots: [xcodeRoot], fileCount: xcodeCount)) }
+            if xcodeSize > 0 {
+                categories.append(JunkCategory(
+                    type: .xcodeJunk,
+                    ownerID: "xcode-derived-data",
+                    ownerName: "Xcode · DerivedData",
+                    ownerDescription: "Build intermediates, indexes and logs generated by Xcode. The source project is not deleted; Xcode rebuilds this data on the next build.",
+                    safety: .rebuild,
+                    size: xcodeSize,
+                    files: xcodeFiles,
+                    cleanupRoots: [xcodeRoot],
+                    fileCount: xcodeCount
+                ))
+            }
+
+            // Developer caches are kept as separate owner rows. This avoids
+            // making a developer choose between one opaque "User Cache" total
+            // and a dangerous all-or-nothing delete.
+            for candidate in ownerRoots {
+                guard candidate.id != "xcode-derived-data",
+                      fm.fileExists(atPath: candidate.url.path) else { continue }
+                let result = scanPath(candidate.url, collectFiles: false)
+                let measuredBytes = result.0 > 0 ? result.0 : Self.boundedDirectorySize(candidate.url)
+                guard measuredBytes > 0 else { continue }
+                categories.append(JunkCategory(
+                    type: .developerOwner,
+                    ownerID: candidate.id,
+                    ownerName: candidate.name,
+                    ownerDescription: candidate.description,
+                    safety: candidate.safety,
+                    size: measuredBytes,
+                    files: [],
+                    cleanupRoots: [candidate.url],
+                    fileCount: result.2
+                ))
+            }
+
+            for candidate in Self.projectArtifactCandidates(home: home) {
+                guard fm.fileExists(atPath: candidate.url.path) else { continue }
+                let bytes = Self.boundedDirectorySize(candidate.url)
+                guard bytes > 0 else { continue }
+                let dirty = candidate.projectRoot.map(Self.projectHasUncommittedChanges) ?? false
+                categories.append(JunkCategory(
+                    type: .developerOwner,
+                    ownerID: candidate.id,
+                    ownerName: candidate.name,
+                    ownerDescription: candidate.description,
+                    safety: dirty ? .review : candidate.safety,
+                    blockedReason: dirty ? "Project has uncommitted Git changes" : nil,
+                    projectRoot: candidate.projectRoot,
+                    size: bytes,
+                    files: [],
+                    cleanupRoots: [candidate.url],
+                    fileCount: nil
+                ))
+            }
 
             let userLogsRoot = home.appendingPathComponent("Library/Logs")
             let (userLogsSize, userLogsFiles, userLogsCount) = scanPath(userLogsRoot, collectFiles: false)
@@ -1386,8 +1696,24 @@ class StorageAnalyzerService: ObservableObject {
             let (systemLogsSize, systemLogsFiles, systemLogsCount) = scanPath(systemLogsRoot, collectFiles: false)
             if systemLogsSize > 0 { categories.append(JunkCategory(type: .systemLogs, size: systemLogsSize, files: systemLogsFiles, cleanupRoots: [systemLogsRoot], fileCount: systemLogsCount)) }
 
+            let detailedCategories = categories.map { category -> JunkCategory in
+                var detailed = category
+                if detailed.entries.isEmpty {
+                    if let root = detailed.cleanupRoots.first {
+                        detailed.entries = Self.previewEntries(at: root, safety: detailed.safety)
+                    } else {
+                        detailed.entries = detailed.files.prefix(12).map { url in
+                            let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .fileSizeKey, .totalFileAllocatedSizeKey, .fileAllocatedSizeKey])
+                            let isDirectory = values?.isDirectory == true
+                            let size = isDirectory ? Self.boundedDirectorySize(url) : UInt64(max(values?.totalFileAllocatedSize ?? values?.fileAllocatedSize ?? values?.fileSize ?? 0, 0))
+                            return JunkEntry(id: url.path, url: url, name: url.lastPathComponent, path: url.path, size: size, itemCount: 1, isDirectory: isDirectory, isAggregate: false, safety: detailed.safety)
+                        }
+                    }
+                }
+                return detailed
+            }
             DispatchQueue.main.async {
-                self.junkCategories = categories.sorted { $0.size > $1.size }
+                self.junkCategories = detailedCategories.sorted { $0.size > $1.size }
                 self.junkScanWasLimited = budget.wasLimited
                 self.junkScannedEntryCount = budget.consumedEntries
                 self.isScanningJunk = false
@@ -1420,11 +1746,67 @@ class StorageAnalyzerService: ObservableObject {
         }
     }
 
-    func cleanJunkCategory(_ category: JunkCategory, completion: @escaping (JunkCleanResult) -> Void) {
+    /// Retries one already-selected Large Files item through macOS's native
+    /// administrator prompt. The app passes only the exact source path and
+    /// the current user's Trash path; it never asks for or stores a password.
+    func trashItemAsAdministrator(url: URL, completion: @escaping (Bool, String?) -> Void) {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let trash = home.appendingPathComponent(".Trash", isDirectory: true)
+        let command = "/bin/mv -n -- \(Self.shellQuote(url.path)) \(Self.shellQuote(trash.path))"
+        let script = "do shell script \"\(Self.appleScriptEscaped(command))\" with administrator privileges"
+        DispatchQueue.global(qos: .userInitiated).async {
+            let task = Process()
+            task.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+            task.arguments = ["-e", script]
+            let pipe = Pipe()
+            task.standardOutput = pipe
+            task.standardError = pipe
+            do {
+                try task.run()
+                task.waitUntilExit()
+                let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                DispatchQueue.main.async {
+                    completion(task.terminationStatus == 0, task.terminationStatus == 0 ? nil : (output?.isEmpty == false ? output : "Administrator authorization was cancelled or the file could not be moved."))
+                }
+            } catch {
+                DispatchQueue.main.async { completion(false, error.localizedDescription) }
+            }
+        }
+    }
+
+    private static func shellQuote(_ value: String) -> String {
+        "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
+    }
+
+    private static func appleScriptEscaped(_ value: String) -> String {
+        value.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+    }
+
+    func cleanJunkCategory(
+        _ category: JunkCategory,
+        allowUncommittedProject: Bool = false,
+        completion: @escaping (JunkCleanResult) -> Void
+    ) {
+        // Protected developer-owner roots may be scanned and displayed, but
+        // they are never eligible for a bulk Trash operation—even if a stale
+        // selection state or a future caller passes them directly here.
+        if category.safety == .protected {
+            completion(JunkCleanResult(
+                success: true,
+                removedCount: 0,
+                alreadyAbsentCount: 0,
+                skippedCount: category.itemCount,
+                failedCount: 0,
+                message: "Protected data was not removed. Use the owning tool to manage it."
+            ))
+            return
+        }
         if category.type == .trash {
             completion(JunkCleanResult(
                 success: false,
                 removedCount: 0,
+                alreadyAbsentCount: 0,
                 skippedCount: category.itemCount,
                 failedCount: 0,
                 message: "Use Finder's Empty Trash command to permanently remove Trash contents."
@@ -1438,6 +1820,7 @@ class StorageAnalyzerService: ObservableObject {
             var failedCount = 0
             var skippedCount = 0
             var removedCount = 0
+            var alreadyAbsentCount = 0
             let statsCategory = CleanupStatsStore.category(for: category.type)
             let protectionPolicy = SafeDeletionService.currentProtectionPolicy()
             let browserRoots = self.userBrowserCacheRoots()
@@ -1446,7 +1829,10 @@ class StorageAnalyzerService: ObservableObject {
             if !category.cleanupRoots.isEmpty {
                 for root in category.cleanupRoots {
                     autoreleasepool {
-                        guard fm.fileExists(atPath: root.path) else { return }
+                        guard fm.fileExists(atPath: root.path) else {
+                            alreadyAbsentCount += 1
+                            return
+                        }
 
                         do {
                             let children = try fm.contentsOfDirectory(at: root, includingPropertiesForKeys: nil, options: [])
@@ -1457,7 +1843,8 @@ class StorageAnalyzerService: ObservableObject {
                                         child,
                                         category: category,
                                         protectionPolicy: protectionPolicy,
-                                        browserRoots: browserRoots
+                                        browserRoots: browserRoots,
+                                        allowUncommittedProject: allowUncommittedProject
                                     ) {
 	                                    skippedCount += 1
 	                                    continue
@@ -1468,7 +1855,9 @@ class StorageAnalyzerService: ObservableObject {
                                     removedChildren += 1
                                     removedBytes += childSize
 	                                } catch {
-	                                    if self.isPermissionDenied(error) {
+	                                    if self.isFileMissing(error) {
+	                                        alreadyAbsentCount += 1
+	                                    } else if self.isPermissionDenied(error) {
 	                                        skippedCount += 1
 	                                    } else {
 	                                        failedCount += 1
@@ -1489,9 +1878,13 @@ class StorageAnalyzerService: ObservableObject {
                                 )
                             }
                         } catch {
-                            failedCount += 1
-                            if firstError == nil {
-                                firstError = error.localizedDescription
+                            if self.isFileMissing(error) {
+                                alreadyAbsentCount += 1
+                            } else {
+                                failedCount += 1
+                                if firstError == nil {
+                                    firstError = error.localizedDescription
+                                }
                             }
                         }
                     }
@@ -1499,12 +1892,16 @@ class StorageAnalyzerService: ObservableObject {
             } else {
                 for url in category.files {
                     autoreleasepool {
-	                        guard fm.fileExists(atPath: url.path) else { return }
+	                        guard fm.fileExists(atPath: url.path) else {
+	                            alreadyAbsentCount += 1
+	                            return
+	                        }
 	                        if self.shouldSkipJunkURL(
                                 url,
                                 category: category,
                                 protectionPolicy: protectionPolicy,
-                                browserRoots: browserRoots
+                                browserRoots: browserRoots,
+                                allowUncommittedProject: allowUncommittedProject
                             ) {
 	                            skippedCount += 1
 	                            return
@@ -1534,7 +1931,9 @@ class StorageAnalyzerService: ObservableObject {
                                 )
                             }
 	                        } catch {
-	                            if self.isPermissionDenied(error) {
+	                            if self.isFileMissing(error) {
+	                                alreadyAbsentCount += 1
+	                            } else if self.isPermissionDenied(error) {
 	                                skippedCount += 1
 	                            } else {
 	                                failedCount += 1
@@ -1561,6 +1960,7 @@ class StorageAnalyzerService: ObservableObject {
 	                completion(JunkCleanResult(
 	                    success: removedCount > 0 || failedCount == 0,
 	                    removedCount: removedCount,
+	                    alreadyAbsentCount: alreadyAbsentCount,
 	                    skippedCount: skippedCount,
 	                    failedCount: failedCount,
 	                    message: message
@@ -1580,7 +1980,7 @@ class StorageAnalyzerService: ObservableObject {
         let parent = url.deletingLastPathComponent().path
 
         switch category.type {
-        case .userCache, .systemCache, .browserCache, .xcodeJunk, .systemLogs, .userLogs:
+        case .userCache, .systemCache, .browserCache, .xcodeJunk, .systemLogs, .userLogs, .developerOwner:
             return parent
         case .trash, .downloads, .unusedDMG, .screenCaptures:
             return path
@@ -1591,12 +1991,22 @@ class StorageAnalyzerService: ObservableObject {
         _ url: URL,
         category: JunkCategory,
         protectionPolicy: SafeDeletionService.ProtectionPolicy,
-        browserRoots: [URL]
+        browserRoots: [URL],
+        allowUncommittedProject: Bool = false
     ) -> Bool {
         let name = url.lastPathComponent.lowercased()
         let path = url.path.lowercased()
 
         if SafeDeletionService.isProtectedApplicationPath(url, policy: protectionPolicy) { return true }
+
+        if category.type == .browserCache,
+           let owner = category.ownerName?.replacingOccurrences(of: " cache", with: ""),
+           NSWorkspace.shared.runningApplications.contains(where: { $0.localizedName == owner && !$0.isTerminated }) {
+            return true
+        }
+        if !allowUncommittedProject && category.projectRoot.map(Self.projectHasUncommittedChanges) == true {
+            return true
+        }
 
         switch category.type {
         case .userCache, .systemCache:
@@ -1626,6 +2036,11 @@ class StorageAnalyzerService: ObservableObject {
         case .xcodeJunk:
             let keepNames: Set<String> = ["archives", "devicesupport"]
             return keepNames.contains(name)
+        case .developerOwner:
+            // Docker and model stores are intentionally review-only. They can
+            // be measured in Junk Files, but this layer never guesses how to
+            // destroy a container volume or a model selected by an agent.
+            return category.safety == .protected
         default:
             return false
         }
@@ -1649,6 +2064,22 @@ class StorageAnalyzerService: ObservableObject {
             nsError.code == NSFileReadNoPermissionError ||
             nsError.code == NSFileWriteVolumeReadOnlyError
         )
+    }
+
+    private func isFileMissing(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        if nsError.domain == NSCocoaErrorDomain {
+            if nsError.code == NSFileNoSuchFileError || nsError.code == NSFileReadNoSuchFileError {
+                return true
+            }
+        } else if nsError.domain == NSPOSIXErrorDomain && nsError.code == 2 { // ENOENT
+            return true
+        }
+
+        if let underlying = nsError.userInfo[NSUnderlyingErrorKey] as? Error {
+            return isFileMissing(underlying)
+        }
+        return false
     }
 
     private func itemSize(at url: URL, budget: inout ScanResourceBudget) -> UInt64 {

@@ -841,6 +841,69 @@ final class SafetyPolicyTests: XCTestCase {
             .isSubset(of: Set(try XCTUnwrap(providers.first).registeredTypeIdentifiers)))
     }
 
+    func testDeveloperOwnerCatalogSeparatesToolOwnersAndProtectsModels() {
+        let home = URL(fileURLWithPath: "/Users/test")
+        let owners = StorageAnalyzerService.developerOwnerRoots(home: home)
+        let ids = Set(owners.map(\.id))
+        XCTAssertTrue(ids.contains("swiftpm"))
+        XCTAssertTrue(ids.contains("cocoapods"))
+        XCTAssertTrue(ids.contains("carthage"))
+        XCTAssertTrue(ids.contains("xcode-simulator-runtimes"))
+        XCTAssertEqual(ids.count, owners.count)
+        XCTAssertEqual(owners.first(where: { $0.id == "ollama" })?.safety, .protected)
+        XCTAssertEqual(owners.first(where: { $0.id == "docker" })?.safety, .protected)
+    }
+
+    func testJunkOwnerSelectionIdentityDoesNotCollapseBrowserRows() {
+        let chrome = JunkCategory(
+            type: .browserCache,
+            ownerID: "browser-chrome",
+            ownerName: "Google Chrome cache",
+            size: 10,
+            files: []
+        )
+        let safari = JunkCategory(
+            type: .browserCache,
+            ownerID: "browser-safari",
+            ownerName: "Safari cache",
+            size: 10,
+            files: []
+        )
+        XCTAssertNotEqual(chrome.id, safari.id)
+    }
+
+    func testJunkCategoryAutoSelectsRebuildableEntriesOnly() {
+        let rebuildable = JunkCategory(type: .developerOwner, ownerID: "cache", safety: .rebuild, size: 1, files: [])
+        let protected = JunkCategory(type: .developerOwner, ownerID: "models", safety: .protected, size: 1, files: [])
+        let review = JunkCategory(type: .developerOwner, ownerID: "archives", safety: .review, size: 1, files: [])
+
+        XCTAssertTrue(rebuildable.isSelectedByDefault)
+        XCTAssertFalse(protected.isSelectedByDefault)
+        XCTAssertFalse(review.isSelectedByDefault)
+    }
+
+    func testJunkCleanupTreatsAlreadyMissingFileAsResolved() {
+        let missingURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("MacCleaner-missing-\(UUID().uuidString)")
+        let category = JunkCategory(
+            type: .systemCache,
+            ownerID: "missing-race",
+            size: 1,
+            files: [missingURL]
+        )
+        let finished = expectation(description: "Missing cache item resolved")
+
+        StorageAnalyzerService().cleanJunkCategory(category) { result in
+            XCTAssertTrue(result.success)
+            XCTAssertEqual(result.removedCount, 0)
+            XCTAssertEqual(result.alreadyAbsentCount, 1)
+            XCTAssertEqual(result.failedCount, 0)
+            finished.fulfill()
+        }
+
+        wait(for: [finished], timeout: 2)
+    }
+
     private func jpegData(from url: URL, compression: Double) throws -> Data {
         let image = try XCTUnwrap(NSImage(contentsOf: url))
         let tiff = try XCTUnwrap(image.tiffRepresentation)

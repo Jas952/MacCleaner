@@ -34,6 +34,13 @@
 - Cloud Reclaim: только локальный eviction подтверждённых iCloud-файлов.
 - Complete Analysis: последовательный запуск Advisor, Duplicates, Similar Photos и Cloud Reclaim с единым отчётом.
 - Сброс завершённых Storage-сценариев при выходе со вкладки.
+- Junk Files owner-группы: Xcode DerivedData/Archives/Device Support/Simulator data и runtimes, SwiftPM, CocoaPods, Carthage, Homebrew, npm/Yarn/pnpm, Python pip/uv, Gradle/Maven/Android Studio, Cargo, Go, JetBrains, Blender, VS Code/Cursor/Claude caches и артефакты Unity/Unreal/Godot/web/Swift/Rust/Python-проектов. Каждая категория раскрывается в список путей с размерами; большое количество мелких файлов сворачивается в агрегированную строку папки. Безопасные и пересоздаваемые данные (`safe`, `rebuild`, `redownload`) автоматически отмечены чекбоксами, требующие проверки (`review`, `protected`) — нет.
+- Артефакты web/Swift/Rust/Python/Unity/Unreal-проектов находятся только в известных папках проектов с bounded scan; исходный код не сканируется как кандидат на удаление. Для Git-проекта с незакоммиченными изменениями требуется явное подтверждение.
+- Открытые Chrome/Safari/Firefox/Edge/Brave перед очисткой кэша требуют подтверждения и закрываются обычным запросом завершения; принудительный kill отсутствует.
+- Если временный cache-файл исчез между сканированием и перемещением в Trash, очистка считает его уже разрешённым элементом, убирает устаревшую категорию из результата и не показывает ложную ошибку `The file doesn’t exist`.
+- Hugging Face/папки локальных Ollama-моделей и Docker Desktop data отображаются как защищённые данные: они не входят в массовое удаление, потому что могут содержать модели, базы и рабочее состояние.
+- Защищённые категории скрыты в результатах Junk Files по умолчанию; кнопка «Показать защищённые» раскрывает их только для обзора и не добавляет в очистку.
+- Large Files при отказе macOS в доступе предлагает отдельное подтверждение административного удаления только для неудачных выбранных файлов; без подтверждения файлы остаются на месте.
 
 ### Дополнительные инструменты
 
@@ -61,13 +68,14 @@
 - В status item режим `Battery` показывает выровненные вертикальные indicators с load/heat fill, semantic green/orange/red, temperature thermometer и окрашенный тем же semantic color compact format marker (`%/C`, `%/G`, `%/°`, `C/F`, `%/clock`). Режим `Values` заменяет battery на непосредственные проценты или числа с единицей измерения. Оба режима используют одинаковые `CPU`, `RAM`, `GPU`, `TEMP`, `BAT` labels, dividers, accessibility values и live preview в Settings. При отключении всех gauges остаётся настоящий значок приложения MacCleaner.
 - Menu bar modules визуально разделены тонкими dividers; short labels увеличены до сопоставимого с battery кегля, а термометр стоит после temperature battery.
 - Updates: Sparkle, подписанный EdDSA appcast, шестичасовые автоматические проверки и общий About & Updates overlay. Ручная команда открывает штатный сценарий Download → Install → Relaunch; автоматический режим управляет одновременно проверкой и фоновой загрузкой без отдельного дублирующего `UserDefaults`.
+- General Settings содержит компактную companion-карточку Browser Monitor от того же разработчика: startup-emblem со shield-контуром, краткое описание, основную загрузку ZIP версии 1.0.0, следующую за ней GitHub-ссылку с фирменным знаком и простой локальный popover без декоративных шаговых badges для установки unpacked extension в Chrome.
 
 ### UI и качество
 
 - Общий design system, modal overlay, segmented control и контрастные button styles.
 - Launch intro и фиксированное desktop window layout.
 - Адаптивный англоязычный промо-сайт в `website/` с физически разделённой анимацией закрытого и открытого MacBook: оба состояния используют один масштаб и шарнир, а строгая передача между ними исключает одновременное появление двух корпусов. На внешней крышке расположен защитный знак; открытое состояние включает ограниченную по перспективе клавиатурную деку, полноценный macOS desktop внутри экрана и последовательное переключение всех 11 основных sidebar-разделов по чистым системным кадрам. Carousel поддерживает стрелки, горизонтальные вкладки, клавиатуру и клики по реальной боковой панели. Нижние product stories отдельно рассказывают о system overview, AI Agents и maintenance/diagnostics; остальные возможности собраны без повторения carousel. Фон первого экрана использует анимированные mesh-gradient, glass-orbit и light-plane слои и реагирует на движение указателя; предусмотрен `prefers-reduced-motion`.
-- 46 safety/policy XCTest-тестов; текущий test run проходит.
+- 50 safety/policy XCTest-тестов; текущий test run проходит.
 
 ## Реализовано с ограничениями
 

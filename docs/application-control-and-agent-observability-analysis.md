@@ -175,6 +175,7 @@ Agent session
 
 ## Связанные материалы
 
+- [Developer Process & Memory Attribution](developer-process-memory-attribution-research.md)
 - [[Architecture]]
 - [[Features]]
 - [[Opportunities]]

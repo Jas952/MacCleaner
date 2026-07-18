@@ -4,16 +4,21 @@ import UniformTypeIdentifiers
 struct SettingsView: View {
     @ObservedObject private var settings = SettingsManager.shared
     @ObservedObject var monitor: SystemMonitor
+    @State private var selectedTab = SettingsTab.general
     @State private var draggedMenuBarGauge: MenuBarGauge?
+    @State private var isBrowserMonitorInstallGuidePresented = false
 
     var body: some View {
-        TabView {
+        TabView(selection: $selectedTab) {
             general
                 .tabItem { Label("General", systemImage: "gearshape") }
+                .tag(SettingsTab.general)
             tools
                 .tabItem { Label("Tools", systemImage: "square.grid.2x2") }
+                .tag(SettingsTab.tools)
             menuBar
                 .tabItem { Label("Menu Bar", systemImage: "menubar.rectangle") }
+                .tag(SettingsTab.menuBar)
         }
         .padding(18)
         .frame(width: 760, height: 580)
@@ -34,6 +39,61 @@ struct SettingsView: View {
             Section("Privacy") {
                 Label("Capture and media tools process content locally.", systemImage: "lock.shield")
                 Label("Optional permissions are requested only when a tool is used.", systemImage: "hand.raised")
+            }
+            Section {
+                HStack(alignment: .center, spacing: 16) {
+                    Image("browser_monitor")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 58, height: 64)
+                        .accessibilityLabel("Browser Monitor icon")
+
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("Browser Monitor")
+                            .font(.headline)
+                        Text("Local Chrome tab insights, tracker protection and reversible controls for busy pages.")
+                            .font(.callout)
+                            .foregroundStyle(Color.textSecondaryLight)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        HStack(spacing: 10) {
+                            Link(destination: BrowserMonitorLink.download) {
+                                Label("Download", systemImage: "arrow.down.circle.fill")
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.small)
+
+                            Link(destination: BrowserMonitorLink.repository) {
+                                Image("icon_github")
+                                    .resizable()
+                                    .scaledToFit()
+                                    .frame(width: 16, height: 16)
+                            }
+                            .buttonStyle(.link)
+                            .help("Open the project page")
+                            .accessibilityLabel("Open the Browser Monitor project page")
+
+                            Button {
+                                isBrowserMonitorInstallGuidePresented.toggle()
+                            } label: {
+                                Image(systemName: "info.circle")
+                            }
+                            .buttonStyle(.borderless)
+                            .help("How to install Browser Monitor")
+                            .accessibilityLabel("Browser Monitor installation instructions")
+                            .popover(isPresented: $isBrowserMonitorInstallGuidePresented, arrowEdge: .bottom) {
+                                BrowserMonitorInstallGuide()
+                            }
+                        }
+                    }
+
+                    Spacer(minLength: 0)
+                }
+                .padding(.vertical, 6)
+            } header: {
+                Text("More tools from this developer")
+            } footer: {
+                Text("A companion utility from the same developer, available separately from MacCleaner.")
             }
         }
         .formStyle(.grouped)
@@ -277,6 +337,51 @@ struct SettingsView: View {
         }
     }
 
+}
+
+private enum SettingsTab: Hashable {
+    case general
+    case tools
+    case menuBar
+}
+
+private enum BrowserMonitorLink {
+    static let repository = URL(string: "https://github.com/Jas952/BrowserMonitor")!
+    static let download = URL(string: "https://github.com/Jas952/BrowserMonitor/releases/download/v1.0.0/browser-monitor-1.0.0.zip")!
+}
+
+private struct BrowserMonitorInstallGuide: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Install in Chrome")
+                .font(.headline)
+
+            VStack(alignment: .leading, spacing: 7) {
+                installStep(1, "Extract the downloaded ZIP to a permanent folder.")
+                installStep(2, "Open chrome://extensions and enable Developer mode.")
+                installStep(3, "Choose Load unpacked and select the folder containing manifest.json.")
+                installStep(4, "Pin Browser Monitor to the Chrome toolbar.")
+            }
+
+            Text("Keep the extracted folder after installation.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(14)
+        .frame(width: 330, alignment: .leading)
+    }
+
+    private func installStep(_ number: Int, _ text: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text("\(number).")
+                .font(.callout.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .frame(width: 18, alignment: .trailing)
+            Text(text)
+                .font(.callout)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
 }
 
 private struct MenuBarGaugeDropDelegate: DropDelegate {
