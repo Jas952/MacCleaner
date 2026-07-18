@@ -4,7 +4,7 @@
         <title>MacCleaner</title>
         <item>
             <title>1.0.4</title>
-            <pubDate>Sat, 18 Jul 2026 16:40:20 +0000</pubDate>
+            <pubDate>Sat, 18 Jul 2026 13:25:45 +0000</pubDate>
             <link>https://github.com/Jas952/MacCleaner</link>
             <sparkle:version>6</sparkle:version>
             <sparkle:shortVersionString>1.0.4</sparkle:shortVersionString>
@@ -12,13 +12,23 @@
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
             <description sparkle:format="markdown"><![CDATA[# MacCleaner 1.0.4
 
-- Renumbered the product line to 1.0.1, 1.0.2, 1.0.3, and 1.0.4.
-- Redesigned Junk Files as a hierarchical category, folder, and file-path list with aggregate rows for many small files.
-- Added developer and AI owner groups, automatic selection of rebuildable data, protected-category visibility controls, and safer Trash policies.
-- Added a targeted administrator authorization retry for Large Files that fail due to macOS permissions.
-- Redesigned Tools, menu bar monitoring, diagnostics, Storage workflows, and documentation.
+- Перенумерована линейка продукта: первоначальные релизы теперь обозначены как 1.0.1, 1.0.2 и 1.0.3; текущая версия — 1.0.4.
+- Junk Files переработан в иерархический список: категория → папка/подкатегория → конкретные пути и размеры.
+- Мелкие файлы внутри больших папок объединяются в агрегированную строку с количеством и суммарным размером.
+- Безопасные, пересоздаваемые и повторно загружаемые данные автоматически отмечаются для очистки.
+- Developer- и AI-данные разделены по владельцам: Xcode, SwiftPM, npm, pnpm, Python, Docker, Ollama, Hugging Face и другие инструменты.
+- Protected-категории скрыты по умолчанию и раскрываются отдельной кнопкой только для просмотра; в массовую очистку они не попадают.
+- Для Large Files добавлен адресный повтор удаления через системный запрос администратора только после отказа обычных прав доступа.
+- Усилены проверки Trash-only удаления, защиты данных MacCleaner, открытых браузеров и проектов с незакоммиченными Git-изменениями.
+- Обновлены интерфейс Storage, пояснения безопасности, документация и сценарии проверки.
+
+## История версий
+
+- **1.0.3** — ранее опубликованный релиз `v1.2`.
+- **1.0.2** — ранее опубликованный релиз `v1.1`.
+- **1.0.1** — первоначальный релиз `v1.0`.
 ]]></description>
-            <enclosure url="https://github.com/Jas952/MacCleaner/releases/download/v1.0.4/MacCleaner.dmg" length="0" type="application/octet-stream"/>
+            <enclosure url="https://github.com/Jas952/MacCleaner/releases/download/v1.0.4/MacCleaner.dmg" length="9671611" type="application/octet-stream" sparkle:edSignature="RirbK+54mCZZ2GN5slAy7yFrwnxj7wClRs3dJhAUEhl+3i0D8y2zUQxGvQ7o0GP4/6CzgjUXxQuhzv3kicUCCw=="/>
         </item>
     </channel>
 </rss>
