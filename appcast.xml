@@ -4,7 +4,7 @@
         <title>MacCleaner</title>
         <item>
             <title>1.0.4</title>
-            <pubDate>Sat, 18 Jul 2026 13:25:45 +0000</pubDate>
+            <pubDate>Sat, 18 Jul 2026 13:30:46 +0000</pubDate>
             <link>https://github.com/Jas952/MacCleaner</link>
             <sparkle:version>6</sparkle:version>
             <sparkle:shortVersionString>1.0.4</sparkle:shortVersionString>
@@ -12,23 +12,16 @@
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
             <description sparkle:format="markdown"><![CDATA[# MacCleaner 1.0.4
 
-- Перенумерована линейка продукта: первоначальные релизы теперь обозначены как 1.0.1, 1.0.2 и 1.0.3; текущая версия — 1.0.4.
-- Junk Files переработан в иерархический список: категория → папка/подкатегория → конкретные пути и размеры.
-- Мелкие файлы внутри больших папок объединяются в агрегированную строку с количеством и суммарным размером.
-- Безопасные, пересоздаваемые и повторно загружаемые данные автоматически отмечаются для очистки.
-- Developer- и AI-данные разделены по владельцам: Xcode, SwiftPM, npm, pnpm, Python, Docker, Ollama, Hugging Face и другие инструменты.
-- Protected-категории скрыты по умолчанию и раскрываются отдельной кнопкой только для просмотра; в массовую очистку они не попадают.
-- Для Large Files добавлен адресный повтор удаления через системный запрос администратора только после отказа обычных прав доступа.
-- Усилены проверки Trash-only удаления, защиты данных MacCleaner, открытых браузеров и проектов с незакоммиченными Git-изменениями.
-- Обновлены интерфейс Storage, пояснения безопасности, документация и сценарии проверки.
-
-## История версий
-
-- **1.0.3** — ранее опубликованный релиз `v1.2`.
-- **1.0.2** — ранее опубликованный релиз `v1.1`.
-- **1.0.1** — первоначальный релиз `v1.0`.
+- Redesigned Junk Files as a hierarchical list: category → folder/subcategory → concrete paths and sizes.
+- Small files inside large folders are grouped into one aggregate row with the item count and total size.
+- Safe, rebuildable, and downloadable-again data is selected automatically for cleanup.
+- Developer and AI data is separated by owner, including Xcode, SwiftPM, npm, pnpm, Python, Docker, Ollama, Hugging Face, and other tools.
+- Protected categories are hidden by default and can be revealed for review; they are excluded from bulk cleanup.
+- Large Files now offers a targeted administrator authorization retry only after a normal permission failure.
+- Strengthened Trash-only deletion, MacCleaner data protection, open-browser checks, and dirty Git project confirmation.
+- Updated the Storage interface, safety explanations, documentation, and validation scenarios.
 ]]></description>
-            <enclosure url="https://github.com/Jas952/MacCleaner/releases/download/v1.0.4/MacCleaner.dmg" length="9671611" type="application/octet-stream" sparkle:edSignature="RirbK+54mCZZ2GN5slAy7yFrwnxj7wClRs3dJhAUEhl+3i0D8y2zUQxGvQ7o0GP4/6CzgjUXxQuhzv3kicUCCw=="/>
+            <enclosure url="https://github.com/Jas952/MacCleaner/releases/download/v1.0.4/MacCleaner.dmg" length="9671068" type="application/octet-stream" sparkle:edSignature="UuMsUdf4hGsrHyxWlFwH4wLr1fadrXjQUJ6bFTF1x7LkEY0D8RNFlsjOsxvbtQMBZaEKkM4K3mVZXMIGF2AFDg=="/>
         </item>
     </channel>
 </rss>
