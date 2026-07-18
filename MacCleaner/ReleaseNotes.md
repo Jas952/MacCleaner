@@ -1,17 +1,10 @@
 # MacCleaner 1.0.4
 
-- Перенумерована линейка продукта: первоначальные релизы теперь обозначены как 1.0.1, 1.0.2 и 1.0.3; текущая версия — 1.0.4.
-- Junk Files переработан в иерархический список: категория → папка/подкатегория → конкретные пути и размеры.
-- Мелкие файлы внутри больших папок объединяются в агрегированную строку с количеством и суммарным размером.
-- Безопасные, пересоздаваемые и повторно загружаемые данные автоматически отмечаются для очистки.
-- Developer- и AI-данные разделены по владельцам: Xcode, SwiftPM, npm, pnpm, Python, Docker, Ollama, Hugging Face и другие инструменты.
-- Protected-категории скрыты по умолчанию и раскрываются отдельной кнопкой только для просмотра; в массовую очистку они не попадают.
-- Для Large Files добавлен адресный повтор удаления через системный запрос администратора только после отказа обычных прав доступа.
-- Усилены проверки Trash-only удаления, защиты данных MacCleaner, открытых браузеров и проектов с незакоммиченными Git-изменениями.
-- Обновлены интерфейс Storage, пояснения безопасности, документация и сценарии проверки.
-
-## История версий
-
-- **1.0.3** — ранее опубликованный релиз `v1.2`.
-- **1.0.2** — ранее опубликованный релиз `v1.1`.
-- **1.0.1** — первоначальный релиз `v1.0`.
+- Redesigned Junk Files as a hierarchical list: category → folder/subcategory → concrete paths and sizes.
+- Small files inside large folders are grouped into one aggregate row with the item count and total size.
+- Safe, rebuildable, and downloadable-again data is selected automatically for cleanup.
+- Developer and AI data is separated by owner, including Xcode, SwiftPM, npm, pnpm, Python, Docker, Ollama, Hugging Face, and other tools.
+- Protected categories are hidden by default and can be revealed for review; they are excluded from bulk cleanup.
+- Large Files now offers a targeted administrator authorization retry only after a normal permission failure.
+- Strengthened Trash-only deletion, MacCleaner data protection, open-browser checks, and dirty Git project confirmation.
+- Updated the Storage interface, safety explanations, documentation, and validation scenarios.
