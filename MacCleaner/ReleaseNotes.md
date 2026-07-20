@@ -1,4 +1,4 @@
-# MacCleaner 1.0.4
+# MacCleaner 1.0.5
 
 - Redesigned Junk Files and Optimize cleanup reports as expandable lists: category → subcategory/folder → concrete paths, item counts, and sizes.
 - Added automatic selection for safe-to-remove entries while keeping protected, sensitive, and rebuildable data out of bulk cleanup.

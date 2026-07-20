@@ -21,7 +21,7 @@ MacCleaner is a native macOS utility for understanding what is happening on your
 
 It does not treat cleanup as a one-click promise. MacCleaner shows what it found, keeps potentially destructive choices visible, and uses bounded, cancellable scans so deeper analysis does not turn into uncontrolled full-disk work.
 
-### Current release — 1.0.4
+### Current release — 1.0.5
 
 The current build makes the cleanup and developer-workflow parts of MacCleaner substantially more actionable:
 
