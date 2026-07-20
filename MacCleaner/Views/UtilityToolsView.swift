@@ -106,11 +106,11 @@ struct UtilityToolsView: View {
         case .homebrew: HomebrewToolView()
         case .audioMixer, .chargeLimit: ToolsWelcomeView(toolCount: visibleTools.count - 1)
         case .physical:
-            PhysicalMaintenanceToolView(service: maintenance)
+            PhysicalMaintenanceToolView(service: maintenance, compact: true)
         case .keyboard:
             ToolPage(.keyboard) { KeyboardDiagnosticSection(service: keyboard); PointerInputTestPanel() }
         case .speaker:
-            ToolPage(.speaker) {
+            ToolPage(.speaker, compact: true) {
                 SpeakerTestPanel(service: speaker)
                 ToolPanel("Listening checklist", subtitle: "Use the same quiet listening position for every channel and sweep.") {
                     HStack(alignment: .top, spacing: 18) {
@@ -283,22 +283,27 @@ struct ToolScroll<Content: View>: View {
 
 private struct ToolPage<Content: View>: View {
     let tool: UtilityToolID
+    let compact: Bool
     @ViewBuilder let content: Content
-    init(_ tool: UtilityToolID, @ViewBuilder content: () -> Content) { self.tool = tool; self.content = content() }
+    init(_ tool: UtilityToolID, compact: Bool = false, @ViewBuilder content: () -> Content) {
+        self.tool = tool
+        self.compact = compact
+        self.content = content()
+    }
     var body: some View {
         GeometryReader { geometry in
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    HStack(spacing: 12) {
-                        Image(systemName: tool.icon).font(.title2).foregroundStyle(Color.accentBlue).frame(width: 42, height: 42).background(Color.accentBlue.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
+                VStack(alignment: .leading, spacing: compact ? 12 : 18) {
+                    HStack(spacing: 10) {
+                        Image(systemName: tool.icon).font(compact ? .headline : .title2).foregroundStyle(Color.accentBlue).frame(width: compact ? 36 : 42, height: compact ? 36 : 42).background(Color.accentBlue.opacity(0.10), in: RoundedRectangle(cornerRadius: compact ? 10 : 12))
                         VStack(alignment: .leading, spacing: 3) {
-                            Text(tool.title).font(.system(size: 20, weight: .semibold)).foregroundStyle(Color.textPrimaryLight)
+                            Text(tool.title).font(.system(size: compact ? 18 : 20, weight: .semibold)).foregroundStyle(Color.textPrimaryLight)
                             Text(tool.subtitle).font(.system(size: 12)).foregroundStyle(Color.textSecondaryLight)
                         }
                     }
                     content
                 }
-                .padding(26)
+                .padding(compact ? 18 : 26)
                 .frame(maxWidth: .infinity, minHeight: max(0, geometry.size.height - 1), alignment: .topLeading)
             }
         }
@@ -459,7 +464,7 @@ private struct ShelfToolView: View {
                     minHeight: topCardHeight > 0 ? topCardHeight : nil,
                     headerActions: shelfHeaderActions
                 ) {
-                    VStack(alignment: .leading, spacing: 14) {
+                    VStack(alignment: .leading, spacing: 12) {
                         HStack(spacing: 12) {
                             Label(preferences.isPinned ? "Pinned above other windows" : "Use normal window level", systemImage: preferences.isPinned ? "pin.fill" : "pin.slash")
                             Spacer(minLength: 12)
@@ -510,23 +515,15 @@ private struct ShelfToolView: View {
                 topCardHeight = measuredHeight
             }
 
-            ToolPanel("Drop zone", subtitle: "Keep this compact target in Tools, or use the floating shelf while working in other apps.", minHeight: 230) {
-                VStack(spacing: 12) {
-                    Image(systemName: "arrow.down.doc.fill").font(.system(size: 38)).foregroundStyle(Color.accentBlue)
-                    Text(store.items.isEmpty ? "Drop files, links, images or text here" : "\(store.items.count) item\(store.items.count == 1 ? "" : "s") parked")
-                        .font(.title3.weight(.semibold))
-                        Text("Files are copied into a private session store; the original stays unchanged. Clipboard and drag representations remain available for this session.")
-                        .font(.caption).foregroundStyle(Color.textSecondaryLight)
-                    HStack(spacing: 10) {
-                        SubtleToolIconButton(title: "Add Current Clipboard", systemImage: "doc.on.clipboard", action: store.pasteFromClipboard)
-                        Text("\(store.sessionCopyCount) stored copies · \(store.temporaryCount) temporary")
-                            .font(.caption.monospacedDigit()).foregroundStyle(Color.textTertiaryLight)
-                    }
+            ToolPanel("Shelf settings", subtitle: "Configure the floating shelf without turning this page into another drop target.") {
+                VStack(alignment: .leading, spacing: 10) {
+                    settingsShortcutRow("Open floating shelf", shortcut: "⌥S")
+                    settingsShortcutRow("Paste into destination", shortcut: "⌘V")
+                    Text("Drop files into the floating Shelf window. Files remain session-only and the original stays unchanged.")
+                        .font(.caption)
+                        .foregroundStyle(Color.textSecondaryLight)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                .frame(maxWidth: .infinity, minHeight: 160)
-                .background(Color.accentBlue.opacity(0.035), in: RoundedRectangle(cornerRadius: 12))
-                .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.accentBlue.opacity(0.18), style: StrokeStyle(lineWidth: 1, dash: [6, 5])))
-                .onDrop(of: [UTType.fileURL.identifier, UTType.url.identifier, UTType.text.identifier, UTType.image.identifier], isTargeted: nil, perform: store.accept)
             }
         }
     }
@@ -785,7 +782,7 @@ private struct ColorPickerToolView: View {
 
                 ToolPanel("Color values", subtitle: "Ready for design tools, CSS and native UI work.", minHeight: 350) {
                     VStack(spacing: 0) {
-                        colorValueRow("HEX", service.hex, icon: "number")
+                        colorValueRow("HEX", service.hex, icon: "number", copyValue: service.hex)
                         Divider()
                         colorValueRow("RGB", service.rgbDescription.replacingOccurrences(of: "RGB ", with: ""), icon: "circle.grid.cross")
                         Divider()
@@ -827,12 +824,17 @@ private struct ColorPickerToolView: View {
         }
     }
 
-    private func colorValueRow(_ label: String, _ value: String, icon: String) -> some View {
+    private func colorValueRow(_ label: String, _ value: String, icon: String, copyValue: String? = nil) -> some View {
         HStack(spacing: 10) {
             Image(systemName: icon).foregroundStyle(Color.accentBlue).frame(width: 20)
             Text(label).foregroundStyle(Color.textSecondaryLight)
             Spacer()
             Text(value).font(.system(.body, design: .monospaced)).fontWeight(.semibold)
+            if let copyValue {
+                SubtleToolIconButton(title: "Copy \(label)", systemImage: "doc.on.doc", compact: true) {
+                    service.copy(copyValue)
+                }
+            }
         }
         .padding(.vertical, 14)
     }
@@ -953,8 +955,10 @@ private struct HomebrewToolView: View {
                             .buttonStyle(AppPrimaryButtonStyle())
                             .help("Find installed formulae and casks with newer versions")
                         Button("Cleanup Dry Run", action: service.cleanupDryRun)
+                            .buttonStyle(AppSecondaryButtonStyle())
                             .help("Preview removable Homebrew downloads and old versions")
                         Button("Run Cleanup") { confirmingCleanup = true }
+                            .buttonStyle(AppSecondaryButtonStyle())
                             .disabled(service.isWorking)
                             .help("Remove only what Homebrew reports as safe cleanup")
                     }
@@ -1002,7 +1006,7 @@ private struct HomebrewToolView: View {
 
             ToolPanel("Maintenance policy") {
                 HStack(alignment: .top, spacing: 18) {
-                    policyNote("selection", "Selected only", "Upgrades never include unchecked top-level packages.")
+                    policyNote("checkmark.square.fill", "Selected only", "Upgrades never include unchecked top-level packages.")
                     policyNote("doc.text.magnifyingglass", "Dry run first", "Cleanup can be inspected before anything changes.")
                     policyNote("hand.raised.fill", "No background work", "Every package change requires a visible action and confirmation.")
                 }
@@ -1020,7 +1024,10 @@ private struct HomebrewToolView: View {
 
     private func policyNote(_ icon: String, _ title: String, _ detail: String) -> some View {
         HStack(alignment: .top, spacing: 9) {
-            Image(systemName: icon).foregroundStyle(Color.accentBlue).frame(width: 24, height: 24)
+            Image(systemName: icon)
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(Color.accentBlue)
+                .frame(width: 26, height: 26, alignment: .center)
             VStack(alignment: .leading, spacing: 3) {
                 Text(title).fontWeight(.semibold)
                 Text(detail).font(.caption).foregroundStyle(Color.textSecondaryLight)
@@ -1235,8 +1242,13 @@ struct AppSettingsLink<Label: View>: View {
 
 private struct PhysicalMaintenanceToolView: View {
     @ObservedObject var service: MaintenanceService
+    let compact: Bool
+    init(service: MaintenanceService, compact: Bool = false) {
+        self.service = service
+        self.compact = compact
+    }
     var body: some View {
-        ToolPage(.physical) {
+        ToolPage(.physical, compact: compact) {
             CapabilityCard(title: "Cleaning mode", icon: "sparkles", detail: "Use the established Screen Blackout, Keyboard Lock and combined maintenance controls below. Cmd-Q remains protected while a maintenance session is active.")
             ScreenDimCard(svc: service, cardHeight: 160)
             KeyboardLockCard(svc: service, cardHeight: 160)

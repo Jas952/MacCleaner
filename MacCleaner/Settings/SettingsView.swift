@@ -72,7 +72,8 @@ struct SettingsView: View {
                                 Label("Download", systemImage: "arrow.down.circle.fill")
                             }
                             .buttonStyle(.borderedProminent)
-                            .controlSize(.small)
+                            .controlSize(.regular)
+                            .frame(minHeight: 30)
 
                             Link(destination: BrowserMonitorLink.repository) {
                                 Image("icon_github")
@@ -105,6 +106,7 @@ struct SettingsView: View {
                 Text("More tools from this developer")
             } footer: {
                 Text("A companion utility from the same developer, available separately from MacCleaner.")
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .formStyle(.grouped)
@@ -250,6 +252,7 @@ struct SettingsView: View {
                 Text("MacCleaner keeps a local, privacy-conscious history of performance samples and important app events. File contents, secrets, and network traffic are never recorded.")
                     .foregroundStyle(Color.textSecondaryLight)
                     .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
 
                 HStack {
                     Label("Stored entries", systemImage: "doc.text.magnifyingglass")
@@ -594,6 +597,7 @@ private struct MenuBarQuickToolRow: View {
         }
         .toggleStyle(.checkbox)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .alignmentGuide(.leading) { dimensions in dimensions[.leading] }
         .padding(.vertical, 8)
     }
 }
