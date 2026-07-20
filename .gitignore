@@ -16,6 +16,7 @@ dist/
 *.dSYM
 *.app
 *.dmg
+*.profraw
 *.p12
 *.p8
 

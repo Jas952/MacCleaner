@@ -1,12 +1,17 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import AppKit
 
 struct SettingsView: View {
     @ObservedObject private var settings = SettingsManager.shared
+    @ObservedObject private var diagnosticLogs = DiagnosticLogStore.shared
     @ObservedObject var monitor: SystemMonitor
     @State private var selectedTab = SettingsTab.general
     @State private var draggedMenuBarGauge: MenuBarGauge?
     @State private var isBrowserMonitorInstallGuidePresented = false
+    @AppStorage(ThermalAlertPreferences.enabledKey) private var thermalAlertsEnabled = true
+    @AppStorage(ThermalAlertPreferences.cpuThresholdKey) private var thermalAlertCPUThreshold = 85.0
+    @AppStorage(ThermalAlertPreferences.temperatureThresholdKey) private var thermalAlertTemperatureThreshold = 85.0
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -19,6 +24,12 @@ struct SettingsView: View {
             menuBar
                 .tabItem { Label("Menu Bar", systemImage: "menubar.rectangle") }
                 .tag(SettingsTab.menuBar)
+            notifications
+                .tabItem { Label("Notifications", systemImage: "bell.badge") }
+                .tag(SettingsTab.notifications)
+            other
+                .tabItem { Label("Other", systemImage: "ellipsis.circle") }
+                .tag(SettingsTab.other)
         }
         .padding(18)
         .frame(width: 760, height: 580)
@@ -130,7 +141,7 @@ struct SettingsView: View {
                                         Text(tool.subtitle).font(.caption).foregroundStyle(Color.textSecondaryLight)
                                     }
                                     Spacer()
-                                    if tool.isBeta {
+                                    if tool.isBeta && !tool.isAvailableInTools {
                                         Text("In development")
                                             .font(.caption.weight(.medium))
                                             .foregroundStyle(Color.textTertiaryLight)
@@ -230,6 +241,154 @@ struct SettingsView: View {
                 }
             }
             .padding(4)
+        }
+    }
+
+    private var other: some View {
+        Form {
+            Section {
+                Text("MacCleaner keeps a local, privacy-conscious history of performance samples and important app events. File contents, secrets, and network traffic are never recorded.")
+                    .foregroundStyle(Color.textSecondaryLight)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack {
+                    Label("Stored entries", systemImage: "doc.text.magnifyingglass")
+                    Spacer()
+                    Text("\(diagnosticLogs.count)")
+                        .font(.system(.body, design: .monospaced))
+                        .foregroundStyle(Color.textSecondaryLight)
+                }
+
+                Picker("Retention", selection: $diagnosticLogs.retentionDays) {
+                    Text("7 days").tag(7)
+                    Text("30 days").tag(30)
+                    Text("90 days").tag(90)
+                }
+
+                HStack(spacing: 10) {
+                    Button {
+                        exportDiagnosticLogs(as: .json)
+                    } label: {
+                        Label("Export JSON", systemImage: "curlybraces")
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+
+                    Button {
+                        exportDiagnosticLogs(as: .csv)
+                    } label: {
+                        Label("Export CSV", systemImage: "tablecells")
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+
+                    Spacer()
+
+                    Button("Clear logs", role: .destructive) {
+                        diagnosticLogs.clear()
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(diagnosticLogs.entries.isEmpty)
+                }
+
+            } header: {
+                Text("Diagnostics & logs")
+            } footer: {
+                Text("Logs are stored locally in MacCleaner Application Support and are removed automatically after the selected retention period.")
+            }
+
+            Section {
+                if diagnosticLogs.entries.isEmpty {
+                    Text("No diagnostic entries yet.")
+                        .foregroundStyle(Color.textSecondaryLight)
+                } else {
+                    ForEach(diagnosticLogs.entries.suffix(12).reversed()) { entry in
+                        HStack(alignment: .top, spacing: 8) {
+                            Image(systemName: entry.level == .error ? "xmark.octagon.fill" : (entry.level == .warning ? "exclamationmark.triangle.fill" : "info.circle.fill"))
+                                .foregroundStyle(entry.level == .error ? Color.accentRed : (entry.level == .warning ? Color.accentAmber : Color.accentBlue))
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(entry.message)
+                                    .font(.callout)
+                                    .lineLimit(2)
+                                Text("\(entry.category) · \(entry.date.formatted(date: .abbreviated, time: .shortened))")
+                                    .font(.caption)
+                                    .foregroundStyle(Color.textTertiaryLight)
+                            }
+                        }
+                    }
+                }
+            } header: {
+                Text("Recent entries")
+            }
+
+        }
+        .formStyle(.grouped)
+    }
+
+    private var notifications: some View {
+        Form {
+            Section {
+                Toggle("High load and temperature alerts", isOn: $thermalAlertsEnabled)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("CPU load threshold")
+                        Spacer()
+                        Text("\(Int(thermalAlertCPUThreshold))%")
+                            .font(.system(.body, design: .monospaced).weight(.semibold))
+                            .foregroundStyle(Color.accentAmber)
+                    }
+                    Slider(value: $thermalAlertCPUThreshold, in: 50...100, step: 1)
+                        .disabled(!thermalAlertsEnabled)
+                    Text("Alert when total CPU usage reaches this value.")
+                        .font(.caption)
+                        .foregroundStyle(Color.textSecondaryLight)
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("Temperature threshold")
+                        Spacer()
+                        Text("\(Int(thermalAlertTemperatureThreshold))°C")
+                            .font(.system(.body, design: .monospaced).weight(.semibold))
+                            .foregroundStyle(Color.accentRed)
+                    }
+                    Slider(value: $thermalAlertTemperatureThreshold, in: 50...110, step: 1)
+                        .disabled(!thermalAlertsEnabled)
+                    Text("Uses the higher available CPU or SoC sensor reading.")
+                        .font(.caption)
+                        .foregroundStyle(Color.textSecondaryLight)
+                }
+            } header: {
+                Text("Load alerts")
+            } footer: {
+                Text("The warning appears after 3 consecutive readings above either threshold. It is shown once per sustained event and disappears after 5 seconds.")
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    private enum DiagnosticExportFormat {
+        case json, csv
+        var fileExtension: String { self == .json ? "json" : "csv" }
+        var contentType: UTType { self == .json ? .json : .commaSeparatedText }
+    }
+
+    private func exportDiagnosticLogs(as format: DiagnosticExportFormat) {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = "maccleaner-diagnostic-logs.\(format.fileExtension)"
+        panel.allowedContentTypes = [format.contentType]
+        panel.canCreateDirectories = true
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            do {
+                switch format {
+                case .json: try diagnosticLogs.exportJSON(to: url)
+                case .csv: try diagnosticLogs.exportCSV(to: url)
+                }
+            } catch {
+                diagnosticLogs.append(level: .error, category: "export", message: "Could not export diagnostic logs: \(error.localizedDescription)")
+            }
         }
     }
 
@@ -343,6 +502,8 @@ private enum SettingsTab: Hashable {
     case general
     case tools
     case menuBar
+    case notifications
+    case other
 }
 
 private enum BrowserMonitorLink {

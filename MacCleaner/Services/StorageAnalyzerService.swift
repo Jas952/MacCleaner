@@ -1746,6 +1746,38 @@ class StorageAnalyzerService: ObservableObject {
         }
     }
 
+    static func requiresAdministratorAccess(_ url: URL) -> Bool {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path) else { return false }
+        if let ownerID = attributes[.ownerAccountID] as? NSNumber, ownerID.intValue != getuid() {
+            return true
+        }
+        return !FileManager.default.isWritableFile(atPath: url.path)
+    }
+
+    /// Requests authorization without changing the selected file. The actual
+    /// move still happens only after the user presses Delete.
+    func requestAdministratorAuthorization(completion: @escaping (Bool, String?) -> Void) {
+        let script = "do shell script \"/usr/bin/true\" with administrator privileges"
+        DispatchQueue.global(qos: .userInitiated).async {
+            let task = Process()
+            task.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+            task.arguments = ["-e", script]
+            let pipe = Pipe()
+            task.standardError = pipe
+            do {
+                try task.run()
+                task.waitUntilExit()
+                let output = (String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                DispatchQueue.main.async {
+                    completion(task.terminationStatus == 0, task.terminationStatus == 0 ? nil : output)
+                }
+            } catch {
+                DispatchQueue.main.async { completion(false, error.localizedDescription) }
+            }
+        }
+    }
+
     /// Retries one already-selected Large Files item through macOS's native
     /// administrator prompt. The app passes only the exact source path and
     /// the current user's Trash path; it never asks for or stores a password.

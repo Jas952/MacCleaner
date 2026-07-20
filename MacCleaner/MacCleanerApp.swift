@@ -8,6 +8,7 @@ import SwiftUI
 struct MacCleanerApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var sharedMonitor = SystemMonitor()
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
         WindowGroup(id: "main") {
@@ -23,6 +24,9 @@ struct MacCleanerApp: App {
                 )
                 .background {
                     StatusBarSceneBridge(monitor: sharedMonitor, appDelegate: appDelegate)
+                }
+                .onChange(of: scenePhase) { phase in
+                    sharedMonitor.setBackgroundSuspended(phase != .active)
                 }
         }
         .windowStyle(.hiddenTitleBar)
@@ -79,10 +83,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        DiagnosticLogStore.shared.append(
+            category: "lifecycle",
+            message: "MacCleaner launched",
+            metadata: ["os": ProcessInfo.processInfo.operatingSystemVersionString]
+        )
         Task { @MainActor [weak self] in
             self?.installUtilityRuntime()
         }
         #if DEBUG
+        if ProcessInfo.processInfo.environment["MACCLEANER_TEST_THERMAL_ALERT"] == "1" ||
+            ProcessInfo.processInfo.arguments.contains("--test-thermal-alert") {
+            Task { @MainActor in
+                ThermalLoadAlertService.shared.triggerTestAlert()
+            }
+        }
         if ProcessInfo.processInfo.environment["MACCLEANER_MAINTENANCE_SELFTEST"] == "screenDimCmdQ" {
             Task { @MainActor in
                 await MaintenanceRuntimeSelfTest.runScreenDimCmdQ()

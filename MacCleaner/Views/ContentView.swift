@@ -9,6 +9,7 @@ enum Tab: String, CaseIterable {
     case processes = "Processes"
     case fans      = "Fans"
     case cleaner   = "Optimize"
+    case startup   = "Startup"
     case windows   = "Windows"
     case disk      = "Disk"
     case storage   = "Storage"
@@ -26,6 +27,7 @@ enum Tab: String, CaseIterable {
         case .processes: return "cpu"
         case .fans:      return "fanblades"
         case .cleaner:   return "sparkles"
+        case .startup:   return "bolt.horizontal.circle"
         case .windows:   return "macwindow.on.rectangle"
         case .disk:      return "internaldrive"
         case .storage: return "externaldrive.badge.timemachine"
@@ -60,6 +62,7 @@ struct ContentView: View {
     @StateObject private var storageWorkspace = StorageWorkspaceService()
     @StateObject private var desktopService = DesktopService()
     @StateObject private var cleanerViewState: CleanerViewState
+    @StateObject private var startupOptimizerService = StartupOptimizerService()
     @StateObject private var webAppsPackager = PakePackager()
     @StateObject private var updateService = UpdateService.shared
     @StateObject private var modalCoordinator = AppModalCoordinator()
@@ -88,16 +91,8 @@ struct ContentView: View {
         }
         _storageSelectedTool = State(initialValue: storageTool)
         _showingUpdates = State(initialValue: arguments.contains("--show-updates"))
-        let requestedCleanerTool = arguments
-            .first(where: { $0.hasPrefix("--cleaner-tool=") })?
-            .dropFirst("--cleaner-tool=".count)
-            .lowercased()
-        let cleanerTool = CleanerTool.allCases.first {
-            $0.title.lowercased() == requestedCleanerTool || String(describing: $0).lowercased() == requestedCleanerTool
-        }
-        _cleanerSelectedTool = State(initialValue: cleanerTool)
+        _cleanerSelectedTool = State(initialValue: nil)
         let cleanerState = CleanerViewState()
-        if cleanerTool != nil { cleanerState.mode = .professional }
         _cleanerViewState = StateObject(wrappedValue: cleanerState)
     }
 
@@ -184,8 +179,7 @@ struct ContentView: View {
                 monitor: monitor,
                 isCleanerWorking: isCleanerWorking,
                 isStorageWorking: isStorageWorking,
-                isDesktopWorking: isDesktopWorking,
-                cleanerMode: $cleanerViewState.mode
+                isDesktopWorking: isDesktopWorking
             )
                 .frame(width: 240)
                 .frame(maxHeight: .infinity, alignment: .top)
@@ -209,8 +203,11 @@ struct ContentView: View {
                             state: cleanerViewState,
                             activeTool: $cleanerSelectedTool,
                             ramFlow: $ramCleaningFlow,
-                            operationActive: $cleanerOperationActive
+                            operationActive: $cleanerOperationActive,
+                            onOpenStartup: { selectedTab = .startup }
                         )
+                    case .startup:
+                        StartupOptimizerView(service: startupOptimizerService)
                     case .windows:   WindowsView(monitor: monitor)
                     case .disk:      DiskDetailView(monitor: monitor)
                     case .storage:
@@ -260,6 +257,14 @@ struct ContentView: View {
         .onChange(of: storageWorkspace.isWorking) { isWorking in
             storageAnalysisOperationActive = isWorking
         }
+        .onReceive(NotificationCenter.default.publisher(for: .macCleanerOpenDestination)) { notification in
+            guard let destination = notification.userInfo?["destination"] as? String else { return }
+            switch destination {
+            case "fans": selectedTab = .fans
+            case "processes": selectedTab = .processes
+            default: break
+            }
+        }
         .onChange(of: selectedTab) { newTab in
             let oldTab = previousTab
             previousTab = newTab
@@ -290,7 +295,6 @@ struct SidebarView: View {
     let isCleanerWorking: Bool
     let isStorageWorking: Bool
     let isDesktopWorking: Bool
-    @Binding var cleanerMode: CleanerMode
 
     private var ramColor: Color {
         monitor.memory.usedPercent > 0.85 ? .accentRed
@@ -333,8 +337,7 @@ struct SidebarView: View {
 
                 CleanerSidebarItem(
                     isSelected: selectedTab == .cleaner,
-                    isWorking: isCleanerWorking,
-                    mode: $cleanerMode
+                    isWorking: isCleanerWorking
                 ) {
                     selectedTab = .cleaner
                 }
@@ -579,10 +582,7 @@ struct SidebarItemLight: View {
 struct CleanerSidebarItem: View {
     let isSelected: Bool
     let isWorking: Bool
-    @Binding var mode: CleanerMode
     let action: () -> Void
-
-    @State private var isHovered = false
 
     var body: some View {
         HStack(spacing: 10) {
@@ -604,37 +604,6 @@ struct CleanerSidebarItem: View {
             .buttonStyle(.plain)
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            if isHovered {
-                HStack(spacing: 0) {
-                    Button {
-                        mode = .professional
-                    } label: {
-                        Text("Pro")
-                            .font(.system(size: 9, weight: mode == .professional ? .semibold : .medium))
-                            .foregroundStyle(mode == .professional ? .white : Color.textSecondaryLight)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 3)
-                            .background(mode == .professional ? Color.accentBlue : Color.surfaceCardLight)
-                    }
-                    .buttonStyle(.plain)
-
-                    Button {
-                        mode = .optimization
-                    } label: {
-                        Text("Opt")
-                            .font(.system(size: 9, weight: mode == .optimization ? .semibold : .medium))
-                            .foregroundStyle(mode == .optimization ? .white : Color.textSecondaryLight)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 3)
-                            .background(mode == .optimization ? Color.accentBlue : Color.surfaceCardLight)
-                    }
-                    .buttonStyle(.plain)
-                }
-                .background(Color.surfaceCardLight)
-                .clipShape(RoundedRectangle(cornerRadius: 5))
-                .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.borderLight))
-                .transition(.opacity.combined(with: .scale))
-            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -643,11 +612,6 @@ struct CleanerSidebarItem: View {
                 .fill(isSelected ? Color.white : Color.clear)
                 .shadow(color: isSelected ? Color.shadowMedium : .clear, radius: 4, x: 0, y: 2)
         )
-        .onHover { hovering in
-            withAnimation(.easeInOut(duration: 0.15)) {
-                isHovered = hovering
-            }
-        }
     }
 }
 
@@ -1818,6 +1782,8 @@ struct LargeFilesView: View {
     @State private var showAdministratorDeleteConfirmation = false
     @State private var pendingAdministratorFiles: [FSNode] = []
     @State private var hasDeletedItems = false
+    @State private var administratorAuthorizationInFlight = false
+    @State private var administratorAuthorized = false
     
     var body: some View {
         VStack(spacing: 0) {
@@ -1861,12 +1827,13 @@ struct LargeFilesView: View {
 
             // Select all row
             HStack(spacing: 12) {
-                let allSelected = !service.largeFiles.isEmpty && selectedFileIds.count == service.largeFiles.count
+                let selectableFiles = service.largeFiles.filter { !StorageAnalyzerService.requiresAdministratorAccess($0.url) }
+                let allSelected = !selectableFiles.isEmpty && selectableFiles.allSatisfy { selectedFileIds.contains($0.id) }
                 Button(action: {
                     if allSelected {
-                        selectedFileIds.removeAll()
+                        selectedFileIds.subtract(selectableFiles.map(\.id))
                     } else {
-                        selectedFileIds = Set(service.largeFiles.map { $0.id })
+                        selectedFileIds.formUnion(selectableFiles.map(\.id))
                     }
                 }) {
                     HStack(spacing: 12) {
@@ -1896,7 +1863,7 @@ struct LargeFilesView: View {
                             if selectedFileIds.contains(file.id) {
                                 selectedFileIds.remove(file.id)
                             } else {
-                                selectedFileIds.insert(file.id)
+                                selectLargeFile(file)
                             }
                         }) {
                             HStack(spacing: 12) {
@@ -1920,6 +1887,11 @@ struct LargeFilesView: View {
                                         .foregroundStyle(Color.textTertiaryLight)
                                         .lineLimit(1)
                                         .truncationMode(.middle)
+                                    if StorageAnalyzerService.requiresAdministratorAccess(file.url) {
+                                        Text("Administrator permission required")
+                                            .font(.system(size: 9, weight: .medium))
+                                            .foregroundStyle(Color.accentAmber)
+                                    }
                                 }
                                 
                                 Spacer()
@@ -1982,7 +1954,7 @@ struct LargeFilesView: View {
                                 .clipShape(RoundedRectangle(cornerRadius: 7))
                             }
                             .buttonStyle(.plain)
-                            .disabled(isDeleting)
+                            .disabled(isDeleting || administratorAuthorizationInFlight)
 
                             Button(action: deleteSelected) {
                                 ZStack {
@@ -2138,6 +2110,22 @@ struct LargeFilesView: View {
         }
     }
 
+    private func selectLargeFile(_ file: FSNode) {
+        selectedFileIds.insert(file.id)
+        guard StorageAnalyzerService.requiresAdministratorAccess(file.url), !administratorAuthorized else { return }
+        administratorAuthorizationInFlight = true
+        service.requestAdministratorAuthorization { success, error in
+            administratorAuthorizationInFlight = false
+            if success {
+                administratorAuthorized = true
+            } else {
+                selectedFileIds.remove(file.id)
+                errorMessage = error ?? "Administrator permission was not granted."
+                showError = true
+            }
+        }
+    }
+
     private func retryAdministratorDeletion() {
         let files = pendingAdministratorFiles
         pendingAdministratorFiles.removeAll()
@@ -2171,28 +2159,6 @@ struct LargeFilesView: View {
         }
     }
 }
-
-// JunkCategory and JunkType are re-declared here for ContentView's internal use
-// (ContentView has its own StorageAnalyzerService with junkCategories: [JunkCategory])
-
-private struct _CVJunkCategory: Identifiable {
-    let id = UUID()
-    let type: _CVJunkType
-    var size: UInt64
-    var files: [URL]
-    var name: String { type.name }
-    var icon: String { type.icon }
-    var color: Color { type.color }
-}
-
-private enum _CVJunkType: CaseIterable, Hashable {
-    case userCache, systemCache, xcodeJunk, systemLogs, browserCache, userLogs, unusedDMG, trash, downloads, screenCaptures
-    var name: String { "Кэш" }
-    var icon: String { "folder" }
-    var color: Color { .gray }
-}
-
-
 
 // MARK: - Junk Files View
 
@@ -2353,40 +2319,44 @@ struct JunkFilesView: View {
     private var junkResultsView: some View {
         VStack(spacing: 0) {
             // Summary header
-            HStack(alignment: .center) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Scan Complete")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(Color.textPrimary)
-                    Text("\(visibleCategories.count) categories found")
-                        .font(.mono(11))
-                        .foregroundStyle(Color.textTertiary)
-                }
-                Spacer()
-                let protectedCount = service.junkCategories.filter { $0.safety == .protected }.count
-                if protectedCount > 0 {
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            showProtectedCategories.toggle()
+            VStack(spacing: 12) {
+                HStack(alignment: .top, spacing: 14) {
+                    HStack(spacing: 10) {
+                        Image(systemName: "archivebox.fill")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(junkAccent)
+                            .frame(width: 32, height: 32)
+                            .background(junkAccent.opacity(0.12))
+                            .clipShape(RoundedRectangle(cornerRadius: 9))
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Junk cleanup report")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundStyle(Color.textPrimary)
+                            Text("Review categories and individual paths before cleanup.")
+                                .font(.system(size: 10))
+                                .foregroundStyle(Color.textSecondary)
                         }
-                    } label: {
-                        Label(
-                            showProtectedCategories ? "Скрыть защищённые" : "Показать защищённые (\(protectedCount))",
-                            systemImage: showProtectedCategories ? "eye.slash" : "lock"
-                        )
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(Color.textSecondary)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 7)
-                        .background(Color.surfaceSecondary)
-                        .clipShape(RoundedRectangle(cornerRadius: 7))
                     }
-                    .buttonStyle(.plain)
+                    Spacer()
+                    Text("READY TO REVIEW")
+                        .font(.system(size: 9, weight: .bold))
+                        .tracking(0.6)
+                        .foregroundStyle(junkAccent)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 6)
+                        .background(junkAccent.opacity(0.10))
+                        .clipShape(Capsule())
+                }
+
+                HStack(spacing: 8) {
+                    junkSummaryMetric(title: "Categories", value: "\(visibleCategories.count)", detail: "found")
+                    junkSummaryMetric(title: "Disk junk", value: MemoryInfo.formatted(totalSize), detail: "in report")
+                    junkSummaryMetric(title: "Selected", value: MemoryInfo.formatted(selectedSize), detail: "to Trash")
                 }
             }
             .padding(.horizontal, 24)
-            .padding(.top, 20)
-            .padding(.bottom, 16)
+            .padding(.top, 18)
+            .padding(.bottom, 14)
 
             Divider()
 
@@ -2553,7 +2523,7 @@ struct JunkFilesView: View {
 	                    .padding(.vertical, 9)
 	                    .background(Color.accentBlue.opacity(0.07))
 	                }
-	                HStack(spacing: 16) {
+                HStack(spacing: 16) {
                     HStack(spacing: 4) {
                         if selectedIDs.isEmpty {
                             Text("Select items to clean")
@@ -2571,14 +2541,29 @@ struct JunkFilesView: View {
                     Spacer()
                     HStack(spacing: 8) {
                         Button(action: { service.resetForNavigation() }) {
-                            HStack(spacing: 4) {
-                                Image(systemName: hasDeletedItems ? "checkmark" : "xmark").font(.system(size: 11))
-                                Text(hasDeletedItems ? "Done" : "Cancel").font(.system(size: 12))
+                            HStack(spacing: 5) {
+                                Image(systemName: "xmark")
+                                Text("Cancel")
                             }
+                            .font(.system(size: 12, weight: .medium))
                             .foregroundStyle(Color.textTertiary)
-                            .padding(.horizontal, 10).padding(.vertical, 8)
+                            .padding(.horizontal, 12).padding(.vertical, 8)
                             .background(Color.surfaceSecondary)
-                            .clipShape(RoundedRectangle(cornerRadius: 7))
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(isDeleting)
+
+                        Button(action: { service.resetForNavigation() }) {
+                            HStack(spacing: 5) {
+                                Image(systemName: "checkmark")
+                                Text("Done")
+                            }
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 13).padding(.vertical, 8)
+                            .background(junkAccent)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
                         }
                         .buttonStyle(.plain)
                         .disabled(isDeleting)
@@ -2637,6 +2622,28 @@ struct JunkFilesView: View {
             .background(Color.surfaceSecondary.opacity(0.5))
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func junkSummaryMetric(title: String, value: String, detail: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title.uppercased())
+                .font(.system(size: 8, weight: .semibold))
+                .tracking(0.45)
+                .foregroundStyle(Color.textTertiary)
+            Text(value)
+                .font(.system(size: 15, weight: .bold, design: .rounded))
+                .foregroundStyle(junkAccent)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+            Text(detail)
+                .font(.system(size: 9))
+                .foregroundStyle(Color.textTertiary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(junkAccent.opacity(0.06))
+        .clipShape(RoundedRectangle(cornerRadius: 9))
     }
 
     private func junkEntryRow(_ entry: JunkEntry, category: JunkCategory) -> some View {

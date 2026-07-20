@@ -70,7 +70,7 @@ struct UpdateWindowContent: View {
                 .disabled(!updateService.canCheckForUpdates || updateService.status == .checking)
                 .opacity(updateService.canCheckForUpdates ? 1 : 0.50)
 
-                Toggle("Download and install automatically", isOn: automaticUpdatesBinding)
+                Toggle("Check automatically; ask before installing", isOn: automaticUpdatesBinding)
                     .toggleStyle(GreenCheckboxToggleStyle())
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(Color.textPrimaryLight)

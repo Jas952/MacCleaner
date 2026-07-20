@@ -1,5 +1,119 @@
 import Foundation
 
+struct CodexUsageWindow: Identifiable {
+    let id: String
+    let title: String
+    let remainingPercent: Int
+    let resetsAt: Date?
+    let windowDurationMinutes: Int?
+}
+
+struct CodexUsageSnapshot {
+    let planType: String?
+    let windows: [CodexUsageWindow]
+    let fetchedAt: Date
+
+    var hasData: Bool { !windows.isEmpty }
+}
+
+/// Read-only bridge to Codex's local app-server protocol.
+/// It never changes auth, config, sessions, or usage state.
+enum CodexUsageService {
+    private static let lock = NSLock()
+    private static var cached: (date: Date, value: CodexUsageSnapshot)?
+    private static let cacheTTL: TimeInterval = 60
+
+    static func fetch() -> CodexUsageSnapshot? {
+        lock.lock()
+        defer { lock.unlock() }
+        if let cached, Date().timeIntervalSince(cached.date) < cacheTTL { return cached.value }
+
+        guard let executable = codexExecutable() else { return nil }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: executable)
+        process.arguments = ["app-server", "--stdio"]
+        let input = Pipe()
+        let output = Pipe()
+        process.standardInput = input
+        process.standardOutput = output
+        process.standardError = FileHandle.nullDevice
+
+        do { try process.run() } catch { return nil }
+        func send(_ message: [String: Any]) {
+            guard JSONSerialization.isValidJSONObject(message),
+                  let data = try? JSONSerialization.data(withJSONObject: message) else { return }
+            input.fileHandleForWriting.write(data)
+            input.fileHandleForWriting.write(Data([10]))
+        }
+        send(["method": "initialize", "id": 1, "params": [
+            "clientInfo": ["name": "maccleaner", "title": "MacCleaner", "version": "1.0.4"],
+            "capabilities": [:]
+        ]])
+
+        let responseReady = DispatchSemaphore(value: 0)
+        var buffer = Data()
+        var response: [String: Any]?
+        var didCompleteHandshake = false
+        output.fileHandleForReading.readabilityHandler = { handle in
+            let data = handle.availableData
+            if !data.isEmpty {
+                buffer.append(data)
+                while let newline = buffer.firstIndex(of: 10) {
+                    let line = buffer.prefix(upTo: newline)
+                    buffer.removeSubrange(...newline)
+                    guard let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any] else { continue }
+                    if (object["id"] as? NSNumber)?.intValue == 1 && !didCompleteHandshake {
+                        didCompleteHandshake = true
+                        send(["method": "initialized", "params": [:]])
+                        send(["method": "account/rateLimits/read", "id": 2, "params": [:]])
+                    }
+                    if (object["id"] as? NSNumber)?.intValue == 2 {
+                        response = object
+                        responseReady.signal()
+                        return
+                    }
+                }
+            }
+        }
+        _ = responseReady.wait(timeout: .now() + 5)
+        output.fileHandleForReading.readabilityHandler = nil
+        input.fileHandleForWriting.closeFile()
+        if process.isRunning { process.terminate() }
+        guard let result = response?["result"] as? [String: Any],
+              let limits = result["rateLimits"] as? [String: Any] else { return nil }
+
+        var windows: [CodexUsageWindow] = []
+        for (key, title) in [("secondary", "5-hour"), ("primary", "Weekly")] {
+            guard let raw = limits[key] as? [String: Any],
+                  let used = raw["usedPercent"] as? NSNumber else { continue }
+            let duration = (raw["windowDurationMins"] as? NSNumber)?.intValue
+            let reset = (raw["resetsAt"] as? NSNumber).map { Date(timeIntervalSince1970: $0.doubleValue) }
+            let label = duration == 5 * 60 ? "5-hour" : (duration == 7 * 24 * 60 ? "Weekly" : title)
+            windows.append(CodexUsageWindow(
+                id: key,
+                title: label,
+                remainingPercent: max(0, min(100, 100 - used.intValue)),
+                resetsAt: reset,
+                windowDurationMinutes: duration
+            ))
+        }
+        let account = (limits["planType"] as? String)?.capitalized
+        let snapshot = CodexUsageSnapshot(planType: account, windows: windows, fetchedAt: Date())
+        cached = (Date(), snapshot)
+        return snapshot
+    }
+
+    private static func codexExecutable() -> String? {
+        let candidates = [
+            "/Applications/ChatGPT.app/Contents/Resources/codex",
+            "/Applications/Codex.app/Contents/Resources/codex",
+            "/opt/homebrew/bin/codex",
+            "/usr/local/bin/codex"
+        ]
+        return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
+    }
+}
+
 final class AIWorkloadService {
     private static let inventoryCacheTTL: TimeInterval = 10
     private static var componentCache: [String: (date: Date, value: [AIAgentComponent])] = [:]

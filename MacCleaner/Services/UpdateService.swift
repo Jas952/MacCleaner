@@ -52,12 +52,13 @@ final class UpdateService: NSObject, ObservableObject, SPUUpdaterDelegate {
 
     var automaticallyUpdates: Bool {
         get {
-            controller.updater.automaticallyChecksForUpdates &&
-                controller.updater.automaticallyDownloadsUpdates
+            controller.updater.automaticallyChecksForUpdates
         }
         set {
             controller.updater.automaticallyChecksForUpdates = newValue
-            controller.updater.automaticallyDownloadsUpdates = newValue
+            // Discovery is automatic, but download/install remains explicit
+            // so an unseen appcast item can never change the app silently.
+            controller.updater.automaticallyDownloadsUpdates = false
             objectWillChange.send()
         }
     }

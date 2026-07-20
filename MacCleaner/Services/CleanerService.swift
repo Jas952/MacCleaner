@@ -302,6 +302,42 @@ enum DiskCleanScanMode: String, Sendable {
     var maximumDurationPerRoot: TimeInterval { self == .efficient ? 0.45 : 3 }
 }
 
+enum DiskScanRoot: String, CaseIterable, Identifiable, Hashable, Sendable {
+    case browser
+    case developer
+    case ai
+    case applications
+    case logs
+    case savedState
+    case trash
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .browser: return "Browser caches"
+        case .developer: return "Developer tools"
+        case .ai: return "AI tools"
+        case .applications: return "Application caches"
+        case .logs: return "Logs and reports"
+        case .savedState: return "Saved application state"
+        case .trash: return "Trash"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .browser: return "Chrome, Safari, Firefox and other browser cache data"
+        case .developer: return "Xcode, npm, pip, Gradle, Docker build and tool caches"
+        case .ai: return "Temporary AI-tool caches and old agent artifacts"
+        case .applications: return "Caches created by installed applications"
+        case .logs: return "Xcode, simulator and crash reports"
+        case .savedState: return "Restorable window and application state"
+        case .trash: return "Items already in the user Trash"
+        }
+    }
+}
+
 enum CleanCategory: String, CaseIterable {
     case browserCache  = "Browser Caches"
     case devCache      = "Developer Caches"
@@ -313,6 +349,19 @@ enum CleanCategory: String, CaseIterable {
     case savedState    = "Saved App State"
     case trash         = "Trash"
     case downloads     = "Large Downloads"
+
+    var scanRoot: DiskScanRoot {
+        switch self {
+        case .browserCache: return .browser
+        case .devCache: return .developer
+        case .aiTools: return .ai
+        case .userCache, .miscCache, .systemCache: return .applications
+        case .logs: return .logs
+        case .savedState: return .savedState
+        case .trash: return .trash
+        case .downloads: return .applications
+        }
+    }
 
     var isSelectedByDefault: Bool {
         switch self {
@@ -379,6 +428,8 @@ enum CleanCategory: String, CaseIterable {
 final class DiskCleaner {
 
     static func scan(mode: DiskCleanScanMode = .efficient,
+                     roots: Set<DiskScanRoot> = Set(DiskScanRoot.allCases),
+                     excludingPaths: Set<String> = [],
                      progress: @escaping (String) -> Void = { _ in },
                      completion: @escaping (DiskCleanScanResult) -> Void) {
         DispatchQueue.global(qos: .utility).async {
@@ -400,6 +451,7 @@ final class DiskCleaner {
             }
 
             func estimateSize(_ path: String) -> Int64 {
+                guard !excludingPaths.contains(path) else { return 0 }
                 let url = URL(fileURLWithPath: path)
                 guard resourceBudget.beginRoot(),
                       !SafeDeletionService.isApplicationOwnedPath(url, policy: protectionPolicy) else { return 0 }
@@ -479,6 +531,7 @@ final class DiskCleaner {
             // Cursor Agent old versions
             let cursorVersionsDir = "\(home)/.local/share/cursor-agent/versions"
             if fm.fileExists(atPath: cursorVersionsDir),
+               roots.contains(.ai),
                let contents = try? fm.contentsOfDirectory(atPath: cursorVersionsDir) {
                 // Keep the newest version, mark older ones for cleanup
                 let sorted = contents.sorted().reversed()
@@ -496,6 +549,7 @@ final class DiskCleaner {
                 ("\(home)/.vscode/extensions", "Obsolete VS Code Extension"),
                 ("\(home)/.cursor/extensions", "Obsolete Cursor Extension"),
             ] {
+                guard roots.contains(.developer) else { continue }
                 if fm.fileExists(atPath: dir),
                    let contents = try? fm.contentsOfDirectory(atPath: dir) {
                     for ext in contents {
@@ -508,6 +562,7 @@ final class DiskCleaner {
             }
 
             for (path, name, category) in targets {
+                guard roots.contains(category.scanRoot) else { continue }
                 guard fm.fileExists(atPath: path) else { continue }
                 emitProgress("Scanning \(name)")
                 let size = estimateSize(path)
@@ -520,7 +575,7 @@ final class DiskCleaner {
 
             // ── Dynamic: all ~/Library/Caches/* subdirs (App Caches) ──
             let cachesDir = "\(home)/Library/Caches"
-            if let subdirs = try? fm.contentsOfDirectory(atPath: cachesDir) {
+            if roots.contains(.applications), let subdirs = try? fm.contentsOfDirectory(atPath: cachesDir) {
                 for sub in subdirs {
                     let fullPath = (cachesDir as NSString).appendingPathComponent(sub)
                     guard !knownPaths.contains(fullPath) else { continue }
@@ -538,7 +593,7 @@ final class DiskCleaner {
             let appSupportSubdirNames = ["CachedData", "GPUCache", "Cache", "Code Cache",
                                          "DawnGraphiteCache", "DawnWebGPUCache", "GraphiteDawnCache",
                                          "DawnCache", "ShaderCache", "Service Worker/CacheStorage", "Service Worker/ScriptCache"]
-            if let apps = try? fm.contentsOfDirectory(atPath: appSupportDir) {
+            if roots.contains(.applications), let apps = try? fm.contentsOfDirectory(atPath: appSupportDir) {
                 for app in apps {
                     let appDir = (appSupportDir as NSString).appendingPathComponent(app)
                     var isDir: ObjCBool = false
@@ -562,7 +617,7 @@ final class DiskCleaner {
             ]
             let profileSubdirs = ["Cache", "Code Cache", "GPUCache", "Service Worker/CacheStorage",
                                   "Service Worker/ScriptCache", "component_crx_cache"]
-            for (appPath, appName) in chromiumApps {
+            for (appPath, appName) in chromiumApps where roots.contains(.browser) {
                 guard fm.fileExists(atPath: appPath),
                       let profiles = try? fm.contentsOfDirectory(atPath: appPath) else { continue }
                 for profile in profiles {
