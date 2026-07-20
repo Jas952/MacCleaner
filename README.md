@@ -96,8 +96,7 @@ It combines live system monitoring, storage analysis, safe cleanup, process insp
       src="https://img.shields.io/badge/GitHub-AlexsJones%2Fllmfit-181717?style=for-the-badge&logo=github&logoColor=white"
       alt="View AlexsJones/llmfit on GitHub"
       height="28"
-    />
-  </a> — compare local language models against the Mac's available hardware, then filter and sort them by memory requirements, speed, parameters, context length, capabilities, publisher, and use case. Model data and compatibility checks are provided through [llmfit](https://github.com/AlexsJones/llmfit).
+    /> — compare local language models against the Mac's available hardware, then filter and sort them by memory requirements, speed, parameters, context length, capabilities, publisher, and use case. Model data and compatibility checks are provided through [llmfit](https://github.com/AlexsJones/llmfit).
 - **Utilities and diagnostics** — use the Drop Shelf, screen color picker, Homebrew maintenance tools, keyboard and pointer testing, speaker channel checks, physical cleaning mode, device health checks, and network latency tests.
 
 ## Local AI Workload
