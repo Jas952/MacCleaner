@@ -89,8 +89,7 @@ It combines live system monitoring, storage analysis, safe cleanup, process insp
       src="https://img.shields.io/badge/GitHub-tw93%2FPake-181717?style=for-the-badge&logo=github&logoColor=white"
       alt="View tw93/Pake on GitHub"
       height="28"
-    />
-  </a> — turn preset services or any website URL into a lightweight standalone macOS application, then open or remove generated apps from the same screen. Powered by the original Pake project. 
+    /> — turn preset services or any website URL into a lightweight standalone macOS application, then open or remove generated apps from the same screen. Powered by the original Pake project. 
 - **Local AI workload** — detect supported agents, MCP servers, helper processes, skills, profiles, vector stores, model runtimes, and related local files. MacCleaner also attributes CPU and memory usage to the detected AI tools.
 -  <a href="https://github.com/AlexsJones/llmfit">
     <img
