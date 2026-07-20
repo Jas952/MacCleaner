@@ -21,57 +21,20 @@ MacCleaner is a native macOS utility for understanding what is happening on your
 
 It does not treat cleanup as a one-click promise. MacCleaner shows what it found, keeps potentially destructive choices visible, and uses bounded, cancellable scans so deeper analysis does not turn into uncontrolled full-disk work.
 
-### Current release — 1.0.6
-
-The current build makes the cleanup and developer-workflow parts of MacCleaner substantially more actionable:
-
-- **Reviewable cleanup reports:** Optimize and Storage/Junk now expose cleanup results as expandable category, subcategory, folder, and path lists with sizes and item counts. Safe-to-remove entries are preselected, while protected or rebuildable data remains clearly marked and out of bulk cleanup.
-- **Developer-focused storage analysis:** Xcode, SwiftPM, npm/pnpm, Python, Docker, Ollama, Hugging Face, browser caches, logs, and other tool data are identified separately instead of being presented as generic “junk.”
-- **Safer file handling:** Large-file deletion remains Trash-only, retries administrator authorization only after a normal permission failure, and protects MacCleaner data and sensitive project locations.
-- **Drop Shelf workflow:** Files, images, and text can be parked as session copies without moving the original. Drag-out uses a disposable export; destinations without drag support can use Copy for paste and `Cmd+V`.
-- **Agent visibility and system feedback:** Agents expose local footprint and process context, while system load alerts report CPU, temperature, and the processes contributing to high load through a native macOS notification panel.
-
 ## Understand, Clean, and Maintain
 
 ### System overview
-
 The Dashboard brings together CPU, memory, disks, network, GPU, battery, temperatures, and top processes. Separate process and window views make it easier to see which apps are using resources and which individual instances are active.
 
 ### Storage and cleanup
-
 Storage tools find large files, junk, exact duplicates, similar photos, app leftovers, and reclaimable local iCloud copies. Cleanup Advisor ranks opportunities by size, risk, and recovery cost, while Complete Analysis combines the main storage checks into one workflow.
 
 ### AI workload
-
 MacCleaner treats local AI tools as part of the system workload. It connects supported agents with their active processes, memory use, MCP servers, skills, profiles, components, and local indexes.
 
 ### Utilities and diagnostics
 
 The remaining tools cover startup items, Desktop organization, fans and thermals, keyboard and speaker checks, APFS and SMART diagnostics, network checks, Pake Apps, and local model fit.
-
-## Verified Facts
-
-| Metric | Result | Why it matters |
-| --- | ---: | --- |
-| Permanent-delete fallback | **0** | If Trash fails, cleanup stops |
-| Scan modes | **2** | Efficient for speed; Thorough for wider coverage |
-| Exact-duplicate verification | **3 stages** | Metadata → 128 KB sample → full SHA-256 |
-| Safety and policy tests | **53 passing** | Current XCTest suite covers cleanup, storage, agents, clipboard, Drop Shelf, and system policy |
-| Automatic update checks | **Every 6 hours** | HTTPS appcast with EdDSA verification |
-| Performance benchmark | **Pending** | Percentages require the same corpus and Mac |
-
-## Efficient vs Thorough
-
-| Limit | Efficient | Thorough |
-| --- | ---: | ---: |
-| Duplicate minimum file size | 1 MB | 128 KB |
-| Duplicate filesystem entries | 200,000 | 1,000,000 |
-| Duplicate verification I/O | 40 GB | 500 GB |
-| Similar photos | 500 | 2,000 |
-| Photo comparisons | 75,000 | 1,000,000 |
-| Photo time budget | 60 seconds | 5 minutes |
-
-Both modes are bounded and cancellable. Thorough expands coverage; it is not an unlimited forensic scan.
 
 <p align="center">
   <img src="./docs/assets-github/product-overview-titlebar.svg" alt="MacCleaner product overview" width="100%" /><br />
@@ -85,16 +48,6 @@ The Agents view answers two practical questions: which tools are active, and wha
 <p align="center">
   <img src="./docs/readme-media/agents-showcase.png" alt="MacCleaner agent workload overview" width="100%" />
 </p>
-
-## Safety by Default
-
-| Action | MacCleaner does | MacCleaner does not do |
-| --- | --- | --- |
-| File cleanup | Moves selected files through macOS Trash | Silently fall back to permanent deletion |
-| Memory | Shows pressure and recommendations | Automatically kill apps or run privileged `purge` |
-| Cloud reclaim | Evicts a confirmed local iCloud copy | Delete the cloud copy |
-| Startup items | Supports reversible disable and restore | Modify protected Apple or MacCleaner items |
-| Similar photos | Keeps the final choice with the user | Preselect files after the first scan |
 
 ## Install
 
