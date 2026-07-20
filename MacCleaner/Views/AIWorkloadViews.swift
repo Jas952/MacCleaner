@@ -63,7 +63,10 @@ struct AIAgentsView: View {
     @State private var inspectorKind: AgentInspectorKind = .processes
     @EnvironmentObject private var modalCoordinator: AppModalCoordinator
     @State private var snapshot: AIWorkloadSnapshot?
+    @State private var codexUsage: CodexUsageSnapshot?
+    @State private var codexUsageLoading = false
     @State private var snapshotTask: Task<Void, Never>?
+    @State private var usageTask: Task<Void, Never>?
     @State private var stores: [AIIndexStore] = []
     @State private var storesTask: Task<Void, Never>?
     @State private var storesLoading = false
@@ -81,6 +84,7 @@ struct AIAgentsView: View {
                     AIHeader(title: "Agents", subtitle: "Active agents, MCP bridges, helper runtimes, and LLM-related local load.") {
                         AIRefreshButton {
                             monitor.refresh(forceProcesses: true)
+                            loadCodexUsage()
                             if selectedTab == .indexes { loadStores(force: true) }
                         }
                     }
@@ -129,11 +133,13 @@ struct AIAgentsView: View {
                 monitor.refresh(forceProcesses: true)
             }
             loadSnapshot()
+            loadCodexUsage()
             loadStores()
         }
         .onDisappear {
             monitor.setConsumer(.ai, active: false)
             snapshotTask?.cancel()
+            usageTask?.cancel()
             storesTask?.cancel()
         }
         .onReceive(monitor.$processNodes) { _ in
@@ -153,8 +159,8 @@ struct AIAgentsView: View {
                     .font(.system(size: 12))
                     .foregroundStyle(Color.textSecondaryLight)
             } else {
-                ForEach(currentSnapshot.agents) { agent in
-                    AIAgentCard(agent: agent, totalMemory: currentSnapshot.totalMemoryBytes) { agentID, kind in
+                    ForEach(currentSnapshot.agents) { agent in
+                    AIAgentCard(agent: agent, totalMemory: currentSnapshot.totalMemoryBytes, usage: codexUsage, usageLoading: codexUsageLoading) { agentID, kind in
                         inspectorAgentID = agentID
                         inspectorKind = kind
                         modalCoordinator.present(title: "Agent Inspector", subtitle: "Processes and attributed workloads") {
@@ -208,6 +214,19 @@ struct AIAgentsView: View {
             if Task.isCancelled { return }
             await MainActor.run {
                 snapshot = value
+            }
+        }
+    }
+
+    private func loadCodexUsage() {
+        usageTask?.cancel()
+        codexUsageLoading = true
+        usageTask = Task.detached(priority: .utility) {
+            let value = CodexUsageService.fetch()
+            if Task.isCancelled { return }
+            await MainActor.run {
+                codexUsage = value
+                codexUsageLoading = false
             }
         }
     }
@@ -1687,8 +1706,16 @@ private struct AIAgentsSummary: View {
 private struct AIAgentCard: View {
     let agent: AIAgentProfile
     let totalMemory: UInt64
+    let usage: CodexUsageSnapshot?
+    let usageLoading: Bool
     let onInspect: (String, AgentInspectorKind) -> Void
     @State private var componentsExpanded = false
+
+    private var isCodex: Bool {
+        agent.id.caseInsensitiveCompare("codex") == .orderedSame ||
+        agent.name.caseInsensitiveCompare("codex") == .orderedSame ||
+        agent.rootPath.localizedStandardContains("/.codex")
+    }
 
     private var memoryShare: Double {
         guard totalMemory > 0 else { return 0 }
@@ -1761,8 +1788,13 @@ private struct AIAgentCard: View {
                     Text("RAM")
                         .font(.mono(11))
                         .foregroundStyle(Color.textTertiaryLight)
+                    if isCodex {
+                        AgentUsageInline(usage: usage, isLoading: usageLoading)
+                            .frame(maxWidth: 210, alignment: .trailing)
+                            .padding(.top, 2)
+                    }
                 }
-                .frame(width: 116, alignment: .trailing)
+                .frame(width: 210, alignment: .trailing)
             }
 
             if !agent.components.isEmpty {
@@ -1797,6 +1829,41 @@ private struct AIAgentCard: View {
     }
 }
 
+private struct AgentUsageInline: View {
+    let usage: CodexUsageSnapshot?
+    let isLoading: Bool
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: "gauge.with.dots.needle.67percent")
+                .font(.system(size: 9, weight: .medium))
+                .foregroundStyle(Color.accentBlue)
+            if isLoading {
+                Text("Loading…")
+            } else if let usage, usage.hasData {
+                ForEach(usage.windows) { window in
+                    Text("\(shortTitle(for: window)) \(window.remainingPercent)%")
+                }
+                if let plan = usage.planType { Text("· \(plan)") }
+            } else {
+                Text("Unavailable")
+            }
+        }
+        .font(.system(size: 9, weight: .medium))
+        .foregroundStyle(Color.textTertiaryLight)
+        .lineLimit(1)
+        .help("Usage limits are shown only when a verified provider API, CLI, or local source is available.")
+    }
+
+    private func shortTitle(for window: CodexUsageWindow) -> String {
+        switch window.title {
+        case "5-hour": return "5h"
+        case "Weekly": return "7d"
+        default: return window.title
+        }
+    }
+}
+
 private struct AgentActivityIndicator: View {
     let state: AIAgentActivityState
 
@@ -1804,11 +1871,11 @@ private struct AgentActivityIndicator: View {
         Group {
             switch state {
             case .terminalActive:
-                ProgressView()
-                    .controlSize(.small)
-                    .scaleEffect(0.45)
-                    .frame(width: 12, height: 12)
-                    .help("Agent has active terminal/tool child process")
+                Circle()
+                    .fill(Color.accentBlue)
+                    .frame(width: 7, height: 7)
+                    .overlay(Circle().stroke(Color.accentBlue.opacity(0.35), lineWidth: 4))
+                    .help("Agent has an active terminal/tool child process")
             case .active:
                 Circle()
                     .fill(Color.accentBlue)

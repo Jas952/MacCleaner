@@ -24,6 +24,7 @@ final class SystemMonitor: ObservableObject {
     @Published var networkHistory: [(down: Double, up: Double)] = Array(repeating: (down: 0, up: 0), count: 60)
     @Published var gpuUsage: Double = 0
     @Published var gpuHistory: [Double] = Array(repeating: 0, count: 60)
+    @Published private(set) var isBackgroundSuspended = false
 
     private var timer: Timer?
     private var prevCPUInfo: processor_info_array_t?
@@ -47,6 +48,21 @@ final class SystemMonitor: ObservableObject {
     private static let externalBatteryInterval = 1_440 // every 6 hours; system_profiler is expensive
     private static let networkInterfaceCacheTTL: TimeInterval = 60
     private static let externalBatteryCacheTTL: TimeInterval = 30 * 60
+
+    func setBackgroundSuspended(_ suspended: Bool) {
+        guard isBackgroundSuspended != suspended else { return }
+        isBackgroundSuspended = suspended
+        refreshTick = 0
+        scheduleMonitoringTimer()
+        Task { @MainActor in
+            DiagnosticLogStore.shared.append(
+                category: "lifecycle",
+                message: suspended ? "Heavy monitoring suspended in background" : "Heavy monitoring resumed",
+                metadata: ["mode": suspended ? "lightweight-alert" : "interactive"]
+            )
+        }
+        if !suspended { refresh(forceProcesses: true, forceSensors: true) }
+    }
 
     init() {
         refresh()
@@ -77,7 +93,9 @@ final class SystemMonitor: ObservableObject {
     }
 
     private func scheduleMonitoringTimer() {
-        let interval = Self.recommendedRefreshInterval(hasActiveConsumers: !activeConsumers.isEmpty)
+        let interval = isBackgroundSuspended
+            ? 60.0
+            : Self.recommendedRefreshInterval(hasActiveConsumers: !activeConsumers.isEmpty)
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             self?.refresh()
@@ -96,19 +114,19 @@ final class SystemMonitor: ObservableObject {
         let networkInfo = fetchNetwork()
 
         // ── Determine what else to fetch ──
-        let wantsLiveProcesses = !activeConsumers.isDisjoint(with: [.processes, .windows])
-        let wantsSummaryProcesses = !activeConsumers.isDisjoint(with: [.dashboard, .ai])
-        let wantsFrequentSensors = !activeConsumers.isDisjoint(with: [.dashboard, .fans, .ai])
+        let wantsLiveProcesses = !isBackgroundSuspended && !activeConsumers.isDisjoint(with: [.processes, .windows])
+        let wantsSummaryProcesses = !isBackgroundSuspended && !activeConsumers.isDisjoint(with: [.dashboard, .ai])
+        let wantsFrequentSensors = !isBackgroundSuspended && !activeConsumers.isDisjoint(with: [.dashboard, .fans, .ai])
         let processInterval = wantsLiveProcesses
             ? Self.liveProcessInterval
             : (wantsSummaryProcesses ? Self.summaryProcessInterval : Self.idleProcessInterval)
-        let sensorInterval = wantsFrequentSensors ? Self.activeSensorInterval : Self.idleSensorInterval
+        let sensorInterval = isBackgroundSuspended ? 2 : (wantsFrequentSensors ? Self.activeSensorInterval : Self.idleSensorInterval)
         let runSensors = forceSensors || (refreshTick > 1 && refreshTick % sensorInterval == 0)
-        let runProcesses = forceProcesses || refreshTick == 1 || (refreshTick > 1 && refreshTick % processInterval == 0)
-        let runDisks = refreshTick == 1 || runProcesses
-        let runBattery = refreshTick == 1 || refreshTick % Self.batteryInterval == 0
-        let runExternalBattery = refreshTick > 1 && refreshTick % Self.externalBatteryInterval == 0
-        let runGPU = runSensors
+        let runProcesses = !isBackgroundSuspended && (forceProcesses || refreshTick == 1 || (refreshTick > 1 && refreshTick % processInterval == 0))
+        let runDisks = !isBackgroundSuspended && (refreshTick == 1 || runProcesses)
+        let runBattery = !isBackgroundSuspended && (refreshTick == 1 || refreshTick % Self.batteryInterval == 0)
+        let runExternalBattery = !isBackgroundSuspended && refreshTick > 1 && refreshTick % Self.externalBatteryInterval == 0
+        let runGPU = runSensors && !isBackgroundSuspended
 
         // ── Heavy work on background thread ──
         DispatchQueue.global(qos: .utility).async { [weak self] in
@@ -194,6 +212,31 @@ final class SystemMonitor: ObservableObject {
                 }
 
                 if let fansResult { self.fans = fansResult }
+
+                ThermalLoadAlertService.shared.evaluate(
+                    // CPUInfo stores aggregate load as a normalized 0...1 value;
+                    // alert presentation and thresholds use the user-facing 0...100 scale.
+                    cpuUsage: cpuInfo.totalUsage * 100,
+                    thermal: self.thermal,
+                    topProcesses: self.topProcesses
+                )
+
+                if self.refreshTick % 4 == 0 {
+                    let diskRead = self.processNodes.reduce(UInt64(0)) { $0 &+ $1.diskRead }
+                    let diskWritten = self.processNodes.reduce(UInt64(0)) { $0 &+ $1.diskWritten }
+                    DiagnosticLogStore.shared.append(
+                        category: "performance",
+                        message: "System monitor sample",
+                        metadata: [
+                            "cpu": String(format: "%.3f", cpuInfo.totalUsage),
+                            "memoryUsed": String(format: "%.3f", mem.usedPercent),
+                            "processes": "\(self.processNodes.count)",
+                            "diskReadBytes": "\(diskRead)",
+                            "diskWrittenBytes": "\(diskWritten)",
+                            "thermalCPU": String(format: "%.1f", self.thermal.cpuTemp)
+                        ]
+                    )
+                }
             }
         }
     }
@@ -760,313 +803,6 @@ final class SystemMonitor: ObservableObject {
     }
 }
 
-// MARK: - Retired root daemon implementation
-
-// Kept temporarily for source-history context only. It is not compiled and must not
-// be re-enabled: the legacy daemon accepted unauthenticated HTTP commands as root.
-#if false
-
-final class HelperManager: ObservableObject {
-    static let shared = HelperManager()
-    
-    @Published var isInstalled: Bool = false
-    @Published var isInstalling: Bool = false
-    
-    private init() {
-        checkStatus()
-    }
-    
-    func checkStatus() {
-        guard let url = URL(string: "http://127.0.0.1:9099/processes") else { return }
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 1
-        
-        let task = URLSession.shared.dataTask(with: request) { data, _, error in
-            DispatchQueue.main.async {
-                self.isInstalled = (error == nil && data != nil)
-            }
-        }
-        task.resume()
-    }
-    
-    func installHelper(completion: @escaping (Bool, String?) -> Void) {
-        DispatchQueue.main.async { self.isInstalling = true }
-        
-        DispatchQueue.global(qos: .utility).async {
-            let daemonSource = """
-            import Foundation
-            import Network
-
-            @_silgen_name("proc_pid_rusage")
-            func proc_pid_rusage(_ pid: Int32, _ flavor: Int32, _ buffer: UnsafeMutableRawPointer) -> Int32
-
-            struct rusage_info_v4 {
-                var ri_uuid: (UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8, UInt8) = (0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0)
-                var ri_user_time: UInt64 = 0
-                var ri_system_time: UInt64 = 0
-                var ri_pkg_idle_wkups: UInt64 = 0
-                var ri_interrupt_wkups: UInt64 = 0
-                var ri_pageins: UInt64 = 0
-                var ri_wired_size: UInt64 = 0
-                var ri_resident_size: UInt64 = 0
-                var ri_phys_footprint: UInt64 = 0
-                var ri_proc_start_abstime: UInt64 = 0
-                var ri_proc_exit_abstime: UInt64 = 0
-                var ri_child_user_time: UInt64 = 0
-                var ri_child_system_time: UInt64 = 0
-                var ri_child_pkg_idle_wkups: UInt64 = 0
-                var ri_child_interrupt_wkups: UInt64 = 0
-                var ri_child_pageins: UInt64 = 0
-                var ri_child_elapsed_abstime: UInt64 = 0
-                var ri_diskio_bytesread: UInt64 = 0
-                var ri_diskio_byteswritten: UInt64 = 0
-                var ri_cpu_time_qos_default: UInt64 = 0
-                var ri_cpu_time_qos_maintenance: UInt64 = 0
-                var ri_cpu_time_qos_background: UInt64 = 0
-                var ri_cpu_time_qos_utility: UInt64 = 0
-                var ri_cpu_time_qos_legacy: UInt64 = 0
-                var ri_cpu_time_qos_user_initiated: UInt64 = 0
-                var ri_cpu_time_qos_user_interactive: UInt64 = 0
-                var ri_billed_system_time: UInt64 = 0
-                var ri_serviced_system_time: UInt64 = 0
-                var ri_logical_writes: UInt64 = 0
-                var ri_lifetime_max_phys_footprint: UInt64 = 0
-                var ri_instructions: UInt64 = 0
-                var ri_cycles: UInt64 = 0
-                var ri_billed_energy: UInt64 = 0
-                var ri_serviced_energy: UInt64 = 0
-                var ri_interval_max_phys_footprint: UInt64 = 0
-                var ri_runnable_time: UInt64 = 0
-            }
-
-            struct ProcessInfoPayload: Codable {
-                let pid: Int32
-                let footprint: UInt64
-                let diskRead: UInt64
-                let diskWritten: UInt64
-            }
-
-            let RUSAGE_INFO_V4: Int32 = 4
-
-            func fetchAllUsage() -> [ProcessInfoPayload] {
-                let task = Process()
-                task.launchPath = "/bin/ps"
-                task.arguments = ["-axo", "pid"]
-                let pipe = Pipe()
-                task.standardOutput = pipe
-                try? task.run()
-                let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                task.waitUntilExit()
-                guard let out = String(data: data, encoding: .utf8) else { return [] }
-                
-                var results: [ProcessInfoPayload] = []
-                let lines = out.components(separatedBy: .newlines).dropFirst()
-                for line in lines {
-                    let trimmed = line.trimmingCharacters(in: .whitespaces)
-                    guard !trimmed.isEmpty, let pid = Int32(trimmed) else { continue }
-                    
-                    var ru = rusage_info_v4()
-                    let ret = withUnsafeMutablePointer(to: &ru) { ptr in
-                        proc_pid_rusage(pid, RUSAGE_INFO_V4, ptr)
-                    }
-                    if ret == 0 {
-                        results.append(ProcessInfoPayload(
-                            pid: pid,
-                            footprint: ru.ri_phys_footprint,
-                            diskRead: ru.ri_diskio_bytesread,
-                            diskWritten: ru.ri_diskio_byteswritten
-                        ))
-                    }
-                }
-                return results
-            }
-
-            func processName(pid: Int32) -> String {
-                let task = Process()
-                task.launchPath = "/bin/ps"
-                task.arguments = ["-p", "\\(pid)", "-o", "comm="]
-                let pipe = Pipe()
-                task.standardOutput = pipe
-                try? task.run()
-                let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                task.waitUntilExit()
-                return String(data: data, encoding: .utf8)?
-                    .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            }
-
-            func isProtectedProcess(pid: Int32) -> Bool {
-                if pid <= 1 { return true }
-                let name = processName(pid: pid).lowercased()
-                let protectedNames = [
-                    "kernel_task", "launchd", "windowserver", "logd", "mds", "mds_stores",
-                    "coreaudiod", "configd", "opendirectoryd", "diskarbitrationd"
-                ]
-                if protectedNames.contains(where: { name.contains($0) }) { return true }
-                return name.hasPrefix("com.apple.security") ||
-                    name.hasPrefix("com.apple.system") ||
-                    name.hasPrefix("kernel")
-            }
-
-            func terminateProcess(pid: Int32) -> Bool {
-                guard !isProtectedProcess(pid: pid) else { return false }
-                if kill(pid, SIGTERM) == 0 { return true }
-                Thread.sleep(forTimeInterval: 1.0)
-                if kill(pid, 0) != 0 { return true }
-                return kill(pid, SIGKILL) == 0
-            }
-
-            func handleRequest(request: String) -> Data? {
-                if request.contains("GET /processes") {
-                    let payload = fetchAllUsage()
-                    if let jsonData = try? JSONEncoder().encode(payload) {
-                        let responseStr = "HTTP/1.1 200 OK\\r\\nContent-Type: application/json\\r\\nContent-Length: \\(jsonData.count)\\r\\n\\r\\n"
-                        var respData = responseStr.data(using: .utf8)!
-                        respData.append(jsonData)
-                        return respData
-                    }
-                } else if request.contains("POST /purge") {
-                    let p = Process()
-                    p.launchPath = "/usr/sbin/purge"
-                    try? p.run()
-                    p.waitUntilExit()
-                    let responseStr = "HTTP/1.1 200 OK\\r\\nContent-Length: 2\\r\\n\\r\\nOK"
-                    return responseStr.data(using: .utf8)
-                } else if request.contains("POST /kill"), let urlStr = request.components(separatedBy: " ").dropFirst().first {
-                    if let comps = URLComponents(string: urlStr),
-                       let pidStr = comps.queryItems?.first(where: { $0.name == "pid" })?.value,
-                       let pid = Int32(pidStr) {
-                        if terminateProcess(pid: pid) {
-                            let responseStr = "HTTP/1.1 200 OK\\r\\nContent-Length: 2\\r\\n\\r\\nOK"
-                            return responseStr.data(using: .utf8)
-                        }
-                        let responseStr = "HTTP/1.1 403 Forbidden\\r\\nContent-Length: 0\\r\\n\\r\\n"
-                        return responseStr.data(using: .utf8)
-                    }
-                }
-                let responseStr = "HTTP/1.1 404 Not Found\\r\\nContent-Length: 0\\r\\n\\r\\n"
-                return responseStr.data(using: .utf8)
-            }
-
-            func startServer() {
-                let queue = DispatchQueue(label: "com.maccleaner.daemon.server")
-                do {
-                    let listener = try NWListener(using: .tcp, on: 9099)
-                    listener.newConnectionHandler = { connection in
-                        connection.start(queue: queue)
-                        connection.receive(minimumIncompleteLength: 1, maximumLength: 4096) { data, _, _, _ in
-                            if let data = data, let reqStr = String(data: data, encoding: .utf8) {
-                                if let resp = handleRequest(request: reqStr) {
-                                    connection.send(content: resp, completion: .contentProcessed { _ in
-                                        connection.cancel()
-                                    })
-                                    return
-                                }
-                            }
-                            connection.cancel()
-                        }
-                    }
-                    listener.start(queue: queue)
-                    print("MacCleanerDaemon started on port 9099")
-                    dispatchMain()
-                } catch {
-                    print("Failed to start server: \\(error)")
-                    exit(1)
-                }
-            }
-
-            startServer()
-            """
-            
-            let tempSource = FileManager.default.temporaryDirectory.appendingPathComponent("MacCleanerDaemon.swift")
-            let tempBin = FileManager.default.temporaryDirectory.appendingPathComponent("MacCleanerDaemon")
-            
-            do {
-                if FileManager.default.fileExists(atPath: tempSource.path) {
-                    try FileManager.default.removeItem(at: tempSource)
-                }
-                try daemonSource.write(to: tempSource, atomically: true, encoding: .utf8)
-                
-                let compileTask = Process()
-                compileTask.launchPath = "/usr/bin/swiftc"
-                compileTask.arguments = [tempSource.path, "-o", tempBin.path]
-                compileTask.launch()
-                compileTask.waitUntilExit()
-                
-                if compileTask.terminationStatus != 0 {
-                    DispatchQueue.main.async {
-                        self.isInstalling = false
-                        completion(false, "Failed to compile the daemon.")
-                    }
-                    return
-                }
-                
-                let plistStr = """
-                <?xml version="1.0" encoding="UTF-8"?>
-                <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-                <plist version="1.0">
-                <dict>
-                    <key>Label</key>
-                    <string>com.maccleaner.daemon</string>
-                    <key>ProgramArguments</key>
-                    <array>
-                        <string>/Library/PrivilegedHelperTools/com.maccleaner.daemon</string>
-                    </array>
-                    <key>RunAtLoad</key>
-                    <true/>
-                    <key>KeepAlive</key>
-                    <true/>
-                </dict>
-                </plist>
-                """
-                
-                let tempPlist = FileManager.default.temporaryDirectory.appendingPathComponent("com.maccleaner.daemon.plist")
-                try plistStr.write(to: tempPlist, atomically: true, encoding: .utf8)
-                
-                let shellCmd = "mkdir -p /Library/PrivilegedHelperTools && cp '\(tempBin.path)' /Library/PrivilegedHelperTools/com.maccleaner.daemon && chown root:wheel /Library/PrivilegedHelperTools/com.maccleaner.daemon && chmod 755 /Library/PrivilegedHelperTools/com.maccleaner.daemon && cp '\(tempPlist.path)' /Library/LaunchDaemons/com.maccleaner.daemon.plist && chown root:wheel /Library/LaunchDaemons/com.maccleaner.daemon.plist && chmod 644 /Library/LaunchDaemons/com.maccleaner.daemon.plist && (launchctl unload /Library/LaunchDaemons/com.maccleaner.daemon.plist 2>/dev/null || true) && launchctl load -w /Library/LaunchDaemons/com.maccleaner.daemon.plist"
-                
-                let safeShellCmd = shellCmd
-                    .replacingOccurrences(of: "\\", with: "\\\\")
-                    .replacingOccurrences(of: "\"", with: "\\\"")
-                
-                let script = "do shell script \"\(safeShellCmd)\" with administrator privileges"
-                
-                let osaScriptURL = FileManager.default.temporaryDirectory.appendingPathComponent("install_helper.applescript")
-                try script.write(to: osaScriptURL, atomically: true, encoding: .utf8)
-                
-                let osaTask = Process()
-                osaTask.launchPath = "/usr/bin/osascript"
-                osaTask.arguments = [osaScriptURL.path]
-                let errPipe = Pipe()
-                osaTask.standardError = errPipe
-                
-                osaTask.launch()
-                osaTask.waitUntilExit()
-                
-                let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
-                let errStr = String(data: errData, encoding: .utf8) ?? "Unknown error"
-                
-                DispatchQueue.main.async {
-                    self.isInstalling = false
-                    if osaTask.terminationStatus == 0 {
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-                            self.checkStatus()
-                            completion(true, nil)
-                        }
-                    } else {
-                        completion(false, "Failed (\(osaTask.terminationStatus)): \(errStr)")
-                    }
-                }
-                
-            } catch {
-                DispatchQueue.main.async {
-                    self.isInstalling = false
-                    completion(false, error.localizedDescription)
-                }
-            }
-        }
-    }
-}
-#endif
 
 // MARK: - Legacy helper cleanup
 

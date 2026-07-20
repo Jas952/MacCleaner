@@ -3,7 +3,7 @@ import SwiftUI
 // MARK: - Cleaner Tool enum
 
 enum CleanerTool: CaseIterable, Identifiable {
-    case ram, disk, refresh, dns, shredder, startup
+    case ram, disk, refresh, dns, shredder
 
     var id: Self { self }
 
@@ -14,7 +14,6 @@ enum CleanerTool: CaseIterable, Identifiable {
         case .refresh:   return "Refresh"
         case .dns:       return "DNS Cache"
         case .shredder:  return "Safe Delete"
-        case .startup:   return "Startup"
         }
     }
 
@@ -25,7 +24,6 @@ enum CleanerTool: CaseIterable, Identifiable {
         case .refresh:   return "System maintenance"
         case .dns:       return "Flush DNS records"
         case .shredder:  return "Move files to Trash"
-        case .startup:   return "Reduce login background load"
         }
     }
 
@@ -36,7 +34,6 @@ enum CleanerTool: CaseIterable, Identifiable {
         case .refresh:   return "arrow.triangle.2.circlepath"
         case .dns:       return "globe.americas"
         case .shredder:  return "scissors.badge.ellipsis"
-        case .startup:   return "bolt.horizontal.circle"
         }
     }
 
@@ -47,7 +44,6 @@ enum CleanerTool: CaseIterable, Identifiable {
         case .refresh:   return "gearshape.arrow.triangle.2.circlepath"
         case .dns:       return "network"
         case .shredder:  return "doc.zipper"
-        case .startup:   return "powerplug.fill"
         }
     }
 
@@ -58,7 +54,6 @@ enum CleanerTool: CaseIterable, Identifiable {
         case .refresh:   return Color(red: 0.85, green: 0.65, blue: 0.3)
         case .dns:       return .accentBlue
         case .shredder:  return Color(red: 0.95, green: 0.45, blue: 0.4)
-        case .startup:   return .accentPurple
         }
     }
 
@@ -69,7 +64,6 @@ enum CleanerTool: CaseIterable, Identifiable {
         case .refresh:   return ["QuickLook rebuild", "Font cache", "Launch Services"]
         case .dns:       return ["Site loading issues", "Internet connectivity", "DNS lookup errors"]
         case .shredder:  return ["Reversible removal", "macOS Trash", "No false overwrite claims"]
-        case .startup:   return ["Login speed", "Background RAM", "Reversible"]
         }
     }
 }
@@ -90,17 +84,6 @@ enum ScanPhase: String, CaseIterable {
 }
 
 enum SimpleToolFlow { case idle, running, done }
-
-enum CleanerMode: String, CaseIterable, Identifiable {
-    case professional, optimization
-    var id: Self { self }
-    var title: String {
-        switch self {
-        case .professional: return "Professional"
-        case .optimization: return "Optimization"
-        }
-    }
-}
 
 enum OptimizationLogStatus: String {
     case pending, running, success, failure
@@ -183,11 +166,13 @@ final class CleanerViewState: ObservableObject {
     @Published var optimizationDNSSuccess: Bool = false
     @Published var optimizationRAMSources: [RAMSource] = []
 
-    @Published var mode: CleanerMode = .optimization
+    @Published var optimizationSelectedRoots: Set<DiskScanRoot> = Set(DiskScanRoot.allCases)
+    @Published var optimizationScannedRoots: Set<DiskScanRoot> = []
 
     func resetForNavigation() {
         guard !isScanning, !isCleaning, !optimizationRunning, !refreshRunning, !isShredding else { return }
-        scanItems = []; diskScanWasLimited = false; diskScannedEntryCount = 0
+        // Keep the session scan cache. Returning to Optimize should not walk
+        // the same roots again unless the user explicitly clears the cache.
         hasScan = false; scanPhase = .ready; scanProgress = 0
         resultFreed = nil; resultErrors = 0; showResult = false
         ramAnalysis = nil; ramSources = []; ramAnalyzeProgress = 0; ramFreedBytes = 0
@@ -200,6 +185,13 @@ final class CleanerViewState: ObservableObject {
         optimizationRefreshTaskCount = 0; optimizationRefreshDoneCount = 0
         optimizationDNSSuccess = false; optimizationRAMSources = []
     }
+
+    func clearOptimizationScanCache() {
+        optimizationScannedRoots = []
+        scanItems = []
+        diskScanWasLimited = false
+        diskScannedEntryCount = 0
+    }
 }
 
 struct CleanerView: View {
@@ -208,13 +200,14 @@ struct CleanerView: View {
     @Binding var activeTool: CleanerTool?
     @Binding var ramFlow: RAMCleaningFlow
     @Binding var operationActive: Bool
-    @StateObject private var startupOptimizerService = StartupOptimizerService()
+    let onOpenStartup: () -> Void
 
     // Disk cleaner state
     @State private var runningPulse = false
     @State private var cachedNetworkInterface = "Detecting…"
     @State private var cachedDNSResolver = "Detecting…"
     @State private var showOptimizationCleanupConfirmation = false
+    @State private var isOptimizationScopeExpanded = false
     @State private var showRAMCloseConfirmation = false
 
     private var totalSelected: Int64 { state.scanItems.filter(\.isSelected).reduce(0) { $0 + $1.sizeBytes } }
@@ -269,7 +262,7 @@ struct CleanerView: View {
                 } else {
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(spacing: 8) {
-                            Text("Cleaner")
+                            Text("Optimize")
                                 .font(.system(size: 22, weight: .semibold))
                                 .foregroundStyle(Color.textPrimaryLight)
                             if ramFlow.isActive || operationActive || state.optimizationRunning {
@@ -277,7 +270,7 @@ struct CleanerView: View {
                                     .transition(.scale.combined(with: .opacity))
                             }
                         }
-                        Text(state.mode == .optimization ? "One-click system tune-up" : "Select a tool to begin")
+                        Text("One-click system tune-up")
                             .font(.system(size: 11))
                             .foregroundStyle(Color.textTertiaryLight)
                     }
@@ -291,21 +284,8 @@ struct CleanerView: View {
 
             Rectangle().fill(Color.borderLight).frame(height: 1)
 
-            Group {
-                if state.mode == .optimization {
-                    optimizationView
-                        .transition(.opacity)
-                } else if let tool = activeTool {
-                    // ── Active tool panel ──────────────────────────────
-                    toolPanel(for: tool)
-                        .transition(.opacity)
-                } else {
-                    // ── Tool picker grid ───────────────────────────────
-                    toolGrid
-                        .transition(.opacity)
-                }
-            }
-            .animation(.spring(response: 0.4, dampingFraction: 0.8, blendDuration: 0.05), value: state.mode)
+            optimizationView
+                .transition(.opacity)
         }
         .background(Color.surfaceLight)
         .alert("Confirm cleanup", isPresented: $showOptimizationCleanupConfirmation) {
@@ -324,25 +304,6 @@ struct CleanerView: View {
             let bytes = selected.reduce(0) { $0 &+ $1.bytes }
             Text("MacCleaner will request a normal Quit from \(selected.count) application\(selected.count == 1 ? "" : "s") using up to \(MemoryInfo.formatted(bytes)). Apps may ask you to save work. MacCleaner will never force-terminate them.")
         }
-        .onChange(of: startupOptimizerService.isScanning) { _ in
-            syncOperationStateWithStartup()
-        }
-        .onChange(of: startupOptimizerService.isMutating) { _ in
-            syncOperationStateWithStartup()
-        }
-    }
-
-    private func syncOperationStateWithStartup() {
-        let dnsRunning: Bool
-        if case .running = state.dnsFlow { dnsRunning = true } else { dnsRunning = false }
-        operationActive = startupOptimizerService.isScanning
-            || startupOptimizerService.isMutating
-            || state.isScanning
-            || state.isCleaning
-            || state.refreshRunning
-            || state.isShredding
-            || state.optimizationRunning
-            || dnsRunning
     }
     // MARK: - Tool Picker Grid
 
@@ -368,7 +329,7 @@ struct CleanerView: View {
                 HStack(spacing: g) {
                     toolTile(.dns,       height: row2H)
                     toolTile(.shredder,  height: row2H)
-                    toolTile(.startup,   height: row2H)
+                    toolTile(.dns,       height: row2H)
                 }
                 systemStatusStrip
                     .frame(height: stripH)
@@ -380,6 +341,21 @@ struct CleanerView: View {
     // MARK: - Optimization Mode
 
     private var optimizationView: some View {
+        ZStack {
+            optimizationCompactView
+                .opacity(state.optimizationPhase == .review ? 0 : 1)
+                .scaleEffect(state.optimizationPhase == .review ? 0.985 : 1)
+                .allowsHitTesting(state.optimizationPhase != .review)
+
+            optimizationReviewView
+                .opacity(state.optimizationPhase == .review ? 1 : 0)
+                .scaleEffect(state.optimizationPhase == .review ? 1 : 1.01)
+                .allowsHitTesting(state.optimizationPhase == .review)
+        }
+        .animation(.easeInOut(duration: 0.28), value: state.optimizationPhase)
+    }
+
+    private var optimizationCompactView: some View {
         GeometryReader { geo in
             ZStack {
                 // Circle centered within the detail pane
@@ -400,6 +376,168 @@ struct CleanerView: View {
         }
     }
 
+    private var optimizationReviewView: some View {
+        VStack(spacing: 0) {
+            optimizationReviewHeader
+                .padding(.horizontal, 24)
+                .padding(.top, 18)
+                .padding(.bottom, 14)
+
+            optimizationCleanupList
+                .padding(.horizontal, 24)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Ready to clean")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Color.textPrimaryLight)
+                    Text("Selected items will be moved to Trash and remain recoverable there.")
+                        .font(.system(size: 9))
+                        .foregroundStyle(Color.textTertiaryLight)
+                }
+                Spacer()
+                Button(action: leaveOptimizationReview) {
+                    HStack(spacing: 5) {
+                        Image(systemName: "xmark")
+                        Text("Cancel")
+                    }
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Color.textTertiaryLight)
+                    .padding(.horizontal, 12)
+                    .frame(height: 34)
+                    .background(Color.surfaceSecondary)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+                .buttonStyle(.plain)
+                .disabled(state.optimizationRunning)
+
+                Button(action: leaveOptimizationReview) {
+                    HStack(spacing: 5) {
+                        Image(systemName: "checkmark")
+                        Text("Done")
+                    }
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Color.textSecondaryLight)
+                    .padding(.horizontal, 13)
+                    .frame(height: 34)
+                    .background(Color.surfaceSecondary)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+                .buttonStyle(.plain)
+                .disabled(state.optimizationRunning)
+
+                Button {
+                    showOptimizationCleanupConfirmation = true
+                } label: {
+                    Label(
+                        selectedCount > 0 ? "Clean \(DiskCleaner.formattedSize(totalSelected))" : "Select items",
+                        systemImage: "trash"
+                    )
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Color.white)
+                    .padding(.horizontal, 18)
+                    .frame(height: 38)
+                    .background(selectedCount > 0 ? Color.accentBlue : Color.textTertiaryLight.opacity(0.55))
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                }
+                .buttonStyle(.plain)
+                .disabled(selectedCount == 0 || state.optimizationRunning)
+            }
+            .padding(.horizontal, 24)
+            .padding(.vertical, 14)
+            .background(Color.surfaceCardLight.opacity(0.86))
+            .overlay(alignment: .top) {
+                Rectangle().fill(Color.borderLight).frame(height: 1)
+            }
+        }
+    }
+
+    private func leaveOptimizationReview() {
+        guard !state.optimizationRunning else { return }
+        state.resetForNavigation()
+        isOptimizationScopeExpanded = false
+    }
+
+    private var optimizationReviewHeader: some View {
+        VStack(spacing: 12) {
+            HStack(alignment: .top, spacing: 14) {
+                HStack(spacing: 10) {
+                    Image(systemName: "sparkles.rectangle.stack.fill")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(Color.textSecondaryLight)
+                        .frame(width: 32, height: 32)
+                        .background(Color.surfaceSecondary)
+                        .clipShape(RoundedRectangle(cornerRadius: 9))
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Cleanup report")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(Color.textPrimaryLight)
+                        Text("Review each item before it is moved to Trash.")
+                            .font(.system(size: 10))
+                            .foregroundStyle(Color.textSecondaryLight)
+                    }
+                }
+                Spacer()
+                Text("READY TO REVIEW")
+                    .font(.system(size: 9, weight: .bold))
+                    .tracking(0.6)
+                    .foregroundStyle(Color.textSecondaryLight)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 6)
+                    .background(Color.surfaceSecondary)
+                    .clipShape(Capsule())
+            }
+
+            HStack(spacing: 8) {
+                optimizationReviewMetric(
+                    title: "Disk junk",
+                    value: DiskCleaner.formattedSize(state.optimizationFoundDisk),
+                    detail: "found",
+                    color: .textSecondaryLight
+                )
+                optimizationReviewMetric(
+                    title: "Items",
+                    value: "\(state.scanItems.count)",
+                    detail: "in report",
+                    color: .textSecondaryLight
+                )
+                optimizationReviewMetric(
+                    title: "Selected",
+                    value: DiskCleaner.formattedSize(totalSelected),
+                    detail: "to Trash",
+                    color: .textSecondaryLight
+                )
+            }
+        }
+        .padding(14)
+        .background(Color.surfaceCardLight.opacity(0.86))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color.borderLight))
+    }
+
+    private func optimizationReviewMetric(title: String, value: String, detail: String, color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title.uppercased())
+                .font(.system(size: 8, weight: .semibold))
+                .tracking(0.45)
+                .foregroundStyle(Color.textTertiaryLight)
+            Text(value)
+                .font(.system(size: 15, weight: .bold, design: .rounded))
+                .foregroundStyle(color)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+            Text(detail)
+                .font(.system(size: 9))
+                .foregroundStyle(Color.textTertiaryLight)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(Color.surfaceSecondary.opacity(0.72))
+        .clipShape(RoundedRectangle(cornerRadius: 9))
+    }
+
     private var bottomContentArea: some View {
         Group {
             switch state.optimizationPhase {
@@ -407,7 +545,9 @@ struct CleanerView: View {
                 optimizationLogList
                     .frame(width: 600, height: 120)
                     .transition(.opacity)
-            case .review, .cleaning, .success:
+            case .review:
+                EmptyView()
+            case .cleaning, .success:
                 optimizationSummaryPanel
                     .transition(.opacity)
             case .ready:
@@ -415,34 +555,175 @@ struct CleanerView: View {
                     .transition(.opacity)
             }
         }
-        .animation(.spring(response: 0.45, dampingFraction: 0.8), value: state.optimizationPhase)
+        .animation(.easeInOut(duration: 0.24), value: state.optimizationPhase)
     }
 
     private var optimizationReadyPanel: some View {
-        HStack(spacing: 10) {
-            optimizationReadyItem(
-                icon: "internaldrive",
-                color: .accentBlue,
-                title: "Disk cleanup",
-                detail: "Caches, logs, browser data and safe user-space leftovers"
-            )
-            optimizationReadyItem(
-                icon: "memorychip",
-                color: .accentPurple,
-                title: "Memory review",
-                detail: "Memory pressure and applications you can choose to close"
-            )
-            optimizationReadyItem(
-                icon: "gearshape.2",
-                color: .accentGreen,
-                title: "System & DNS",
-                detail: "Maintenance tasks, stale DNS records and system state"
-            )
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                optimizationReadyItem(
+                    icon: "internaldrive",
+                    color: .accentBlue,
+                    title: "Disk cleanup",
+                    detail: "Caches, logs, browser data and safe user-space leftovers"
+                )
+                optimizationReadyItem(
+                    icon: "memorychip",
+                    color: .accentPurple,
+                    title: "Memory review",
+                    detail: "Memory pressure and applications you can choose to close"
+                )
+                optimizationReadyItem(
+                    icon: "gearshape.2",
+                    color: .accentGreen,
+                    title: "System & DNS",
+                    detail: "Maintenance tasks, stale DNS records and system state"
+                )
+            }
+
+            optimizationScopeDisclosure
+            if isOptimizationScopeExpanded {
+                optimizationRootPicker
+                    .transition(.opacity)
+            }
+
+            optimizationStartupLink
         }
         .frame(width: 700)
-        .padding(12)
+        .padding(10)
         .background(Color.surfaceCardLight)
         .overlay(Rectangle().strokeBorder(Color.borderLight))
+    }
+
+    private var optimizationScopeDisclosure: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.24)) {
+                isOptimizationScopeExpanded.toggle()
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Rectangle()
+                    .fill(Color.borderLight)
+                    .frame(height: 1)
+                Image(systemName: isOptimizationScopeExpanded ? "chevron.up" : "chevron.down")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(Color.textTertiaryLight.opacity(0.72))
+                    .frame(width: 24, height: 16)
+                    .background(Color.surfaceSecondary.opacity(0.5))
+                    .clipShape(Capsule())
+                Rectangle()
+                    .fill(Color.borderLight)
+                    .frame(height: 1)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(isOptimizationScopeExpanded ? "Hide scan scope" : "Show scan scope")
+        .accessibilityLabel("Scan scope")
+        .accessibilityValue(isOptimizationScopeExpanded ? "Expanded" : "Collapsed")
+    }
+
+    private var optimizationStartupLink: some View {
+        Button(action: onOpenStartup) {
+            HStack(spacing: 8) {
+                Image(systemName: "bolt.horizontal.circle")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Color.textSecondaryLight)
+                    .frame(width: 22, height: 22)
+                    .background(Color.surfaceSecondary)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Startup")
+                        .font(.system(size: 9.5, weight: .semibold))
+                        .foregroundStyle(Color.textSecondaryLight)
+                    Text("Review login items and background helpers separately")
+                        .font(.system(size: 7.5))
+                        .foregroundStyle(Color.textTertiaryLight)
+                        .lineLimit(1)
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(Color.textTertiaryLight)
+            }
+            .padding(.horizontal, 9)
+            .frame(height: 30)
+            .background(Color.surfaceSecondary.opacity(0.48))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Open Startup Optimizer")
+        .accessibilityLabel("Startup Optimizer")
+        .accessibilityHint("Review login items and background helpers")
+    }
+
+    private var optimizationRootPicker: some View {
+        // Keep related areas in a stable reading order: browser/AI/system data
+        // on the left, developer/application data on the right.
+        let leftRoots: [DiskScanRoot] = [.browser, .ai, .logs, .trash]
+        let rightRoots: [DiskScanRoot] = [.developer, .applications, .savedState]
+
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .top, spacing: 20) {
+                optimizationRootColumn(leftRoots)
+                optimizationRootColumn(rightRoots)
+            }
+
+            if !state.optimizationScannedRoots.isEmpty {
+                Button("Rescan selected roots") {
+                    let roots = state.optimizationSelectedRoots
+                    state.optimizationScannedRoots.subtract(roots)
+                    state.scanItems.removeAll { roots.contains($0.category.scanRoot) }
+                    state.diskScanWasLimited = false
+                    state.diskScannedEntryCount = 0
+                }
+                .font(.system(size: 9, weight: .medium))
+                .foregroundStyle(Color.accentBlue)
+                .buttonStyle(.plain)
+                .padding(.leading, 2)
+            }
+        }
+    }
+
+    private func optimizationRootColumn(_ roots: [DiskScanRoot]) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            ForEach(roots) { root in
+                optimizationRootRow(root)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func optimizationRootRow(_ root: DiskScanRoot) -> some View {
+        let selected = state.optimizationSelectedRoots.contains(root)
+
+        return Button {
+            guard !state.optimizationRunning else { return }
+            if selected { state.optimizationSelectedRoots.remove(root) }
+            else { state.optimizationSelectedRoots.insert(root) }
+        } label: {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: selected ? "checkmark.square.fill" : "square")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(selected ? Color.accentGreen : Color.textTertiaryLight)
+                    .frame(width: 18, height: 18)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(root.title)
+                        .font(.system(size: 9.5, weight: .semibold))
+                        .foregroundStyle(Color.textPrimaryLight)
+                    Text(root.detail)
+                        .font(.system(size: 7.5))
+                        .foregroundStyle(Color.textTertiaryLight)
+                        .lineLimit(1)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(state.optimizationRunning)
+        .accessibilityLabel(root.title)
+        .accessibilityValue(selected ? "Selected" : "Not selected")
     }
 
     private func optimizationReadyItem(icon: String, color: Color, title: String, detail: String) -> some View {
@@ -554,6 +835,7 @@ struct CleanerView: View {
                     sublabel: sublabelForDNS
                 )
             }
+
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
@@ -562,6 +844,108 @@ struct CleanerView: View {
                 .fill(Color.surfaceCardLight.opacity(0.8))
         )
         .frame(width: 420)
+    }
+
+    private var optimizationCleanupList: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("Items to move to Trash")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Color.textPrimaryLight)
+                Spacer()
+                Text("\(selectedCount) selected · \(DiskCleaner.formattedSize(totalSelected))")
+                    .font(.system(size: 9, weight: .medium, design: .monospaced))
+                    .foregroundStyle(Color.textSecondaryLight)
+            }
+            .padding(.bottom, 7)
+
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 10) {
+                    ForEach(foundCategories, id: \.self) { category in
+                        let categoryItems = state.scanItems
+                            .filter { $0.category == category }
+                            .sorted { lhs, rhs in
+                                if lhs.sizeBytes != rhs.sizeBytes { return lhs.sizeBytes > rhs.sizeBytes }
+                                return lhs.path.localizedStandardCompare(rhs.path) == .orderedAscending
+                            }
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack(spacing: 8) {
+                                Image(systemName: category.icon)
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundStyle(category.color)
+                                    .frame(width: 22, height: 22)
+                                    .background(category.color.opacity(0.10))
+                                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                                Text(category.rawValue)
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundStyle(Color.textPrimaryLight)
+                                Spacer()
+                                Text(DiskCleaner.formattedSize(categoryItems.reduce(0) { $0 + $1.sizeBytes }))
+                                    .font(.system(size: 9, weight: .medium, design: .monospaced))
+                                    .foregroundStyle(Color.textTertiaryLight)
+                            }
+
+                            ForEach(categoryItems) { item in
+                                optimizationCleanupRow(item)
+                            }
+                        }
+                        .padding(.vertical, 4)
+                        .overlay(alignment: .bottom) {
+                            Rectangle().fill(Color.borderLight.opacity(0.65)).frame(height: 1)
+                        }
+                    }
+                }
+            }
+            .frame(maxHeight: .infinity)
+
+            if state.diskScanWasLimited {
+                Text("This result is partial because the scan budget was reached. Select another root or scan the remaining scope later.")
+                    .font(.system(size: 9))
+                    .foregroundStyle(Color.accentAmber)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 7)
+            }
+        }
+        .padding(10)
+        .background(Color.surfaceLight.opacity(0.72))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.borderLight))
+    }
+
+    private func optimizationCleanupRow(_ item: CleanableItem) -> some View {
+        let selected = item.isSelected
+
+        return Button {
+            guard let index = state.scanItems.firstIndex(where: { $0.id == item.id }) else { return }
+            state.scanItems[index].isSelected.toggle()
+        } label: {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: selected ? "checkmark.square.fill" : "square")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(selected ? Color.accentGreen : Color.textTertiaryLight)
+                    .frame(width: 18, height: 18)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 8) {
+                        Text(item.name)
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(Color.textPrimaryLight)
+                            .lineLimit(1)
+                        Spacer(minLength: 8)
+                        Text(DiskCleaner.formattedSize(item.sizeBytes))
+                            .font(.system(size: 9, weight: .medium, design: .monospaced))
+                            .foregroundStyle(Color.textTertiaryLight)
+                    }
+                    Text(item.path)
+                        .font(.system(size: 8, design: .monospaced))
+                        .foregroundStyle(Color.textTertiaryLight)
+                        .lineLimit(1)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(item.name)
+        .accessibilityValue(selected ? "Selected, \(DiskCleaner.formattedSize(item.sizeBytes))" : "Not selected, \(DiskCleaner.formattedSize(item.sizeBytes))")
     }
 
     private var sublabelForDisk: String {
@@ -844,31 +1228,41 @@ struct CleanerView: View {
         // 4. Disk scan
         group.enter()
         var diskLogIDs: [UUID] = []
-        diskLogIDs.append(addOptimizationLog("Scanning disk junk", status: .running))
-        DiskCleaner.scan { logMessage in
-            DispatchQueue.main.async {
-                let id = self.addOptimizationLog(logMessage, status: .running, animated: false)
-                diskLogIDs.append(id)
-            }
-        } completion: { result in
-            DispatchQueue.main.async {
-                self.bulkUpdateRunningLogsToSuccess(ids: diskLogIDs)
-                self.state.scanItems = result.items
-                self.state.diskScanWasLimited = result.wasLimited
-                self.state.diskScannedEntryCount = result.scannedEntryCount
-                self.state.optimizationFoundDisk = result.items.reduce(0) { $0 + $1.sizeBytes }
-                if result.wasLimited {
-                    self.addOptimizationLog(
-                        "Low-load scan stopped after \(result.scannedEntryCount) entries; shown results are partial",
-                        status: .success
-                    )
+        let selectedRoots = state.optimizationSelectedRoots
+        state.scanItems = state.scanItems.filter { selectedRoots.contains($0.category.scanRoot) }
+        let rootsToScan = selectedRoots.subtracting(state.optimizationScannedRoots)
+        if rootsToScan.isEmpty {
+            addOptimizationLog("Reusing the previous disk result; no scanned roots were visited again", status: .success)
+            state.optimizationFoundDisk = state.scanItems.reduce(0) { $0 + $1.sizeBytes }
+            group.leave()
+        } else {
+            diskLogIDs.append(addOptimizationLog("Scanning selected disk roots", status: .running))
+            DiskCleaner.scan(roots: rootsToScan) { logMessage in
+                DispatchQueue.main.async {
+                    let id = self.addOptimizationLog(logMessage, status: .running, animated: false)
+                    diskLogIDs.append(id)
                 }
-                if result.items.isEmpty {
-                    self.addOptimizationLog("No disk junk found", status: .success)
-                } else {
-                    self.addOptimizationLog("Found \(DiskCleaner.formattedSize(self.state.optimizationFoundDisk)) of disk junk", status: .success)
+            } completion: { result in
+                DispatchQueue.main.async {
+                    self.bulkUpdateRunningLogsToSuccess(ids: diskLogIDs)
+                    self.state.scanItems.append(contentsOf: result.items)
+                    self.state.optimizationScannedRoots.formUnion(rootsToScan)
+                    self.state.diskScanWasLimited = self.state.diskScanWasLimited || result.wasLimited
+                    self.state.diskScannedEntryCount += result.scannedEntryCount
+                    self.state.optimizationFoundDisk = self.state.scanItems.reduce(0) { $0 + $1.sizeBytes }
+                    if result.wasLimited {
+                        self.addOptimizationLog(
+                            "Low-load scan stopped after \(result.scannedEntryCount) entries; shown results are partial",
+                            status: .success
+                        )
+                    }
+                    if self.state.scanItems.isEmpty {
+                        self.addOptimizationLog("No disk junk found", status: .success)
+                    } else {
+                        self.addOptimizationLog("Found \(DiskCleaner.formattedSize(self.state.optimizationFoundDisk)) of disk junk", status: .success)
+                    }
+                    group.leave()
                 }
-                group.leave()
             }
         }
 
@@ -960,6 +1354,10 @@ struct CleanerView: View {
                     withAnimation(.easeInOut(duration: 0.5)) {
                         self.state.optimizationFreedDisk = freed
                     }
+                    self.state.scanItems.removeAll { item in
+                        items.contains(where: { $0.id == item.id })
+                    }
+                    self.state.optimizationFoundDisk = self.state.scanItems.reduce(0) { $0 + $1.sizeBytes }
                     if freed > 0 {
                         self.addOptimizationLog("Moved \(DiskCleaner.formattedSize(freed)) to Trash", status: .success)
                     } else {
@@ -1038,9 +1436,6 @@ struct CleanerView: View {
         Button {
             if tool == .refresh && state.refreshTasks.isEmpty {
                 state.refreshTasks = SystemRefreshService.allTasks()
-            }
-            if tool == .startup && startupOptimizerService.items.isEmpty {
-                startupOptimizerService.startScan()
             }
             withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
                 activeTool = tool
@@ -1179,8 +1574,6 @@ struct CleanerView: View {
         case .refresh:   refreshPanel
         case .dns:       dnsPanel
         case .shredder:  shredderPanel
-        case .startup:
-            StartupOptimizerView(service: startupOptimizerService)
         }
     }
 

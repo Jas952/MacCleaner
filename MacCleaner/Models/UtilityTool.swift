@@ -14,6 +14,7 @@ enum UtilityToolID: String, CaseIterable, Identifiable, Codable {
     case welcome
     case shelf
     case colorPicker
+    case fileReader
     case mediaCompressor
     case homebrew
     case audioMixer
@@ -30,16 +31,17 @@ enum UtilityToolID: String, CaseIterable, Identifiable, Codable {
     static var availableCases: [Self] { configurableCases.filter(\.isAvailableInTools) }
 
     var isBeta: Bool {
-        [.mediaCompressor, .audioMixer, .chargeLimit].contains(self)
+        [.fileReader, .mediaCompressor, .audioMixer, .chargeLimit].contains(self)
     }
 
-    var isAvailableInTools: Bool { !isBeta }
+    var isAvailableInTools: Bool { !isBeta || self == .fileReader }
 
     var title: String {
         switch self {
         case .welcome: return "Tools Home"
         case .shelf: return "Drop Shelf"
         case .colorPicker: return "Color Picker"
+        case .fileReader: return "File Reader"
         case .mediaCompressor: return "Media Compressor"
         case .homebrew: return "Homebrew"
         case .audioMixer: return "App Audio Report"
@@ -57,6 +59,7 @@ enum UtilityToolID: String, CaseIterable, Identifiable, Codable {
         case .welcome: return "A focused workspace for everyday utilities"
         case .shelf: return "Park files, links and text temporarily"
         case .colorPicker: return "Sample any screen pixel"
+        case .fileReader: return "Read PDFs, images and other local files"
         case .mediaCompressor: return "Compress images locally"
         case .homebrew: return "Audit and maintain installed packages"
         case .audioMixer: return "Inspect audio routes and mixer compatibility"
@@ -74,6 +77,7 @@ enum UtilityToolID: String, CaseIterable, Identifiable, Codable {
         case .welcome: return "sparkles"
         case .shelf: return "tray.and.arrow.down"
         case .colorPicker: return "eyedropper"
+        case .fileReader: return "doc.text.magnifyingglass"
         case .mediaCompressor: return "arrow.down.right.and.arrow.up.left"
         case .homebrew: return "mug"
         case .audioMixer: return "waveform.and.magnifyingglass"
@@ -89,7 +93,7 @@ enum UtilityToolID: String, CaseIterable, Identifiable, Codable {
     var category: UtilityToolCategory {
         switch self {
         case .welcome, .shelf: return .essentials
-        case .colorPicker: return .capture
+        case .colorPicker, .fileReader: return .capture
         case .mediaCompressor: return .media
         case .homebrew, .chargeLimit: return .system
         case .audioMixer: return .diagnostics

@@ -73,6 +73,9 @@
 		A056_UTS /* UtilityToolServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = F056_UTS /* UtilityToolServices.swift */; };
 		A057_UTV /* UtilityToolsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F057_UTV /* UtilityToolsView.swift */; };
 		A058_CHS /* ClipboardHistoryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F058_CHS /* ClipboardHistoryService.swift */; };
+		A059_DLS /* DiagnosticLogStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F059_DLS /* DiagnosticLogStore.swift */; };
+		A060_TLAS /* ThermalLoadAlertService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F060_TLAS /* ThermalLoadAlertService.swift */; };
+		A061_TLAP /* ThermalLoadAlertPanelController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F061_TLAP /* ThermalLoadAlertPanelController.swift */; };
 		A_SPARKLE /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = P_SPARKLE /* Sparkle */; };
 /* End PBXBuildFile section */
 
@@ -152,6 +155,9 @@
 		F056_UTS /* UtilityToolServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UtilityToolServices.swift; sourceTree = "<group>"; };
 		F057_UTV /* UtilityToolsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UtilityToolsView.swift; sourceTree = "<group>"; };
 		F058_CHS /* ClipboardHistoryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardHistoryService.swift; sourceTree = "<group>"; };
+		F059_DLS /* DiagnosticLogStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticLogStore.swift; sourceTree = "<group>"; };
+		F060_TLAS /* ThermalLoadAlertService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThermalLoadAlertService.swift; sourceTree = "<group>"; };
+		F061_TLAP /* ThermalLoadAlertPanelController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThermalLoadAlertPanelController.swift; sourceTree = "<group>"; };
 		F010 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		F_RELEASE_NOTES /* ReleaseNotes.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = ReleaseNotes.md; sourceTree = "<group>"; };
 		F011 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -243,6 +249,9 @@
 				F053_US /* UpdateService.swift */,
 				F056_UTS /* UtilityToolServices.swift */,
 				F058_CHS /* ClipboardHistoryService.swift */,
+				F059_DLS /* DiagnosticLogStore.swift */,
+				F060_TLAS /* ThermalLoadAlertService.swift */,
+				F061_TLAP /* ThermalLoadAlertPanelController.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -461,6 +470,9 @@
 				A056_UTS /* UtilityToolServices.swift in Sources */,
 				A057_UTV /* UtilityToolsView.swift in Sources */,
 				A058_CHS /* ClipboardHistoryService.swift in Sources */,
+				A059_DLS /* DiagnosticLogStore.swift in Sources */,
+				A060_TLAS /* ThermalLoadAlertService.swift in Sources */,
+				A061_TLAP /* ThermalLoadAlertPanelController.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -591,7 +603,7 @@
 				CODE_SIGN_ENTITLEMENTS = MacCleaner/MacCleaner.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-						CURRENT_PROJECT_VERSION = 6;
+						CURRENT_PROJECT_VERSION = 7;
 				ENABLE_HARDENED_RUNTIME = NO;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = MacCleaner/Info.plist;
@@ -600,7 +612,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
-						MARKETING_VERSION = 1.0.4;
+						MARKETING_VERSION = 1.0.5;
 				PRODUCT_BUNDLE_IDENTIFIER = com.maccleaner.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
@@ -618,7 +630,7 @@
 				CODE_SIGN_ENTITLEMENTS = MacCleaner/MacCleaner.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-						CURRENT_PROJECT_VERSION = 6;
+						CURRENT_PROJECT_VERSION = 7;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = MacCleaner/Info.plist;
@@ -627,7 +639,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
-						MARKETING_VERSION = 1.0.4;
+						MARKETING_VERSION = 1.0.5;
 				PRODUCT_BUNDLE_IDENTIFIER = com.maccleaner.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;

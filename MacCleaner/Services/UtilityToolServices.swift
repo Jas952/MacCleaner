@@ -334,19 +334,35 @@ final class ShelfStore: ObservableObject {
     }
 
     struct Item: Identifiable {
-        enum Storage: Equatable { case reference, temporary }
+        enum Storage: Equatable { case sessionCopy, temporary }
         let id = UUID()
         let title: String
         let subtitle: String
         let storage: Storage
         let providerBox: ItemProviderBox
+        let storedURL: URL?
         var provider: NSItemProvider { providerBox.value }
     }
 
     static let shared = ShelfStore()
     @Published private(set) var items: [Item] = []
+    private let sessionDirectory: URL
+    private var terminationObserver: NSObjectProtocol?
 
-    var referenceCount: Int { items.filter { $0.storage == .reference }.count }
+    private init() {
+        sessionDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("MacCleaner-DropShelf-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: sessionDirectory, withIntermediateDirectories: true)
+        terminationObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.cleanupSessionStorage() }
+        }
+    }
+
+    var sessionCopyCount: Int { items.filter { $0.storage == .sessionCopy }.count }
     var temporaryCount: Int { items.filter { $0.storage == .temporary }.count }
 
     func accept(_ providers: [NSItemProvider]) -> Bool {
@@ -354,9 +370,25 @@ final class ShelfStore: ObservableObject {
             let providerBox = ItemProviderBox(provider)
             if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
                 provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier) { [weak self] value, _ in
-                    let url = (value as? Data).flatMap { URL(dataRepresentation: $0, relativeTo: nil) } ?? value as? URL
+                    let url = Self.resolveURL(value)
                     guard let url else { return }
-                    Task { @MainActor in self?.items.append(Item(title: url.lastPathComponent, subtitle: "File reference", storage: .reference, providerBox: providerBox)) }
+                    // Keep the user's source out of every later drag. Shelf
+                    // owns a session copy and exports a disposable copy of it
+                    // for each destination, so a destination move can never
+                    // move or invalidate the original file.
+                    guard let directory = self?.sessionDirectory else { return }
+                    Task.detached(priority: .userInitiated) {
+                        guard let storedURL = Self.copyIntoSession(url, directory: directory) else { return }
+                        await MainActor.run {
+                            ShelfStore.shared.items.append(Item(
+                                title: url.lastPathComponent,
+                                subtitle: "Session copy · original unchanged",
+                                storage: .sessionCopy,
+                                providerBox: ItemProviderBox(Self.makeFileProvider(for: storedURL)),
+                                storedURL: storedURL
+                            ))
+                        }
+                    }
                 }
             } else if provider.canLoadObject(ofClass: NSImage.self) {
                 let suggestedName = provider.suggestedName
@@ -364,26 +396,148 @@ final class ShelfStore: ObservableObject {
                     guard let image = value as? NSImage else { return }
                     let dimensions = "\(Int(image.size.width)) × \(Int(image.size.height))"
                     Task { @MainActor in
-                        self?.items.append(Item(title: suggestedName ?? "Image", subtitle: "Image · \(dimensions) · original formats", storage: .temporary, providerBox: providerBox))
+                        self?.items.append(Item(title: suggestedName ?? "Image", subtitle: "Image · \(dimensions) · original formats", storage: .temporary, providerBox: providerBox, storedURL: nil))
                     }
                 }
             } else if provider.canLoadObject(ofClass: NSString.self) {
+                let suggestedName = provider.suggestedName
                 provider.loadObject(ofClass: NSString.self) { [weak self] value, _ in
                     guard let text = value as? String else { return }
-                    Task { @MainActor in self?.items.append(Item(title: String(text.prefix(80)), subtitle: "Temporary text · original formats", storage: .temporary, providerBox: providerBox)) }
+                    let textProvider = Self.makeTextProvider(text, suggestedName: suggestedName)
+                    Task { @MainActor in self?.items.append(Item(title: String(text.prefix(80)), subtitle: "Temporary text · original formats", storage: .temporary, providerBox: ItemProviderBox(textProvider), storedURL: nil)) }
                 }
             } else {
-                items.append(Item(title: provider.suggestedName ?? "Dropped item", subtitle: "Temporary item", storage: .temporary, providerBox: providerBox))
+                items.append(Item(title: provider.suggestedName ?? "Dropped item", subtitle: "Temporary item", storage: .temporary, providerBox: providerBox, storedURL: nil))
             }
         }
         return !providers.isEmpty
     }
 
-    func remove(_ item: Item) { items.removeAll { $0.id == item.id } }
-    func clear() { items.removeAll() }
+    func remove(_ item: Item) {
+        if let storedURL = item.storedURL { removeStoredItem(at: storedURL) }
+        items.removeAll { $0.id == item.id }
+    }
+
+    func clear() {
+        items.forEach { if let storedURL = $0.storedURL { removeStoredItem(at: storedURL) } }
+        items.removeAll()
+    }
 
     func pasteFromClipboard() {
         let payload = PasteboardPayload(pasteboard: .general)
         _ = accept(payload.makeItemProviders())
+    }
+
+    func dragProvider(for item: Item) -> NSItemProvider {
+        guard let storedURL = item.storedURL else { return item.provider }
+        // Build a new disposable export for every drag. A destination such as
+        // Telegram may move the handed-off URL instead of copying it; a fresh
+        // provider keeps the Shelf session copy available for later drags.
+        return Self.makeFileProvider(for: storedURL)
+    }
+
+    /// Places a disposable export on the system pasteboard. This is a
+    /// destination-agnostic fallback for apps (including some Telegram
+    /// builds) that do not accept an `NSItemProvider` drag, but do accept a
+    /// file URL pasted with Cmd+V.
+    func copyForPaste(_ item: Item) {
+        if let storedURL = item.storedURL,
+           let exportURL = Self.makeExportCopy(of: storedURL) {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.writeObjects([exportURL as NSURL])
+            return
+        }
+
+        // Clipboard images are intentionally kept as session-only objects,
+        // so materialize the image directly into the system pasteboard.
+        if item.provider.canLoadObject(ofClass: NSImage.self) {
+            item.provider.loadObject(ofClass: NSImage.self) { value, _ in
+                guard let image = value as? NSImage else { return }
+                DispatchQueue.main.async {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.writeObjects([image])
+                }
+            }
+        } else if item.provider.canLoadObject(ofClass: NSString.self) {
+            item.provider.loadObject(ofClass: NSString.self) { value, _ in
+                guard let text = value as? NSString else { return }
+                DispatchQueue.main.async {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.writeObjects([text])
+                }
+            }
+        }
+    }
+
+    private func cleanupSessionStorage() {
+        try? FileManager.default.removeItem(at: sessionDirectory)
+        if let terminationObserver { NotificationCenter.default.removeObserver(terminationObserver) }
+    }
+
+    private func removeStoredItem(at url: URL) {
+        try? FileManager.default.removeItem(at: url.deletingLastPathComponent())
+    }
+
+    nonisolated private static func resolveURL(_ value: NSSecureCoding?) -> URL? {
+        if let url = value as? URL { return url }
+        if let url = value as? NSURL { return url as URL }
+        if let data = value as? Data { return URL(dataRepresentation: data, relativeTo: nil) }
+        if let path = value as? NSString { return URL(fileURLWithPath: path as String) }
+        return nil
+    }
+
+    nonisolated private static func copyIntoSession(_ sourceURL: URL, directory: URL) -> URL? {
+        let fileManager = FileManager.default
+        guard fileManager.fileExists(atPath: sourceURL.path) else { return nil }
+        let itemDirectory = directory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        do {
+            try fileManager.createDirectory(at: itemDirectory, withIntermediateDirectories: true)
+            let destination = itemDirectory.appendingPathComponent(sourceURL.lastPathComponent)
+            try fileManager.copyItem(at: sourceURL, to: destination)
+            return destination
+        } catch {
+            try? fileManager.removeItem(at: itemDirectory)
+            return nil
+        }
+    }
+
+    nonisolated private static func makeFileProvider(for storedURL: URL) -> NSItemProvider {
+        guard let objectExportURL = makeExportCopy(of: storedURL) else {
+            return NSItemProvider()
+        }
+        // Use the canonical macOS file URL provider so Finder, Telegram and
+        // other destinations negotiate the same public.file-url payload.
+        let provider = NSItemProvider(object: objectExportURL as NSURL)
+        provider.suggestedName = storedURL.lastPathComponent
+        return provider
+    }
+
+    nonisolated private static func makeExportCopy(of storedURL: URL) -> URL? {
+        let exportDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("MacCleaner-DropShelf-Export-\(UUID().uuidString)", isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: exportDirectory, withIntermediateDirectories: true)
+            let exportURL = exportDirectory.appendingPathComponent(storedURL.lastPathComponent)
+            try FileManager.default.copyItem(at: storedURL, to: exportURL)
+            return exportURL
+        } catch {
+            try? FileManager.default.removeItem(at: exportDirectory)
+            return nil
+        }
+    }
+
+    nonisolated private static func makeTextProvider(_ text: String, suggestedName: String?) -> NSItemProvider {
+        let provider = NSItemProvider()
+        let data = Data(text.utf8)
+        provider.suggestedName = suggestedName
+        provider.registerDataRepresentation(forTypeIdentifier: UTType.utf8PlainText.identifier, visibility: .all) { completion in
+            completion(data, nil)
+            return nil
+        }
+        provider.registerDataRepresentation(forTypeIdentifier: UTType.plainText.identifier, visibility: .all) { completion in
+            completion(data, nil)
+            return nil
+        }
+        return provider
     }
 }

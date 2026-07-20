@@ -190,6 +190,28 @@ final class ClipboardHistoryService: ObservableObject {
         lastChangeCount = pasteboard.changeCount
     }
 
+    /// Restores an item and sends Cmd-V to the application that was active
+    /// before Clipboard History opened. This makes Enter a complete
+    /// copy-and-paste action rather than requiring a second manual paste.
+    func restoreAndPaste(_ item: Item, into application: NSRunningApplication?) {
+        restore(item)
+        application?.activate(options: [.activateIgnoringOtherApps])
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            guard CGPreflightPostEventAccess() else {
+                _ = CGRequestPostEventAccess()
+                return
+            }
+            guard let source = CGEventSource(stateID: .hidSystemState),
+                  let down = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_V), keyDown: true),
+                  let up = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_V), keyDown: false)
+            else { return }
+            down.flags = .maskCommand
+            up.flags = .maskCommand
+            down.post(tap: .cghidEventTap)
+            up.post(tap: .cghidEventTap)
+        }
+    }
+
     func clear() { items.removeAll() }
 
     private func insert(_ item: Item) {
@@ -263,11 +285,13 @@ final class ClipboardHistoryPanelController {
     static let shared = ClipboardHistoryPanelController()
 
     private var panel: ClipboardHistoryPanel?
+    private var targetApplication: NSRunningApplication?
     private let selectionModel = ClipboardHistorySelectionModel()
     private var localMouseMonitor: Any?
     private var globalMouseMonitor: Any?
 
     func show() {
+        targetApplication = NSWorkspace.shared.frontmostApplication
         ClipboardHistoryService.shared.captureCurrentPasteboard()
         selectionModel.reset(to: ClipboardHistoryService.shared.items)
         let panel = panel ?? makePanel()
@@ -307,7 +331,7 @@ final class ClipboardHistoryPanelController {
         panel.shortcutHandler = { [weak self] index in
             let items = ClipboardHistoryService.shared.items
             guard items.indices.contains(index) else { return }
-            ClipboardHistoryService.shared.restore(items[index])
+            ClipboardHistoryService.shared.restoreAndPaste(items[index], into: self?.targetApplication)
             self?.hide()
         }
         panel.navigationHandler = { [weak self] command in
@@ -320,7 +344,7 @@ final class ClipboardHistoryPanelController {
                 self.selectionModel.move(by: 1, through: service.items)
             case .activate:
                 guard let item = self.selectionModel.selectedItem(in: service.items) else { return }
-                service.restore(item)
+                service.restoreAndPaste(item, into: self.targetApplication)
                 self.hide()
             }
         }

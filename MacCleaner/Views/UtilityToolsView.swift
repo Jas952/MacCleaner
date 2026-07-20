@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
+import PDFKit
 
 struct UtilityToolsView: View {
     @ObservedObject var monitor: SystemMonitor
@@ -100,6 +101,7 @@ struct UtilityToolsView: View {
             ToolsWelcomeView(toolCount: visibleTools.count - 1)
         case .shelf: ShelfToolView()
         case .colorPicker: ColorPickerToolView()
+        case .fileReader: FileReaderToolView()
         case .mediaCompressor: ToolsWelcomeView(toolCount: visibleTools.count - 1)
         case .homebrew: HomebrewToolView()
         case .audioMixer, .chargeLimit: ToolsWelcomeView(toolCount: visibleTools.count - 1)
@@ -513,11 +515,11 @@ private struct ShelfToolView: View {
                     Image(systemName: "arrow.down.doc.fill").font(.system(size: 38)).foregroundStyle(Color.accentBlue)
                     Text(store.items.isEmpty ? "Drop files, links, images or text here" : "\(store.items.count) item\(store.items.count == 1 ? "" : "s") parked")
                         .font(.title3.weight(.semibold))
-                    Text("Files remain references; clipboard and drag representations keep their original formats for this session.")
+                        Text("Files are copied into a private session store; the original stays unchanged. Clipboard and drag representations remain available for this session.")
                         .font(.caption).foregroundStyle(Color.textSecondaryLight)
                     HStack(spacing: 10) {
                         SubtleToolIconButton(title: "Add Current Clipboard", systemImage: "doc.on.clipboard", action: store.pasteFromClipboard)
-                        Text("\(store.referenceCount) references · \(store.temporaryCount) temporary")
+                        Text("\(store.sessionCopyCount) stored copies · \(store.temporaryCount) temporary")
                             .font(.caption.monospacedDigit()).foregroundStyle(Color.textTertiaryLight)
                     }
                 }
@@ -581,22 +583,37 @@ struct FloatingShelfView: View {
             if store.items.isEmpty {
                 VStack(spacing: 8) {
                     Image(systemName: "arrow.down.doc").font(.system(size: 34)).foregroundStyle(Color.textSecondaryLight)
-                    Text("Drop files, links or text here").fontWeight(.medium).foregroundStyle(Color.textPrimaryLight)
-                    Text("Nothing leaves your Mac").font(.caption).foregroundStyle(Color.textSecondaryLight)
+                    Text("Drop here").fontWeight(.medium).foregroundStyle(Color.textPrimaryLight)
+                    Text("Files, links and text").font(.caption).foregroundStyle(Color.textSecondaryLight)
+                    HStack(spacing: 6) {
+                        shelfHint(icon: "arrow.down", text: "Drop in")
+                        shelfHint(icon: "arrow.up", text: "Drag out")
+                        shelfHint(icon: "checkmark.shield", text: "Safe copy")
+                    }
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {
                     LazyVStack(spacing: 8) {
                         ForEach(store.items) { item in
                             HStack {
-                                Image(systemName: item.storage == .reference ? "doc" : "doc.on.clipboard")
-                                VStack(alignment: .leading) { Text(item.title).foregroundStyle(Color.textPrimaryLight).lineLimit(1); Text(item.subtitle).font(.caption).foregroundStyle(Color.textSecondaryLight) }
+                                Image(systemName: item.storage == .sessionCopy ? "doc" : "doc.on.clipboard")
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(item.title).foregroundStyle(Color.textPrimaryLight).lineLimit(1)
+                                    Text(item.subtitle).font(.caption).foregroundStyle(Color.textSecondaryLight)
+                                }
                                 Spacer()
+                                Button { store.copyForPaste(item) } label: {
+                                    Image(systemName: "doc.on.clipboard")
+                                }
+                                .buttonStyle(.borderless)
+                                .foregroundStyle(Color.accentBlue)
+                                .help("Copy file for Cmd+V")
+                                .accessibilityLabel("Copy file for paste")
                                 Button { store.remove(item) } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.plain).foregroundStyle(Color.textSecondaryLight)
                             }
                             .padding(10).background(Color.surfaceCardLight, in: RoundedRectangle(cornerRadius: 10))
                             .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.borderLight, lineWidth: 1))
-                            .onDrag { item.provider }
+                            .onDrag { store.dragProvider(for: item) }
                         }
                     }
                 }
@@ -608,6 +625,16 @@ struct FloatingShelfView: View {
         .background(Color.surfaceLight)
         .background(ShelfWindowConfigurator(isPinned: preferences.isPinned))
         .onDrop(of: [UTType.fileURL.identifier, UTType.url.identifier, UTType.text.identifier, UTType.image.identifier], isTargeted: nil, perform: store.accept)
+    }
+
+    private func shelfHint(icon: String, text: String) -> some View {
+        Label(text, systemImage: icon)
+            .font(.system(size: 10, weight: .medium))
+            .foregroundStyle(Color.textSecondaryLight)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 4)
+            .background(Color.surfaceCardLight.opacity(0.78), in: Capsule())
+            .overlay(Capsule().strokeBorder(Color.borderLight))
     }
 }
 
@@ -621,6 +648,113 @@ private struct ShelfWindowConfigurator: NSViewRepresentable {
             guard let window = view.window else { return }
             window.level = isPinned ? .floating : .normal
             window.collectionBehavior = isPinned ? [.canJoinAllSpaces, .fullScreenAuxiliary] : []
+        }
+    }
+}
+
+private struct FileReaderToolView: View {
+    @State private var selectedURL: URL?
+    @State private var previewText = ""
+    @State private var previewImage: NSImage?
+    @State private var previewPDF: PDFDocument?
+    @State private var errorMessage: String?
+
+    var body: some View {
+        ToolPage(.fileReader) {
+            ToolPanel("Read a local file", subtitle: "Choose any file. PDFs and images get a native preview; text and unknown formats remain local and readable as text or hex.") {
+                HStack(spacing: 10) {
+                    Button("Choose File", action: chooseFile)
+                        .buttonStyle(AppPrimaryButtonStyle())
+                    if let selectedURL {
+                        Label(selectedURL.path, systemImage: "doc.text.magnifyingglass")
+                            .font(.mono(10))
+                            .foregroundStyle(Color.textSecondaryLight)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                }
+
+                if let errorMessage {
+                    Label(errorMessage, systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(Color.accentRed)
+                }
+
+                if let previewImage {
+                    Image(nsImage: previewImage)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxWidth: .infinity, minHeight: 260, maxHeight: 520)
+                        .background(Color.surfaceCardLight, in: RoundedRectangle(cornerRadius: 10))
+                } else if let previewPDF {
+                    ScrollView {
+                        Text(previewPDF.string ?? "This PDF contains no extractable text.")
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(14)
+                    }
+                    .frame(minHeight: 260, maxHeight: 520)
+                    .background(Color.surfaceCardLight, in: RoundedRectangle(cornerRadius: 10))
+                } else if !previewText.isEmpty {
+                    ScrollView {
+                        Text(previewText)
+                            .font(.system(.body, design: .monospaced))
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .topLeading)
+                            .padding(14)
+                    }
+                    .frame(minHeight: 260, maxHeight: 520)
+                    .background(Color.surfaceCardLight, in: RoundedRectangle(cornerRadius: 10))
+                } else {
+                    VStack(spacing: 8) {
+                        Image(systemName: "doc").font(.system(size: 34)).foregroundStyle(Color.textTertiaryLight)
+                        Text("No file selected").font(.headline)
+                        Text("The reader never uploads or modifies the selected file.")
+                            .font(.caption)
+                            .foregroundStyle(Color.textSecondaryLight)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 260)
+                }
+            }
+        }
+    }
+
+    private func chooseFile() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.item]
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            load(url)
+        }
+    }
+
+    private func load(_ url: URL) {
+        selectedURL = url
+        previewText = ""
+        previewImage = nil
+        previewPDF = nil
+        errorMessage = nil
+
+        if let image = NSImage(contentsOf: url) {
+            previewImage = image
+            return
+        }
+        if let pdf = PDFDocument(url: url) {
+            previewPDF = pdf
+            return
+        }
+        do {
+            let data = try Data(contentsOf: url, options: [.mappedIfSafe])
+            if let text = String(data: data, encoding: .utf8) {
+                previewText = text.isEmpty ? "(empty file)" : text
+            } else {
+                previewText = data.prefix(4096).map { String(format: "%02x", $0) }.joined(separator: " ")
+                if data.count > 4096 { previewText += "\n…\n\(data.count - 4096) more bytes" }
+            }
+        } catch {
+            errorMessage = error.localizedDescription
         }
     }
 }
@@ -810,10 +944,19 @@ private struct HomebrewToolView: View {
             ToolPanel("Homebrew status", subtitle: "MacCleaner uses the existing user-owned brew executable and never installs it silently.", minHeight: 154) {
                 if let executable = service.executable {
                     Label(executable.path, systemImage: "checkmark.seal.fill").foregroundStyle(Color.accentGreen)
+                    Text("Audit lists formulae and casks with newer versions. Select only packages you want to upgrade; Cleanup Dry Run previews old downloads before any removal.")
+                        .font(.caption)
+                        .foregroundStyle(Color.textSecondaryLight)
+                        .fixedSize(horizontal: false, vertical: true)
                     HStack {
-                        Button("Audit Outdated", action: service.audit).buttonStyle(AppPrimaryButtonStyle())
+                        Button("Audit Outdated", action: service.audit)
+                            .buttonStyle(AppPrimaryButtonStyle())
+                            .help("Find installed formulae and casks with newer versions")
                         Button("Cleanup Dry Run", action: service.cleanupDryRun)
-                        Button("Run Cleanup") { confirmingCleanup = true }.disabled(service.isWorking)
+                            .help("Preview removable Homebrew downloads and old versions")
+                        Button("Run Cleanup") { confirmingCleanup = true }
+                            .disabled(service.isWorking)
+                            .help("Remove only what Homebrew reports as safe cleanup")
                     }
                     .disabled(service.isWorking)
                 } else {

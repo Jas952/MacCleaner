@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import UniformTypeIdentifiers
 import XCTest
 @testable import MacCleaner
 
@@ -338,6 +339,7 @@ final class SafetyPolicyTests: XCTestCase {
         state.optimizationPhase = .success
         state.optimizationFoundDisk = 1_024
         state.optimizationLogs = [OptimizationLog(message: "Finished", status: .success)]
+        state.optimizationScannedRoots = [.browser]
 
         state.resetForNavigation()
 
@@ -349,6 +351,7 @@ final class SafetyPolicyTests: XCTestCase {
         if case .ready = state.optimizationPhase {} else { XCTFail("Optimization phase was not reset") }
         XCTAssertTrue(state.optimizationLogs.isEmpty)
         XCTAssertEqual(state.optimizationFoundDisk, 0)
+        XCTAssertEqual(state.optimizationScannedRoots, [.browser])
     }
 
     @MainActor
@@ -756,10 +759,12 @@ final class SafetyPolicyTests: XCTestCase {
     }
 
     func testBetaUtilitiesStayOutOfTheToolsWorkspace() {
-        let betaTools: Set<UtilityToolID> = [.mediaCompressor, .audioMixer, .chargeLimit]
+        let betaTools: Set<UtilityToolID> = [.fileReader, .mediaCompressor, .audioMixer, .chargeLimit]
+        let gatedBetaTools = betaTools.subtracting([.fileReader])
 
         XCTAssertEqual(Set(UtilityToolID.configurableCases.filter(\.isBeta)), betaTools)
-        XCTAssertTrue(betaTools.isDisjoint(with: Set(UtilityToolID.availableCases)))
+        XCTAssertTrue(gatedBetaTools.isDisjoint(with: Set(UtilityToolID.availableCases)))
+        XCTAssertTrue(UtilityToolID.availableCases.contains(.fileReader))
         XCTAssertTrue(UtilityToolID.availableCases.allSatisfy(\.isAvailableInTools))
     }
 
@@ -880,6 +885,108 @@ final class SafetyPolicyTests: XCTestCase {
         XCTAssertTrue(rebuildable.isSelectedByDefault)
         XCTAssertFalse(protected.isSelectedByDefault)
         XCTAssertFalse(review.isSelectedByDefault)
+    }
+
+    @MainActor
+    func testDiagnosticLogStoreExportsAndClearsLocalEntries() throws {
+        let store = DiagnosticLogStore.shared
+        store.clear()
+        store.append(category: "test", message: "sample", metadata: ["cpu": "0.5"])
+        XCTAssertEqual(store.count, 1)
+
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let jsonURL = directory.appendingPathComponent("logs.json")
+        let csvURL = directory.appendingPathComponent("logs.csv")
+        try store.exportJSON(to: jsonURL)
+        try store.exportCSV(to: csvURL)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: jsonURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: csvURL.path))
+        XCTAssertTrue(String(data: try Data(contentsOf: csvURL), encoding: .utf8)?.contains("sample") == true)
+
+        store.clear()
+        XCTAssertEqual(store.count, 0)
+    }
+
+    @MainActor
+    func testDropShelfKeepsSourceFileAndStoresSessionCopy() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("MacCleaner-Shelf-Test-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let source = directory.appendingPathComponent("notes.txt")
+        let contents = "Shelf must preserve this exact text\nwith a second line."
+        try contents.data(using: .utf8)!.write(to: source)
+
+        let store = ShelfStore.shared
+        store.clear()
+        XCTAssertTrue(store.accept([NSItemProvider(object: source as NSURL)]))
+
+        let deadline = Date().addingTimeInterval(2)
+        while store.items.isEmpty && Date() < deadline {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+        }
+
+        let item = try XCTUnwrap(store.items.first)
+        XCTAssertEqual(item.storage, .sessionCopy)
+        let storedURL = try XCTUnwrap(item.storedURL)
+        XCTAssertNotEqual(storedURL, source)
+        XCTAssertEqual(String(data: try Data(contentsOf: storedURL), encoding: .utf8), contents)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: source.path))
+
+        let exportExpectation = expectation(description: "Drop Shelf exports a disposable file copy")
+        item.provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier) { value, error in
+            XCTAssertNil(error)
+            let exportedURL: URL? = {
+                if let url = value as? URL { return url }
+                if let url = value as? NSURL { return url as URL }
+                if let data = value as? Data { return URL(dataRepresentation: data, relativeTo: nil) }
+                return nil
+            }()
+            XCTAssertNotNil(exportedURL)
+            if let exportedURL {
+                XCTAssertNotEqual(exportedURL, source)
+                XCTAssertEqual(try? String(contentsOf: exportedURL, encoding: .utf8), contents)
+            }
+            exportExpectation.fulfill()
+        }
+        wait(for: [exportExpectation], timeout: 2)
+
+        let dataExpectation = expectation(description: "Drop Shelf publishes a file URL data representation")
+        item.provider.loadDataRepresentation(forTypeIdentifier: UTType.fileURL.identifier) { data, error in
+            XCTAssertNil(error)
+            let exportedURL = data.flatMap { URL(dataRepresentation: $0, relativeTo: nil) }
+            XCTAssertNotNil(exportedURL)
+            if let exportedURL {
+                XCTAssertNotEqual(exportedURL, source)
+                XCTAssertEqual(try? String(contentsOf: exportedURL, encoding: .utf8), contents)
+            }
+            dataExpectation.fulfill()
+        }
+        wait(for: [dataExpectation], timeout: 2)
+
+        store.clear()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: storedURL.path))
+    }
+
+    @MainActor
+    func testOptimizeUsesSelectableRootsAndKeepsARepeatScanCached() {
+        let state = CleanerViewState()
+        XCTAssertEqual(state.optimizationSelectedRoots, Set(DiskScanRoot.allCases))
+        XCTAssertFalse(CleanerTool.allCases.contains { $0.title == "Startup" })
+        XCTAssertEqual(CleanCategory.browserCache.scanRoot, .browser)
+        XCTAssertEqual(CleanCategory.devCache.scanRoot, .developer)
+        XCTAssertEqual(CleanCategory.logs.scanRoot, .logs)
+
+        state.optimizationScannedRoots = [.browser, .developer]
+        let selected = Set([DiskScanRoot.browser, .developer, .logs])
+        let rootsNeedingScan = selected.subtracting(state.optimizationScannedRoots)
+        XCTAssertEqual(rootsNeedingScan, [.logs])
+
+        state.clearOptimizationScanCache()
+        XCTAssertTrue(state.optimizationScannedRoots.isEmpty)
     }
 
     func testJunkCleanupTreatsAlreadyMissingFileAsResolved() {
