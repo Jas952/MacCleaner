@@ -77,22 +77,21 @@ It combines live system monitoring, storage analysis, safe cleanup, process insp
 
 ## Features
 
-- **Live system dashboard** — monitor CPU, memory, disk, network, GPU, battery, temperatures, and the processes using the most resources. Key metrics are also available from the menu bar for quick access.
-- **Process inspection** — search and sort running applications, inspect grouped processes and child activity, review CPU and memory usage, and quit regular applications directly from MacCleaner.
-- **Cooling and hardware monitoring** — view fan speeds, temperature sensors, thermal history, battery information, disk health, APFS details, and available SMART data. Hardware support depends on the Mac model.
-- **Safe cleanup and optimization** — analyze browser caches, logs, saved states, application data, developer leftovers, and local AI tool caches before removing anything. Results show paths, categories, item counts, sizes, and safety status.
-- **Storage analysis** — find large files, exact duplicates, similar photos, application leftovers, junk data, and reclaimable local iCloud copies. A complete analysis can combine several storage checks into one reviewable workflow.
-- **Cleanup history** — track reclaimed space, recurring cleanup targets, and rebuildable caches without counting the same temporary data as permanent savings multiple times.
-- **Desktop management** — browse files with previews and metadata, rename or move items, create folders, and organize Desktop files into folders by type after confirmation.
-- <a href="https://github.com/tw93/Pake"><img src="https://img.shields.io/badge/GitHub-tw93%2FPake-181717?style=for-the-badge&logo=github&logoColor=white" alt="View tw93/Pake on GitHub" height="28" /></a> — turn preset services or any website URL into a lightweight standalone macOS application, then open or remove generated apps from the same screen. Powered by the original Pake project.
+- **System overview** — understand the current state of your Mac without switching between several system utilities. See live CPU and memory load, disk usage, network activity, GPU, battery, temperatures, fans, and the most resource-heavy processes. Key metrics can also stay visible in the menu bar.
 
-- **Local AI workload** — detect supported agents, MCP servers, helper processes, skills, profiles, vector stores, model runtimes, and related local files. MacCleaner also attributes CPU and memory usage to the detected AI tools.
+- **Cleanup and storage** — discover where disk space is going and review what can be reclaimed before removing anything. MacCleaner can surface caches, logs, large files, duplicates, similar photos, application leftovers, developer data, and local iCloud copies. Quick cleanup tools and deeper storage analysis are available in the same workspace.
 
-- <a href="https://github.com/AlexsJones/llmfit"><img src="https://img.shields.io/badge/GitHub-AlexsJones%2Fllmfit-181717?style=for-the-badge&logo=github&logoColor=white" alt="View AlexsJones/llmfit on GitHub" height="28" /></a> — compare local language models against the Mac's available hardware, then filter and sort them by memory requirements, speed, parameters, context length, capabilities, publisher, and use case. Model data and compatibility checks are provided through llmfit.
+- **Processes and startup** — inspect what is currently running and what starts automatically with macOS. Search grouped processes, explore related activity, compare resource usage, and quit regular applications directly from MacCleaner. This provides a clearer view of background activity without relying entirely on Activity Monitor.
 
-- **Utilities and diagnostics** — use the Drop Shelf, screen color picker, Homebrew maintenance tools, keyboard and pointer testing, speaker channel checks, physical cleaning mode, device health checks, and network latency tests.
+- **Desktop and everyday tools** — manage common tasks without opening a collection of separate utilities. Preview, rename, move, and organize files; temporarily park content in Drop Shelf; sample screen colors; maintain Homebrew; and test keyboard, pointer, speakers, storage, and network health. The Utilities workspace acts as a compact toolkit for everyday Mac use.
 
-- **Utilities and diagnostics** — use the Drop Shelf, screen color picker, Homebrew maintenance tools, keyboard and pointer testing, speaker channel checks, physical cleaning mode, device health checks, and network latency tests.
+- **Standalone web apps** — turn preset services or any website into a lightweight macOS application, then open and manage generated apps from the same screen. Useful for keeping frequently used services separate from browser tabs and profiles. Powered by <a href="https://github.com/tw93/Pake"><img src="https://img.shields.io/badge/GitHub-tw93%2FPake-181717?style=for-the-badge&logo=github&logoColor=white" alt="View tw93/Pake on GitHub" height="24" /></a>
+
+- **Local AI workspace** — make local AI tools visible as part of the Mac's real workload. MacCleaner can detect agents such as Codex, Claude Code, Cursor, and other supported tools, along with related processes, MCP servers, skills, helper runtimes, local components, and vector stores. It connects these components with their CPU and memory footprint instead of showing them as unrelated background processes.
+
+- **Hardware-aware model library** — explore local language models based on what the current Mac can realistically run. Compare compatible models, search by publisher or use case, and review factors such as memory requirements, parameter count, context length, capabilities, quantization, and estimated performance. Model compatibility data is provided through <a href="https://github.com/AlexsJones/llmfit"><img src="https://img.shields.io/badge/GitHub-AlexsJones%2Fllmfit-181717?style=for-the-badge&logo=github&logoColor=white" alt="View AlexsJones/llmfit on GitHub" height="24" /></a>
+
+MacCleaner brings monitoring, cleanup, file management, diagnostics, and local AI visibility into one native macOS workspace. Each area starts with a quick overview and provides deeper tools when more detailed inspection is needed.
 
 ## Local AI Workload
 
