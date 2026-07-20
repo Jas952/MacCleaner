@@ -123,12 +123,6 @@ The Agents view shows which tools are active, how many resources they use, and w
 - Fan, sensor and SMART data depend on the Mac model
 - Some tools may require optional local CLI utilities
 
-## Philosophy
-
-MacCleaner is not a magic one-click cleaner.
-
-It shows what it found, keeps potentially destructive actions visible, and uses bounded, cancellable scans so deeper analysis does not turn into uncontrolled full-disk work.
-
 ## Contact
 
 <p>
