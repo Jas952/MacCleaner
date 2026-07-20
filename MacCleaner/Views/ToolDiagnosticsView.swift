@@ -1205,28 +1205,15 @@ private func metricTile(_ label: String, _ value: String, _ color: Color, info: 
 private struct MetricInfoButton: View {
     let title: String
     let text: String
-    @State private var language: MetricInfoLanguage = .russian
-    @EnvironmentObject private var modalCoordinator: AppModalCoordinator
 
     var body: some View {
-        Button {
-            modalCoordinator.present(title: title, subtitle: "Metric information") {
-                MetricInfoPopover(
-                    title: title,
-                    text: text,
-                    language: $language,
-                    close: modalCoordinator.dismiss
-                )
-            }
-        } label: {
-            Image(systemName: "info.circle")
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(Color.textTertiaryLight)
-                .frame(width: 14, height: 14)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Metric information")
+        Image(systemName: "info.circle")
+            .font(.system(size: 9, weight: .semibold))
+            .foregroundStyle(Color.textTertiaryLight)
+            .frame(width: 14, height: 14)
+            .contentShape(Rectangle())
+            .help(text)
+            .accessibilityLabel("\(title) information")
     }
 }
 

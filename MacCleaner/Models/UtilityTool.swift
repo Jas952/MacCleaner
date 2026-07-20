@@ -34,7 +34,9 @@ enum UtilityToolID: String, CaseIterable, Identifiable, Codable {
         [.fileReader, .mediaCompressor, .audioMixer, .chargeLimit].contains(self)
     }
 
-    var isAvailableInTools: Bool { !isBeta || self == .fileReader }
+    // Beta tools remain visible in Settings for transparency, but are not
+    // enabled in the working Tools sidebar until their implementation is ready.
+    var isAvailableInTools: Bool { !isBeta }
 
     var title: String {
         switch self {
