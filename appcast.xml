@@ -3,26 +3,18 @@
     <channel>
         <title>MacCleaner</title>
         <item>
-            <title>1.0.5</title>
-            <pubDate>Mon, 20 Jul 2026 17:31:01 +0000</pubDate>
+            <title>1.0.6</title>
+            <pubDate>Mon, 20 Jul 2026 18:21:33 +0000</pubDate>
             <link>https://github.com/Jas952/MacCleaner</link>
-            <sparkle:version>7</sparkle:version>
-            <sparkle:shortVersionString>1.0.5</sparkle:shortVersionString>
+            <sparkle:version>8</sparkle:version>
+            <sparkle:shortVersionString>1.0.6</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[# MacCleaner 1.0.5
+            <description sparkle:format="markdown"><![CDATA[# MacCleaner 1.0.6
 
-- Redesigned Junk Files and Optimize cleanup reports as expandable lists: category → subcategory/folder → concrete paths, item counts, and sizes.
-- Added automatic selection for safe-to-remove entries while keeping protected, sensitive, and rebuildable data out of bulk cleanup.
-- Added developer-focused storage categories for Xcode, SwiftPM, npm, pnpm, Python, Docker, Ollama, Hugging Face, browser caches, logs, and related tool artifacts.
-- Improved Optimize so the user can review exactly what will be cleaned, reuse the selected scan scope on subsequent analyses, and access Startup items without a separate sidebar destination.
-- Added targeted administrator authorization retry for Large Files only after a normal Trash operation reports a permission failure.
-- Strengthened Trash-only deletion, MacCleaner data protection, open-browser checks, and dirty Git project confirmation.
-- Added a session-safe Drop Shelf: originals remain untouched, drag-out uses disposable exports, and Copy for paste supports files, images, and text in destinations such as Telegram.
-- Expanded Agents with local footprint and process context, and added native system load notifications with CPU, temperature, and top contributing processes.
-- Updated Clipboard History keyboard insertion, menu bar telemetry presentation, Settings controls, documentation, and validation coverage.
+- Other improvements and bug fixes across the Tools workspace, settings, diagnostics, and utility interactions.
 ]]></description>
-            <enclosure url="https://github.com/Jas952/MacCleaner/releases/download/v1.0.5/MacCleaner.dmg" length="9319936" type="application/octet-stream" sparkle:edSignature="3WTmaTqzf8wJamGNXVoJ16Ar3ASJ5OB+zYlxhqSoLfl8X6dB3hOI5zLDMzxAkrJOpucv4Kk5f4btd+l7Hr2+CA=="/>
+            <enclosure url="https://github.com/Jas952/MacCleaner/releases/download/v1.0.6/MacCleaner.dmg" length="9290043" type="application/octet-stream" sparkle:edSignature="4UAGNMFow+T2x2cwagpuU1nPrPRKCv+bWN3GaM2HOgbGpD2PSYc+TRkytHP2p1o9edsJE4/i90eYTnpXM85wCA=="/>
         </item>
     </channel>
 </rss>
