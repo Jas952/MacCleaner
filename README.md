@@ -84,25 +84,13 @@ It combines live system monitoring, storage analysis, safe cleanup, process insp
 - **Storage analysis** — find large files, exact duplicates, similar photos, application leftovers, junk data, and reclaimable local iCloud copies. A complete analysis can combine several storage checks into one reviewable workflow.
 - **Cleanup history** — track reclaimed space, recurring cleanup targets, and rebuildable caches without counting the same temporary data as permanent savings multiple times.
 - **Desktop management** — browse files with previews and metadata, rename or move items, create folders, and organize Desktop files into folders by type after confirmation.
-- <a href="https://github.com/tw93/Pake">
-    <img
-      src="https://img.shields.io/badge/GitHub-tw93%2FPake-181717?style=for-the-badge&logo=github&logoColor=white"
-      alt="View tw93/Pake on GitHub"
-      height="28"
-    />
-  </a>
-  — turn preset services or any website URL into a lightweight standalone macOS application, then open or remove generated apps from the same screen. Powered by the original Pake project.
+- <a href="https://github.com/tw93/Pake"><img src="https://img.shields.io/badge/GitHub-tw93%2FPake-181717?style=for-the-badge&logo=github&logoColor=white" alt="View tw93/Pake on GitHub" height="28" /></a> — turn preset services or any website URL into a lightweight standalone macOS application, then open or remove generated apps from the same screen. Powered by the original Pake project.
 
 - **Local AI workload** — detect supported agents, MCP servers, helper processes, skills, profiles, vector stores, model runtimes, and related local files. MacCleaner also attributes CPU and memory usage to the detected AI tools.
 
-- <a href="https://github.com/AlexsJones/llmfit">
-    <img
-      src="https://img.shields.io/badge/GitHub-AlexsJones%2Fllmfit-181717?style=for-the-badge&logo=github&logoColor=white"
-      alt="View AlexsJones/llmfit on GitHub"
-      height="28"
-    />
-  </a>
-  — compare local language models against the Mac's available hardware, then filter and sort them by memory requirements, speed, parameters, context length, capabilities, publisher, and use case. Model data and compatibility checks are provided through llmfit.
+- <a href="https://github.com/AlexsJones/llmfit"><img src="https://img.shields.io/badge/GitHub-AlexsJones%2Fllmfit-181717?style=for-the-badge&logo=github&logoColor=white" alt="View AlexsJones/llmfit on GitHub" height="28" /></a> — compare local language models against the Mac's available hardware, then filter and sort them by memory requirements, speed, parameters, context length, capabilities, publisher, and use case. Model data and compatibility checks are provided through llmfit.
+
+- **Utilities and diagnostics** — use the Drop Shelf, screen color picker, Homebrew maintenance tools, keyboard and pointer testing, speaker channel checks, physical cleaning mode, device health checks, and network latency tests.
 
 - **Utilities and diagnostics** — use the Drop Shelf, screen color picker, Homebrew maintenance tools, keyboard and pointer testing, speaker channel checks, physical cleaning mode, device health checks, and network latency tests.
 
