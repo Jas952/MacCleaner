@@ -1,59 +1,24 @@
 <p align="center">
-  <img
-    src="./docs/readme-media/hero-v2.png"
-    alt="MacCleaner — native macOS system, storage, and AI workload utility"
-    width="100%"
-  />
+  <img src="./docs/readme-media/hero-v2.png" alt="MacCleaner" width="100%" />
+</p>
+
+<p align="center">
+  <a href="https://github.com/Jas952/MacCleaner/releases/latest"><img src="https://img.shields.io/badge/Download-Latest_DMG-2F81F7?style=for-the-badge&logo=apple&logoColor=white" alt="Download MacCleaner" height="34" /></a>
+  &nbsp;
+  <img src="https://img.shields.io/badge/Helped_by-Codex-111827?style=for-the-badge&logo=openai&logoColor=white" alt="Codex helped with development" height="34" />
+  &nbsp;
+  <img src="https://img.shields.io/badge/Helped_by-Gemini-7C5CFF?style=for-the-badge&logo=googlegemini&logoColor=white" alt="Gemini helped with development" height="34" />
 </p>
 
 <h1 align="center">MacCleaner</h1>
+<p align="center">Understand what is happening on your Mac — and act from the same native workspace.</p>
 
 <p align="center">
-  Native macOS utility for monitoring, cleaning and maintaining your Mac from one place.
+  <img alt="macOS 13+" src="https://img.shields.io/badge/macOS_13+-111827?style=flat-square&logo=apple&logoColor=white" />
+<img alt="Swift 5" src="https://img.shields.io/badge/Swift_5-F05138?style=flat-square&logo=swift&logoColor=white" />
+<img alt="SwiftUI" src="https://img.shields.io/badge/Native-SwiftUI-147EFB?style=flat-square&logo=xcode&logoColor=white" />
+<img alt="Local first" src="https://img.shields.io/badge/Local--first-19A974?style=flat-square" />
 </p>
-
-<p align="center">
-  <img
-    alt="macOS 13 or newer"
-    src="https://img.shields.io/badge/macOS_13+-111827?style=flat-square&logo=apple&logoColor=white"
-  />
-  <img
-    alt="Swift 5"
-    src="https://img.shields.io/badge/Swift_5-F05138?style=flat-square&logo=swift&logoColor=white"
-  />
-  <img
-    alt="Native SwiftUI application"
-    src="https://img.shields.io/badge/Native-SwiftUI-147EFB?style=flat-square&logo=xcode&logoColor=white"
-  />
-  <img
-    alt="Local-first analysis"
-    src="https://img.shields.io/badge/Local--first-19A974?style=flat-square"
-  />
-</p>
-
-<p align="center">
-  <a href="https://github.com/Jas952/MacCleaner/releases/latest">
-    <img
-      src="https://img.shields.io/badge/Download-Latest_DMG-2F81F7?style=for-the-badge&logo=apple&logoColor=white"
-      alt="Download the latest MacCleaner DMG"
-      height="34"
-    />
-  </a>
-  &nbsp;
-  <img
-    src="https://img.shields.io/badge/Helped_by-Codex-111827?style=for-the-badge&logo=openai&logoColor=white"
-    alt="Codex helped with development"
-    height="34"
-  />
-  &nbsp;
-  <img
-    src="https://img.shields.io/badge/Helped_by-Gemini-7C5CFF?style=for-the-badge&logo=googlegemini&logoColor=white"
-    alt="Gemini helped with development"
-    height="34"
-  />
-</p>
-
-<br />
 
 ## Overview
 
