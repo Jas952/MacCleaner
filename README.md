@@ -77,12 +77,17 @@ It combines live system monitoring, storage analysis, safe cleanup, process insp
 
 ## Features
 
-- **Live dashboard** — CPU, memory, disk, network, GPU, battery, temperatures and top processes.
-- **Storage analysis** — large files, junk, duplicates, similar photos, app leftovers and local iCloud copies.
-- **Cleanup advisor** — shows size, risk and recovery cost before removing anything.
-- **Process inspection** — active apps, background agents and resource usage.
-- **Diagnostics** — APFS, SMART, keyboard, speakers, fans, thermals and network checks.
-- **Local AI workload** — agents, MCP servers, skills, profiles, local indexes and related processes.
+- **Live system dashboard** — monitor CPU, memory, disk, network, GPU, battery, temperatures, and the processes using the most resources. Key metrics are also available from the menu bar for quick access.
+- **Process inspection** — search and sort running applications, inspect grouped processes and child activity, review CPU and memory usage, and quit regular applications directly from MacCleaner.
+- **Cooling and hardware monitoring** — view fan speeds, temperature sensors, thermal history, battery information, disk health, APFS details, and available SMART data. Hardware support depends on the Mac model.
+- **Safe cleanup and optimization** — analyze browser caches, logs, saved states, application data, developer leftovers, and local AI tool caches before removing anything. Results show paths, categories, item counts, sizes, and safety status.
+- **Storage analysis** — find large files, exact duplicates, similar photos, application leftovers, junk data, and reclaimable local iCloud copies. A complete analysis can combine several storage checks into one reviewable workflow.
+- **Cleanup history** — track reclaimed space, recurring cleanup targets, and rebuildable caches without counting the same temporary data as permanent savings multiple times.
+- **Desktop management** — browse files with previews and metadata, rename or move items, create folders, and organize Desktop files into folders by type after confirmation.
+- **Pake Apps** — turn preset services or any website URL into a lightweight standalone macOS application, then open or remove generated apps from the same screen. This feature uses the original [Pake](https://github.com/tw93/Pake) project.
+- **Local AI workload** — detect supported agents, MCP servers, helper processes, skills, profiles, vector stores, model runtimes, and related local files. MacCleaner also attributes CPU and memory usage to the detected AI tools.
+- **Model library** — compare local language models against the Mac's available hardware, then filter and sort them by memory requirements, speed, parameters, context length, capabilities, publisher, and use case. Model data and compatibility checks are provided through [llmfit](https://github.com/AlexsJones/llmfit).
+- **Utilities and diagnostics** — use the Drop Shelf, screen color picker, Homebrew maintenance tools, keyboard and pointer testing, speaker channel checks, physical cleaning mode, device health checks, and network latency tests.
 
 ## Local AI Workload
 
