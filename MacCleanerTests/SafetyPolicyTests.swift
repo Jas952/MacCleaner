@@ -816,6 +816,43 @@ final class SafetyPolicyTests: XCTestCase {
         XCTAssertEqual(reloaded.menuBarGaugeIDs, ["ram", "gpu", "cpu"])
     }
 
+    func testMenuBarDashboardCardsCanBeReorderedRemovedAndRestored() throws {
+        let suiteName = "MacCleanerMenuBarDashboardTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let settings = SettingsManager(defaults: defaults)
+        XCTAssertEqual(
+            settings.menuBarDashboardModuleIDs,
+            MenuBarDashboardModule.allCases.map(\.rawValue)
+        )
+
+        settings.moveMenuBarDashboardModule("cpu", to: "disk")
+        settings.removeMenuBarDashboardModule(.network)
+        XCTAssertEqual(settings.menuBarDashboardModuleIDs, ["memory", "disk", "cpu", "graphics", "battery"])
+
+        settings.restoreMenuBarDashboardModule(.network)
+        let reloaded = SettingsManager(defaults: defaults)
+        XCTAssertEqual(reloaded.menuBarDashboardModuleIDs, ["memory", "disk", "cpu", "graphics", "battery", "network"])
+    }
+
+    func testMenuBarDashboardDirectDragOrderPersistsAndRejectsInvalidSets() throws {
+        let suiteName = "MacCleanerMenuBarDirectDragTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let settings = SettingsManager(defaults: defaults)
+        let order: [MenuBarDashboardModule] = [.battery, .cpu, .memory, .disk, .network, .graphics]
+        settings.setMenuBarDashboardModuleOrder(order)
+        XCTAssertEqual(settings.menuBarDashboardModuleIDs, order.map(\.rawValue))
+
+        settings.setMenuBarDashboardModuleOrder([.cpu, .memory])
+        XCTAssertEqual(settings.menuBarDashboardModuleIDs, order.map(\.rawValue))
+        XCTAssertEqual(SettingsManager(defaults: defaults).menuBarDashboardModuleIDs, order.map(\.rawValue))
+    }
+
     @MainActor
     func testPasteboardPayloadPreservesEveryRepresentation() throws {
         let source = NSPasteboard(name: NSPasteboard.Name("MacCleanerTests.source.\(UUID().uuidString)"))

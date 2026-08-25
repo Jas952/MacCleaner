@@ -132,6 +132,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        FanControlXPCClient.shared.setAllAutomatic { _, _ in }
         MaintenanceService.shared.exitAll()
     }
 }
@@ -206,12 +207,17 @@ private struct LegacyStatusBarSceneBridge: View {
     }
 }
 
+private final class StatusBarPassthroughHostingView<Content: View>: NSHostingView<Content> {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
 @MainActor
 final class StatusBarController: NSObject, NSPopoverDelegate {
     private let monitor: SystemMonitor
     private let settings = SettingsManager.shared
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let popover = NSPopover()
+    private var labelHost: StatusBarPassthroughHostingView<MenuBarLabel>?
     private var cancellables: Set<AnyCancellable> = []
     private var outsideClickMonitor: Any?
     private var openMain: () -> Void
@@ -257,6 +263,11 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
         guard let button = statusItem.button else { return }
         button.image = applicationStatusIcon()
         button.imagePosition = .imageOnly
+        button.title = ""
+        let host = StatusBarPassthroughHostingView(rootView: MenuBarLabel(monitor: monitor))
+        host.isHidden = true
+        button.addSubview(host)
+        labelHost = host
         button.target = self
         button.action = #selector(togglePopover)
         button.sendAction(on: [.leftMouseUp])
@@ -266,15 +277,22 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
         popover.delegate = self
         popover.behavior = .transient
         popover.animates = true
-        popover.contentSize = NSSize(width: 420, height: 430)
+        popover.contentSize = NSSize(width: 430, height: 620)
         popover.contentViewController = NSHostingController(
             rootView: MenuBarPopover(
                 monitor: monitor,
                 openMain: openMain,
                 openShelf: openShelf,
-                openSettings: openSettings
+                openSettings: openSettings,
+                openAbout: {
+                    NSApp.activate(ignoringOtherApps: true)
+                    NSApp.orderFrontStandardAboutPanel(nil)
+                },
+                quit: {
+                    NSApp.terminate(nil)
+                }
             )
-            .frame(width: 420)
+            .frame(width: 430, height: 620)
         )
     }
 
@@ -304,15 +322,10 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
             .store(in: &cancellables)
 
         monitor.objectWillChange
-            .debounce(for: .milliseconds(200), scheduler: RunLoop.main)
+            .throttle(for: .seconds(1), scheduler: RunLoop.main, latest: true)
             .sink { [weak self] _ in
                 DispatchQueue.main.async { self?.updateStatusItem() }
             }
-            .store(in: &cancellables)
-
-        NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
-            .receive(on: RunLoop.main)
-            .sink { [weak self] _ in self?.updateStatusItem() }
             .store(in: &cancellables)
     }
 
@@ -321,80 +334,40 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
         if popover.isShown {
             popover.performClose(nil)
         } else {
-            configurePopover()
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         }
     }
 
     private func updateStatusItem() {
-        guard let button = statusItem.button else { return }
-        let title = NSMutableAttributedString()
-        var accessibilityParts: [String] = []
+        guard let button = statusItem.button, let labelHost else { return }
         let gauges = settings.menuBarGaugeIDs.compactMap(MenuBarGauge.init(rawValue:))
+        let accessibilityParts = gauges.map { gauge in
+            "\(gauge.title) \(reading(for: gauge).value)"
+        }
 
         if gauges.isEmpty {
+            labelHost.isHidden = true
             button.image = applicationStatusIcon()
             button.imagePosition = .imageOnly
+            button.attributedTitle = NSAttributedString()
+            statusItem.length = 26
         } else {
             button.image = nil
             button.imagePosition = .noImage
+            button.attributedTitle = NSAttributedString()
+            labelHost.rootView = MenuBarLabel(monitor: monitor)
+            labelHost.isHidden = false
+            let fittingSize = labelHost.fittingSize
+            statusItem.length = max(30, fittingSize.width + 8)
+            labelHost.frame = NSRect(
+                x: 4,
+                y: max(0, (button.bounds.height - fittingSize.height) / 2),
+                width: fittingSize.width,
+                height: min(button.bounds.height, fittingSize.height)
+            )
         }
 
-        for (index, gauge) in gauges.enumerated() {
-            let reading = reading(for: gauge)
-            let format = settings.valueFormat(for: gauge)
-            let displayStyle = settings.displayStyle(for: gauge)
-            if index > 0 {
-                title.append(NSAttributedString(
-                    string: "   │   ",
-                    attributes: [
-                        .foregroundColor: NSColor.separatorColor,
-                        .font: NSFont.systemFont(ofSize: 11, weight: .regular),
-                        .baselineOffset: 1
-                    ]
-                ))
-            }
-            title.append(NSAttributedString(
-                string: "\(gauge.shortTitle) ",
-                attributes: [
-                    .foregroundColor: NSColor.labelColor,
-                    .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
-                    .baselineOffset: 1
-                ]
-            ))
-
-            switch displayStyle {
-            case .battery:
-                title.append(imageAttachment(
-                    batteryIndicatorImage(progress: reading.progress, color: reading.color),
-                    baselineOffset: -3
-                ))
-                if gauge == .temperature {
-                    title.append(NSAttributedString(string: " "))
-                    title.append(symbolAttachment(named: "thermometer.medium", accessibilityDescription: "Temperature"))
-                }
-                title.append(NSAttributedString(string: " "))
-                appendFormatMarker(
-                    gauge.formatMarker(for: format),
-                    color: reading.color,
-                    to: title
-                )
-            case .value:
-                title.append(NSAttributedString(
-                    string: reading.value,
-                    attributes: [
-                        .foregroundColor: reading.color,
-                        .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .semibold),
-                        .baselineOffset: 1
-                    ]
-                ))
-            }
-            accessibilityParts.append("\(gauge.title) \(reading.value)")
-        }
-
-        button.attributedTitle = title
         button.setAccessibilityLabel(accessibilityParts.isEmpty ? "MacCleaner" : accessibilityParts.joined(separator: ", "))
-        statusItem.length = max(26, button.intrinsicContentSize.width + 6)
     }
 
     private func reading(for gauge: MenuBarGauge) -> (value: String, progress: Double, color: NSColor) {
@@ -456,79 +429,6 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
         return image
     }
 
-    private func symbolAttachment(
-        named name: String,
-        accessibilityDescription: String
-    ) -> NSAttributedString {
-        let configuration = NSImage.SymbolConfiguration(pointSize: 9, weight: .semibold)
-        guard let image = NSImage(systemSymbolName: name, accessibilityDescription: accessibilityDescription)?
-            .withSymbolConfiguration(configuration)
-        else { return NSAttributedString() }
-        image.isTemplate = true
-        return imageAttachment(image, baselineOffset: -1)
-    }
-
-    private func imageAttachment(_ image: NSImage, baselineOffset: CGFloat = 0) -> NSAttributedString {
-        let attachment = NSTextAttachment()
-        attachment.image = image
-        attachment.bounds = NSRect(
-            x: 0,
-            y: baselineOffset,
-            width: image.size.width,
-            height: image.size.height
-        )
-        return NSAttributedString(attachment: attachment)
-    }
-
-    private func appendFormatMarker(
-        _ marker: MenuBarGaugeFormatMarker,
-        color: NSColor,
-        to title: NSMutableAttributedString
-    ) {
-        switch marker {
-        case .text(let value):
-            title.append(NSAttributedString(
-                string: value,
-                attributes: [
-                    .foregroundColor: color,
-                    .font: NSFont.systemFont(ofSize: 8, weight: .semibold),
-                    .baselineOffset: 1
-                ]
-            ))
-        case .symbol(let name):
-            title.append(symbolAttachment(
-                named: name,
-                accessibilityDescription: "Time remaining"
-            ))
-        }
-    }
-
-    private func batteryIndicatorImage(progress: Double, color: NSColor) -> NSImage {
-        let clampedProgress = min(max(progress, 0), 1)
-        let size = NSSize(width: 10, height: 16)
-        let image = NSImage(size: size, flipped: false) { _ in
-            let bodyRect = NSRect(x: 1.25, y: 0.5, width: 7.5, height: 13)
-            let outline = NSBezierPath(roundedRect: bodyRect, xRadius: 2, yRadius: 2)
-            outline.lineWidth = 1
-            NSColor.labelColor.withAlphaComponent(0.72).setStroke()
-            outline.stroke()
-
-            let terminal = NSBezierPath(roundedRect: NSRect(x: 3.25, y: 14, width: 3.5, height: 1.5), xRadius: 0.7, yRadius: 0.7)
-            NSColor.labelColor.withAlphaComponent(0.72).setFill()
-            terminal.fill()
-
-            if clampedProgress > 0 {
-                let fillHeight = max(1.5, 10 * clampedProgress)
-                let fill = NSBezierPath(roundedRect: NSRect(x: 2.75, y: 2, width: 4.5, height: fillHeight), xRadius: 1, yRadius: 1)
-                color.setFill()
-                fill.fill()
-            }
-            return true
-        }
-        image.isTemplate = false
-        return image
-    }
-
     private func loadColor(_ value: Double) -> NSColor {
         if value > 0.85 { return .systemRed }
         if value > 0.65 { return .systemOrange }
@@ -583,9 +483,28 @@ private enum MaintenanceRuntimeSelfTest {
 
 // MARK: - Menu Bar Label
 
+private final class MenuBarRefreshDriver: ObservableObject {
+    let objectWillChange = ObservableObjectPublisher()
+    private var cancellable: AnyCancellable?
+
+    init(monitor: SystemMonitor) {
+        cancellable = monitor.objectWillChange
+            .debounce(for: .milliseconds(120), scheduler: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.objectWillChange.send()
+            }
+    }
+}
+
 struct MenuBarLabel: View {
-    @ObservedObject var monitor: SystemMonitor
+    let monitor: SystemMonitor
     @ObservedObject var settings = SettingsManager.shared
+    @StateObject private var refreshDriver: MenuBarRefreshDriver
+
+    init(monitor: SystemMonitor) {
+        self.monitor = monitor
+        _refreshDriver = StateObject(wrappedValue: MenuBarRefreshDriver(monitor: monitor))
+    }
 
     private var keyTemp: Double {
         monitor.thermal.socTemp > 0 ? monitor.thermal.socTemp : monitor.thermal.cpuTemp
@@ -611,54 +530,61 @@ struct MenuBarLabel: View {
         color(for: severity(forTemperature: keyTemp))
     }
 
+    private var gaugeColumns: [[MenuBarGauge]] {
+        let gauges = settings.menuBarGaugeIDs.compactMap(MenuBarGauge.init(rawValue:))
+        return stride(from: 0, to: gauges.count, by: 2).map { start in
+            Array(gauges[start..<min(start + 2, gauges.count)])
+        }
+    }
+
     var body: some View {
-        HStack(spacing: 7) {
+        HStack(spacing: 6) {
             if settings.menuBarGaugeIDs.isEmpty {
-                Image(systemName: "bolt.circle.fill")
-                    .symbolRenderingMode(.hierarchical)
+                Image(nsImage: NSApp.applicationIconImage)
+                    .resizable()
+                    .frame(width: 17, height: 17)
             }
-            ForEach(Array(settings.menuBarGaugeIDs.enumerated()), id: \.element) { index, rawValue in
-                if let gauge = MenuBarGauge(rawValue: rawValue) {
-                    if index > 0 {
-                        Divider()
-                            .frame(height: 14)
-                            .opacity(0.55)
+            ForEach(Array(gaugeColumns.enumerated()), id: \.offset) { _, column in
+                VStack(alignment: .leading, spacing: -1) {
+                    ForEach(column) { gauge in
+                        gaugeView(gauge)
                     }
-                    gaugeView(gauge)
                 }
+                .frame(height: 20, alignment: .center)
             }
         }
-            .font(.system(size: 12, weight: .semibold, design: .rounded))
-            .monospacedDigit()
-            .lineLimit(1)
-            .fixedSize(horizontal: true, vertical: false)
-            .help(accessibilitySummary)
-            .accessibilityLabel(accessibilitySummary)
+        .fixedSize(horizontal: true, vertical: true)
+        .help(accessibilitySummary)
+        .accessibilityLabel(accessibilitySummary)
     }
 
     @ViewBuilder
     private func gaugeView(_ gauge: MenuBarGauge) -> some View {
         let data = gaugeData(gauge)
-        HStack(alignment: .center, spacing: 2) {
+        HStack(alignment: .center, spacing: 1.5) {
             Text(gauge.shortTitle)
-                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .font(.system(size: 8.5, weight: .semibold, design: .rounded))
                 .foregroundStyle(.primary)
             if settings.displayStyle(for: gauge) == .battery {
                 MenuBarBatteryIndicator(progress: data.progress, color: data.color)
+                    .scaleEffect(0.62)
+                    .frame(width: 7, height: 9)
                 if gauge == .temperature {
                     Image(systemName: "thermometer.medium")
-                        .font(.system(size: 9, weight: .semibold))
+                        .font(.system(size: 7, weight: .semibold))
                         .foregroundStyle(.primary)
                 }
                 MenuBarFormatMarker(marker: gauge.formatMarker(for: settings.valueFormat(for: gauge)))
+                    .scaleEffect(0.78)
+                    .frame(width: 6, height: 9)
             } else {
                 Text(data.value)
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .font(.system(size: 8.5, weight: .semibold, design: .monospaced))
                     .monospacedDigit()
                     .foregroundStyle(data.color)
             }
         }
-        .frame(height: 18, alignment: .center)
+        .frame(height: 10, alignment: .center)
         .fixedSize()
         .help("\(gauge.title): \(data.value)")
     }
@@ -877,82 +803,357 @@ private struct MenuBarBatteryIndicator: View {
 // MARK: - Menu Bar Popover
 
 struct MenuBarPopover: View {
-    @ObservedObject var monitor: SystemMonitor
+    let monitor: SystemMonitor
     @ObservedObject private var settings = SettingsManager.shared
-    @State private var selectedTab: PopoverTab = .overview
+    @StateObject private var refreshDriver: MenuBarRefreshDriver
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var selectedTab: MenuBarPopoverTab = .system
+    @State private var isEditing = false
+    @State private var dragSession: MenuBarCardDragSession?
+    @State private var dragOrder: [MenuBarDashboardModule]?
+    @State private var cardFrames: [MenuBarDashboardModule: CGRect] = [:]
+
     let openMain: () -> Void
     let openShelf: () -> Void
     let openSettings: () -> Void
+    let openAbout: () -> Void
+    let quit: () -> Void
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            header
-
-            tabContent
-                .frame(height: 378, alignment: .top)
-        }
-        .padding(12)
-        .background(.regularMaterial)
-        .animation(.easeInOut(duration: 0.16), value: selectedTab)
+    init(
+        monitor: SystemMonitor,
+        openMain: @escaping () -> Void,
+        openShelf: @escaping () -> Void,
+        openSettings: @escaping () -> Void,
+        openAbout: @escaping () -> Void,
+        quit: @escaping () -> Void
+    ) {
+        self.monitor = monitor
+        self.openMain = openMain
+        self.openShelf = openShelf
+        self.openSettings = openSettings
+        self.openAbout = openAbout
+        self.quit = quit
+        _refreshDriver = StateObject(wrappedValue: MenuBarRefreshDriver(monitor: monitor))
     }
 
-    @ViewBuilder
-    private var tabContent: some View {
-        switch selectedTab {
-        case .overview:
-            overviewTab
-        case .details:
-            detailsTab
-        case .tools:
-            toolsTab
+    private var visibleModules: [MenuBarDashboardModule] {
+        settings.menuBarDashboardModuleIDs.compactMap(MenuBarDashboardModule.init(rawValue:))
+    }
+
+    private var hiddenModules: [MenuBarDashboardModule] {
+        MenuBarDashboardModule.allCases.filter { !settings.menuBarDashboardModuleIDs.contains($0.rawValue) }
+    }
+
+    private var displayedModules: [MenuBarDashboardModule] {
+        dragOrder ?? visibleModules
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            header
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .background(.ultraThinMaterial)
+
+            Group {
+                switch selectedTab {
+                case .system:
+                    systemTab
+                case .tools:
+                    toolsTab
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+
+            footer
+                .padding(.horizontal, 12)
+                .padding(.vertical, 5)
+                .background(.ultraThinMaterial)
         }
+        .background(.regularMaterial)
+        .animation(.easeInOut(duration: 0.18), value: selectedTab)
+        .onChange(of: isEditing) { editing in
+            if !editing { finishCardDrag() }
+        }
+    }
+
+    private var header: some View {
+        HStack(spacing: 8) {
+            Button(action: openMain) {
+                Image(nsImage: NSApp.applicationIconImage)
+                    .resizable()
+                    .interpolation(.high)
+                    .frame(width: 22, height: 22)
+                    .frame(width: 32, height: 32)
+                    .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .menuBarHoverChrome()
+            .help("Open MacCleaner")
+            .accessibilityLabel("Open MacCleaner")
+
+            HStack(spacing: 4) {
+                ForEach(MenuBarPopoverTab.allCases) { tab in
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.16)) {
+                            selectedTab = tab
+                            if tab != .system { isEditing = false }
+                        }
+                    } label: {
+                        Image(systemName: tab.icon)
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(selectedTab == tab ? Color.accentBlue : Color.secondary)
+                            .frame(width: 32, height: 32)
+                            .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .menuBarHoverChrome(isSelected: selectedTab == tab)
+                    .help(tab.title)
+                    .accessibilityLabel(tab.title)
+                }
+            }
+
+            Spacer(minLength: 6)
+
+            if selectedTab == .system {
+                Button {
+                    isEditing.toggle()
+                } label: {
+                    Image(systemName: isEditing ? "checkmark" : "pencil")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(isEditing ? Color.accentBlue : Color.secondary)
+                        .frame(width: 32, height: 32)
+                        .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .menuBarHoverChrome(isSelected: isEditing)
+                .help(isEditing ? "Finish editing dashboard cards" : "Reorder or remove dashboard cards")
+            }
+        }
+    }
+
+    private var systemTab: some View {
+        ZStack {
+            MenuBarSystemBackdrop()
+
+            ScrollView(showsIndicators: false) {
+                LazyVStack(spacing: 12) {
+                    ForEach(Array(displayedModules.enumerated()), id: \.element.id) { index, module in
+                        MenuBarDashboardCard(
+                            module: module,
+                            index: index,
+                            isEditing: isEditing,
+                            isDragging: dragSession?.module == module,
+                            reduceMotion: reduceMotion,
+                            dragChanged: { value in
+                                updateCardDrag(module: module, value: value)
+                            },
+                            dragEnded: finishCardDrag,
+                            remove: {
+                                withAnimation(.easeInOut(duration: 0.18)) {
+                                    settings.removeMenuBarDashboardModule(module)
+                                }
+                            },
+                            content: {
+                                dashboardCard(for: module)
+                            }
+                        )
+                        .background {
+                            GeometryReader { geometry in
+                                Color.clear.preference(
+                                    key: MenuBarCardFramePreferenceKey.self,
+                                    value: [module: geometry.frame(in: .named("menuBarCards"))]
+                                )
+                            }
+                        }
+                    }
+
+                    if visibleModules.isEmpty && !isEditing {
+                        VStack(spacing: 8) {
+                            Image(systemName: "rectangle.stack.badge.plus")
+                                .font(.system(size: 24, weight: .light))
+                                .foregroundStyle(.secondary)
+                            Text("No system cards")
+                                .font(.system(size: 13, weight: .semibold))
+                            Text("Choose Edit to restore a card.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 180)
+                    }
+
+                    if isEditing {
+                        restoreMenu
+                            .transition(.opacity.combined(with: .move(edge: .bottom)))
+                    }
+                }
+                .padding(12)
+            }
+            .mask {
+                LinearGradient(
+                    stops: [
+                        .init(color: .clear, location: 0),
+                        .init(color: .black, location: 0.022),
+                        .init(color: .black, location: 0.978),
+                        .init(color: .clear, location: 1)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            }
+
+            if let dragSession {
+                dashboardCard(for: dragSession.module)
+                    .frame(width: dragSession.frame.width, height: dragSession.frame.height)
+                    .scaleEffect(1.018)
+                    .shadow(color: .black.opacity(0.20), radius: 22, y: 12)
+                    .position(
+                        x: dragSession.frame.midX,
+                        y: dragSession.pointerY - dragSession.grabOffsetY + dragSession.frame.height / 2
+                    )
+                    .allowsHitTesting(false)
+                    .transition(.identity)
+                    .zIndex(10)
+            }
+        }
+        .coordinateSpace(name: "menuBarCards")
+        .onPreferenceChange(MenuBarCardFramePreferenceKey.self) { cardFrames = $0 }
+    }
+
+    private var restoreMenu: some View {
+        Menu {
+            if hiddenModules.isEmpty {
+                Text("All cards are visible")
+            } else {
+                ForEach(hiddenModules) { module in
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.18)) {
+                            settings.restoreMenuBarDashboardModule(module)
+                        }
+                    } label: {
+                        Label(module.title, systemImage: module.icon)
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: hiddenModules.isEmpty ? "checkmark.circle" : "plus.circle")
+                Text(hiddenModules.isEmpty ? "All cards are visible" : "Add a removed card")
+                Spacer()
+            }
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 12)
+            .frame(height: 44)
+            .frame(maxWidth: .infinity)
+            .background(Color(nsColor: .controlBackgroundColor).opacity(0.35), in: RoundedRectangle(cornerRadius: 11))
+            .overlay {
+                RoundedRectangle(cornerRadius: 11)
+                    .stroke(Color.secondary.opacity(0.32), style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
+            }
+        }
+        .menuStyle(.borderlessButton)
+        .disabled(hiddenModules.isEmpty)
+        .help("Restore a hidden dashboard card")
     }
 
     private var toolsTab: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Quick Tools").font(.headline)
+        ScrollView(showsIndicators: false) {
+            LazyVStack(spacing: 8) {
                 ForEach(UtilityToolID.configurableCases.filter { settings.isEnabled($0) && settings.isInMenuBar($0) }) { tool in
-                    Button { runQuickTool(tool) } label: {
-                        HStack(spacing: 10) {
-                            Image(systemName: tool.icon).foregroundStyle(Color.accentBlue).frame(width: 22)
-                            VStack(alignment: .leading, spacing: 1) { Text(tool.title).fontWeight(.medium); Text(tool.subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
-                            Spacer()
-                            Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
-                        }
-                        .padding(10).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 9))
-                    }.buttonStyle(.plain)
+                    quickToolButton(tool)
                 }
+
                 if settings.clipboardHistoryInMenuBar {
                     Button { ClipboardHistoryPanelController.shared.show() } label: {
-                        HStack(spacing: 10) {
-                            Image(systemName: "doc.on.clipboard").foregroundStyle(Color.accentBlue).frame(width: 22)
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text("Clipboard History").fontWeight(.medium)
-                                Text("Reuse recent text, images and files · ⌥C").font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                            }
-                            Spacer()
-                            Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
-                        }
-                        .padding(10).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 9))
-                    }.buttonStyle(.plain)
+                        quickToolLabel(
+                            icon: "doc.on.clipboard",
+                            title: "Clipboard History",
+                            subtitle: "Recent text, images and files · ⌥C"
+                        )
+                    }
+                    .buttonStyle(.plain)
                 }
+
                 if settings.menuBarToolIDs.isEmpty && !settings.clipboardHistoryInMenuBar {
                     VStack(spacing: 8) {
-                        Image(systemName: "menubar.rectangle").font(.title).foregroundStyle(.secondary)
-                        Text("No Quick Tools").font(.headline)
-                        Text("Choose tools in Settings.").font(.caption).foregroundStyle(.secondary)
-                    }.frame(maxWidth: .infinity).frame(height: 220)
-                }
-                Spacer(minLength: 4)
-                HStack {
-                    Button("Open MacCleaner") {
-                        openMain()
+                        Image(systemName: "wrench.and.screwdriver")
+                            .font(.system(size: 24, weight: .light))
+                            .foregroundStyle(.secondary)
+                        Text("No quick tools")
+                            .font(.system(size: 13, weight: .semibold))
+                        Text("Choose them in Settings.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
-                    Spacer()
-                    Button("Settings…", action: openSettings)
+                    .frame(maxWidth: .infinity, minHeight: 240)
                 }
             }
+            .padding(12)
+        }
+    }
+
+    private func quickToolButton(_ tool: UtilityToolID) -> some View {
+        Button { runQuickTool(tool) } label: {
+            quickToolLabel(icon: tool.icon, title: tool.title, subtitle: tool.subtitle)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func quickToolLabel(icon: String, title: String, subtitle: String) -> some View {
+        HStack(spacing: 11) {
+            Image(systemName: icon)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(Color.accentBlue)
+                .frame(width: 26, height: 26)
+                .background(Color.accentBlue.opacity(0.10), in: RoundedRectangle(cornerRadius: 7))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.system(size: 12, weight: .semibold))
+                Text(subtitle).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
+            }
+            Spacer()
+            Image(systemName: "chevron.right")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(.tertiary)
+        }
+        .padding(10)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.68), in: RoundedRectangle(cornerRadius: 11))
+        .contentShape(RoundedRectangle(cornerRadius: 11))
+    }
+
+    private var footer: some View {
+        HStack {
+            Button(action: openSettings) {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 14, weight: .medium))
+                    .frame(width: 32, height: 32)
+                    .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .menuBarHoverChrome()
+            .foregroundStyle(.secondary)
+            .help("Settings")
+            .accessibilityLabel("Open Settings")
+
+            Spacer()
+
+            Button {
+                MenuBarOverflowMenuController.shared.show(
+                    openMain: openMain,
+                    openAbout: openAbout,
+                    quit: quit
+                )
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 14, weight: .semibold))
+                    .frame(width: 32, height: 32)
+                    .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .menuBarHoverChrome()
+            .foregroundStyle(.secondary)
+            .help("More")
+            .accessibilityLabel("More MacCleaner actions")
         }
     }
 
@@ -964,773 +1165,417 @@ struct MenuBarPopover: View {
         }
     }
 
-    private var overviewTab: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            PopoverHealthCard(
-                score: healthScore,
-                title: healthTitle,
-                subtitle: healthSubtitle,
-                color: healthColor
+    private func updateCardDrag(module: MenuBarDashboardModule, value: DragGesture.Value) {
+        guard isEditing else { return }
+
+        if dragSession == nil {
+            guard let frame = cardFrames[module] else { return }
+            dragOrder = visibleModules
+            dragSession = MenuBarCardDragSession(
+                module: module,
+                frame: frame,
+                grabOffsetY: min(max(value.startLocation.y - frame.minY, 0), frame.height),
+                pointerY: value.location.y
             )
+        } else {
+            dragSession?.pointerY = value.location.y
+        }
 
-            HStack(spacing: 8) {
-                PopoverMetricTile(
-                    icon: "cpu",
-                    label: "CPU Load",
-                    value: String(format: "%.0f%%", monitor.cpu.totalUsage * 100),
-                    subtitle: "\(monitor.cpu.processorCount) cores",
-                    color: loadColor(monitor.cpu.totalUsage),
-                    progress: monitor.cpu.totalUsage,
-                    history: monitor.cpuHistory
-                )
+        guard let dragSession, let currentOrder = dragOrder else { return }
+        var remaining = currentOrder.filter { $0 != module }
+        let insertionIndex = remaining.firstIndex { candidate in
+            guard let frame = cardFrames[candidate] else { return false }
+            return dragSession.pointerY < frame.midY
+        } ?? remaining.endIndex
+        remaining.insert(module, at: insertionIndex)
 
-                PopoverMetricTile(
-                    icon: "memorychip",
-                    label: "Memory",
-                    value: String(format: "%.0f%%", monitor.memory.usedPercent * 100),
-                    subtitle: "\(MemoryInfo.formatted(monitor.memory.used)) used",
-                    color: loadColor(monitor.memory.usedPercent),
-                    progress: monitor.memory.usedPercent,
-                    history: monitor.ramHistory
-                )
-            }
-
-            PopoverBatteryStatusCard(battery: monitor.battery)
+        guard remaining != currentOrder else { return }
+        withAnimation(.interactiveSpring(response: 0.30, dampingFraction: 0.84, blendDuration: 0.08)) {
+            dragOrder = remaining
         }
     }
 
-    private var detailsTab: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            HStack(spacing: 8) {
-                if let disk = rootDisk {
-                    PopoverInfoCard(
-                        icon: "internaldrive",
-                        label: "Storage",
-                        value: DiskInfo.formatted(disk.free),
-                        detail: "free on \(disk.volumeName)",
-                        color: loadColor(disk.usedPercent),
-                        progress: disk.usedPercent
-                    )
-                    .frame(width: 166)
-                    .frame(maxHeight: .infinity)
-                }
+    private func finishCardDrag() {
+        guard var session = dragSession else {
+            dragOrder = nil
+            return
+        }
+        guard !session.isSettling else { return }
 
-                PopoverNetworkView(monitor: monitor)
-                    .frame(maxWidth: .infinity)
-                    .frame(maxHeight: .infinity)
+        if let dragOrder {
+            settings.setMenuBarDashboardModuleOrder(dragOrder)
+        }
+
+        session.isSettling = true
+        let sessionID = session.id
+        let targetFrame = cardFrames[session.module] ?? session.frame
+        withAnimation(.interactiveSpring(response: 0.28, dampingFraction: 0.90, blendDuration: 0.08)) {
+            session.pointerY = targetFrame.minY + session.grabOffsetY
+            dragSession = session
+        }
+
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 240_000_000)
+            guard dragSession?.id == sessionID else { return }
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                dragSession = nil
+                dragOrder = nil
             }
-            .frame(height: 120)
-
-            PopoverTemperatureView(monitor: monitor)
-                .frame(height: 86)
-
-            PopoverTopProcessesView(monitor: monitor)
-                .frame(height: 154)
         }
     }
 
-    private var header: some View {
-        HStack(spacing: 8) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(Color.accentBlue.opacity(0.12))
-                    .frame(width: 34, height: 34)
-                Image(systemName: "waveform.path.ecg")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(Color.accentBlue)
+    @ViewBuilder
+    private func dashboardCard(for module: MenuBarDashboardModule) -> some View {
+        switch module {
+        case .cpu:
+            DashboardMetricCard(
+                icon: "cpu",
+                label: "CPU",
+                value: String(format: "%.1f%%", monitor.cpu.totalUsage * 100),
+                subtitle: "Load \(cpuLoadValue) / \(monitor.cpu.processorCount) cores · \(cpuLoadLabel.lowercased())",
+                badge: temperatureBadge(monitor.thermal.cpuTemp),
+                progress: monitor.cpu.totalUsage,
+                color: cpuColor,
+                details: [
+                    ("Load", cpuLoadValue),
+                    ("History", "\(Int((monitor.cpuHistory.last ?? 0) * 100))%")
+                ],
+                history: [],
+                coreUsages: monitor.cpu.coreUsages
+            )
+        case .memory:
+            MemoryDashboardCard(memory: monitor.memory, color: ramColor)
+        case .disk:
+            if let disk = rootDisk {
+                DashboardMetricCard(
+                    icon: "internaldrive",
+                    label: "Disk",
+                    value: DiskInfo.formatted(disk.free),
+                    subtitle: "free on \(disk.volumeName)",
+                    badge: String(format: "%.0f%% used", disk.usedPercent * 100),
+                    progress: disk.usedPercent,
+                    color: diskColor(disk.usedPercent),
+                    details: [
+                        ("Used", DiskInfo.formatted(disk.used)),
+                        ("Total", DiskInfo.formatted(disk.total))
+                    ],
+                    history: []
+                )
+            } else {
+                DashboardMetricCard(
+                    icon: "internaldrive",
+                    label: "Disk",
+                    value: "—",
+                    subtitle: "No current reading",
+                    badge: "Unavailable",
+                    progress: 0,
+                    color: .accentRed,
+                    details: [],
+                    history: []
+                )
             }
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text("MacCleaner Monitor")
-                    .font(.system(size: 13, weight: .semibold))
-.foregroundStyle(Color.primary)
-                Text("Live device telemetry")
-                    .font(.system(size: 10))
-                    .foregroundStyle(Color.secondary.opacity(0.72))
-            }
-
-            Spacer(minLength: 12)
-
-            Picker("Section", selection: $selectedTab) {
-                ForEach(PopoverTab.allCases) { tab in
-                    Text(tab.title).tag(tab)
-                }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(width: 188)
-
-            Spacer(minLength: 12)
-
-            Text(healthTitle)
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(healthColor)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(RoundedRectangle(cornerRadius: 5, style: .continuous).fill(healthColor.opacity(0.10)))
+        case .network:
+            let history = normalizedNetworkHistory
+            DashboardMetricCard(
+                icon: "network",
+                label: "Network",
+                value: NetworkInfo.formattedRate(monitor.network.downloadBytesPerSecond),
+                subtitle: "↓ \(NetworkInfo.formattedRate(monitor.network.downloadBytesPerSecond)) · ↑ \(NetworkInfo.formattedRate(monitor.network.uploadBytesPerSecond))",
+                badge: monitor.network.interfaceName,
+                progress: min(max(monitor.network.downloadBytesPerSecond, monitor.network.uploadBytesPerSecond) / 1_048_576, 1),
+                color: .accentBlue,
+                details: [
+                    ("IP \(countryFlag)", monitor.network.address),
+                    ("State", monitor.network.isActive ? "Active" : "Idle")
+                ],
+                history: history.map(\.down),
+                historySecondary: history.map(\.up)
+            )
+        case .graphics:
+            DashboardMetricCard(
+                icon: "display",
+                label: "GPU",
+                value: String(format: "%.0f%%", monitor.gpuUsage * 100),
+                subtitle: "\(gpuLoadLabel) · \(gpuCoresLabel)",
+                badge: temperatureBadge(gpuTemperature),
+                progress: monitor.gpuUsage,
+                color: .accentAmber,
+                details: [
+                    ("Chip", HardwareInfo.chipName),
+                    ("Display", HardwareInfo.displayInfo)
+                ],
+                history: monitor.gpuHistory
+            )
+        case .battery:
+            BatteryDashboardCard(battery: monitor.battery)
         }
-        .padding(.bottom, 2)
     }
 
     private var rootDisk: DiskInfo? {
         monitor.disks.first(where: { $0.mountPoint == "/" }) ?? monitor.disks.first
     }
 
-    private var keyTemp: Double {
-        monitor.thermal.socTemp > 0 ? monitor.thermal.socTemp : monitor.thermal.cpuTemp
+    private var normalizedNetworkHistory: [(down: Double, up: Double)] {
+        let maximum = max(
+            monitor.networkHistory.map(\.down).max() ?? 0,
+            monitor.networkHistory.map(\.up).max() ?? 0,
+            1
+        )
+        return monitor.networkHistory.map { (min($0.down / maximum, 1), min($0.up / maximum, 1)) }
     }
 
-    private var healthScore: Double {
-        var score = 100.0
-        score -= monitor.cpu.totalUsage * 18
-        score -= monitor.memory.usedPercent * 22
-        if keyTemp > 0 { score -= max(0, keyTemp - 55) * 0.72 }
-        if let disk = rootDisk { score -= max(0, disk.usedPercent - 0.72) * 42 }
-        if monitor.battery.healthPercent > 0 { score -= max(0, 90 - monitor.battery.healthPercent) * 0.45 }
-        return max(0, min(100, score))
+    private var ramColor: Color {
+        monitor.memory.usedPercent > 0.85 ? .accentRed
+            : monitor.memory.usedPercent > 0.65 ? .accentAmber : .accentBlue
     }
 
-    private var healthTitle: String {
-        if healthScore > 78 { return "Healthy" }
-        if healthScore > 58 { return "Watch" }
-        return "Stressed"
+    private var cpuColor: Color {
+        monitor.cpu.totalUsage > 0.85 ? .accentRed
+            : monitor.cpu.totalUsage > 0.65 ? .accentAmber : .accentBlue
     }
 
-    private var healthSubtitle: String {
-        if keyTemp > 78 { return "Thermals are the primary pressure point right now." }
-        if monitor.memory.usedPercent > 0.82 { return "Memory pressure is elevated; keep an eye on active apps." }
-        if monitor.cpu.totalUsage > 0.72 { return "CPU activity is high, but the device is still responsive." }
-        return "System load, memory, and thermal signals look balanced."
+    private var cpuLoadLabel: String {
+        monitor.cpu.totalUsage > 0.65 ? "Busy" : monitor.cpu.totalUsage > 0.2 ? "Active" : "Idle"
     }
 
-    private var healthColor: Color {
-        if healthScore > 78 { return .accentGreen }
-        if healthScore > 58 { return .accentAmber }
-        return .accentRed
+    private var cpuLoadValue: String {
+        String(format: "%.2f", monitor.cpu.totalUsage * Double(max(1, monitor.cpu.processorCount)))
     }
 
-    private func loadColor(_ value: Double) -> Color {
-        if value > 0.85 { return .accentRed }
-        if value > 0.66 { return .accentAmber }
+    private var gpuTemperature: Double {
+        monitor.thermal.gpuTemp > 0 ? monitor.thermal.gpuTemp : monitor.thermal.socTemp
+    }
+
+    private var gpuLoadLabel: String {
+        monitor.gpuUsage > 0.7 ? "heavy" : monitor.gpuUsage > 0.3 ? "moderate" : "idle"
+    }
+
+    private var gpuCoresLabel: String {
+        let cores = HardwareInfo.gpuCoreCount
+        return cores > 0 ? "\(cores) GPU cores" : "Apple GPU"
+    }
+
+    private func temperatureBadge(_ value: Double) -> String {
+        value > 0 ? String(format: "%.0f°C", value) : "Live"
+    }
+
+    private func diskColor(_ value: Double) -> Color {
+        if value > 0.90 { return .accentRed }
+        if value > 0.75 { return .accentAmber }
         return .accentGreen
+    }
+
+    private var countryFlag: String {
+        let regionCode = Locale.current.region?.identifier ?? "US"
+        let base = UnicodeScalar("🇦").value
+        var scalars = String.UnicodeScalarView()
+        for scalar in regionCode.uppercased().unicodeScalars.prefix(2) {
+            guard let flagScalar = UnicodeScalar(base + scalar.value - UnicodeScalar("A").value) else { continue }
+            scalars.append(flagScalar)
+        }
+        return scalars.isEmpty ? "🌐" : String(scalars)
     }
 }
 
-private enum PopoverTab: String, CaseIterable, Identifiable {
-    case overview
-    case details
+private enum MenuBarPopoverTab: String, CaseIterable, Identifiable {
+    case system
     case tools
 
     var id: String { rawValue }
+    var title: String { self == .system ? "System" : "Tools" }
+    var icon: String { self == .system ? "rectangle.stack" : "wrench.and.screwdriver" }
+}
 
-    var title: String {
-        switch self {
-        case .overview: return "Overview"
-        case .details: return "Details"
-        case .tools: return "Tools"
-        }
+private struct MenuBarCardDragSession {
+    let id = UUID()
+    let module: MenuBarDashboardModule
+    let frame: CGRect
+    let grabOffsetY: CGFloat
+    var pointerY: CGFloat
+    var isSettling = false
+}
+
+private struct MenuBarCardFramePreferenceKey: PreferenceKey {
+    static var defaultValue: [MenuBarDashboardModule: CGRect] = [:]
+
+    static func reduce(
+        value: inout [MenuBarDashboardModule: CGRect],
+        nextValue: () -> [MenuBarDashboardModule: CGRect]
+    ) {
+        value.merge(nextValue(), uniquingKeysWith: { _, new in new })
     }
 }
 
-struct PopoverHealthCard: View {
-    let score: Double
-    let title: String
-    let subtitle: String
-    let color: Color
+private struct MenuBarDashboardCard<Content: View>: View {
+    let module: MenuBarDashboardModule
+    let index: Int
+    let isEditing: Bool
+    let isDragging: Bool
+    let reduceMotion: Bool
+    let dragChanged: (DragGesture.Value) -> Void
+    let dragEnded: () -> Void
+    let remove: () -> Void
+    @ViewBuilder let content: Content
 
     var body: some View {
-        HStack(spacing: 14) {
-            ZStack {
-                Circle()
-                    .stroke(color.opacity(0.14), lineWidth: 8)
-                Circle()
-                    .trim(from: 0, to: max(0.04, min(score / 100.0, 1)))
-                    .stroke(
-                        color,
-                        style: StrokeStyle(lineWidth: 8, lineCap: .round)
-                    )
-                    .rotationEffect(.degrees(-90))
-
-                VStack(spacing: 0) {
-                    Text("\(Int(score))")
-                        .font(.system(size: 20, weight: .bold, design: .rounded))
-.foregroundStyle(Color.primary)
-                    Text("score")
-                        .font(.system(size: 8, weight: .medium))
-                        .foregroundStyle(Color.secondary.opacity(0.72))
-                }
-            }
-            .frame(width: 68, height: 68)
-
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 6) {
-                    Text(title)
-                        .font(.system(size: 15, weight: .semibold))
-.foregroundStyle(Color.primary)
-                    Circle()
-                        .fill(color)
-                        .frame(width: 6, height: 6)
-                }
-
-                Text(subtitle)
-                    .font(.system(size: 11))
-                    .foregroundStyle(Color.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Spacer(minLength: 0)
-        }
-        .padding(14)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.78))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .stroke(Color(nsColor: .separatorColor).opacity(0.72), lineWidth: 0.75)
-                )
-        )
-    }
-}
-
-struct PopoverMetricTile: View {
-    let icon: String
-    let label: String
-    let value: String
-    let subtitle: String
-    let color: Color
-    let progress: Double
-    let history: [Double]
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            HStack {
-                Image(systemName: icon)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(color)
-                    .frame(width: 18)
-                Text(label)
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(Color.secondary)
-                Spacer()
-            }
-
-            HStack(alignment: .firstTextBaseline, spacing: 5) {
-                Text(value)
-                    .font(.system(size: 22, weight: .bold, design: .rounded))
-.foregroundStyle(Color.primary)
-                Spacer()
-            }
-
-            Text(subtitle)
-                .font(.system(size: 10))
-                .foregroundStyle(Color.secondary.opacity(0.72))
-                .lineLimit(1)
-
-            GeometryReader { geometry in
-                ZStack(alignment: .leading) {
-                    Capsule()
-                        .fill(Color(nsColor: .separatorColor))
-                    Capsule()
-                        .fill(color)
-                        .frame(width: max(4, geometry.size.width * max(0, min(progress, 1))))
-                }
-            }
-            .frame(height: 5)
-
-            MiniSparkline(values: history, color: color)
-                .frame(height: 34)
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.78))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .stroke(Color(nsColor: .separatorColor).opacity(0.72), lineWidth: 0.75)
-                )
-        )
-    }
-}
-
-struct PopoverInfoCard: View {
-    let icon: String
-    let label: String
-    let value: String
-    let detail: String
-    let color: Color
-    let progress: Double
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            HStack(spacing: 7) {
-                Image(systemName: icon)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(color)
-                    .frame(width: 16)
-                Text(label)
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(Color.secondary)
-                Spacer()
-            }
-
-            Text(value)
-                .font(.system(size: 18, weight: .bold, design: .rounded))
-                .foregroundStyle(Color.primary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
-
-            Text(detail)
-                .font(.system(size: 10))
-                .foregroundStyle(Color.secondary.opacity(0.72))
-                .lineLimit(1)
-
-            GeometryReader { geometry in
-                ZStack(alignment: .leading) {
-                    Capsule()
-                        .fill(Color(nsColor: .separatorColor))
-                    Capsule()
-                        .fill(color)
-                        .frame(width: max(4, geometry.size.width * max(0, min(progress, 1))))
-                }
-            }
-            .frame(height: 5)
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.78))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .stroke(Color(nsColor: .separatorColor).opacity(0.72), lineWidth: 0.75)
-                )
-        )
-    }
-}
-
-struct PopoverBatteryStatusCard: View {
-    let battery: BatteryInfo
-
-    private var chargeProgress: Double {
-        Double(max(0, min(battery.chargePercent, 100))) / 100.0
-    }
-
-    private var batteryColor: Color {
-        if battery.chargePercent <= 20 && !battery.isPluggedIn { return .accentRed }
-        if battery.chargePercent <= 45 && !battery.isPluggedIn { return .accentAmber }
-        return .accentGreen
-    }
-
-    private var statusText: String {
-        if battery.isCharging { return "Charging" }
-        if battery.isPluggedIn { return "Plugged in" }
-        if battery.timeRemaining > 0 {
-            let h = battery.timeRemaining / 60
-            let m = battery.timeRemaining % 60
-            return "\(h)h \(m)m left"
-        }
-        return "On battery"
-    }
-
-    private var healthText: String {
-        battery.healthPercent > 0 ? "\(Int(battery.healthPercent))% \(battery.healthLabel)" : "Health N/A"
-    }
-
-    var body: some View {
-        HStack(spacing: 12) {
-            ZStack {
-                Circle()
-                    .stroke(batteryColor.opacity(0.14), lineWidth: 7)
-                Circle()
-                    .trim(from: 0, to: max(0.04, chargeProgress))
-                    .stroke(
-                        batteryColor,
-                        style: StrokeStyle(lineWidth: 7, lineCap: .round)
-                    )
-                    .rotationEffect(.degrees(-90))
-                Image(systemName: battery.isPluggedIn ? "bolt.fill" : "battery.75")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(batteryColor)
-            }
-            .frame(width: 52, height: 52)
-
-            VStack(alignment: .leading, spacing: 7) {
-                HStack(alignment: .firstTextBaseline) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Battery")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(Color.secondary)
-                        Text(statusText)
-                            .font(.system(size: 10))
-                            .foregroundStyle(Color.secondary.opacity(0.72))
-                    }
-
-                    Spacer()
-
-                    Text(battery.chargePercent > 0 ? "\(battery.chargePercent)%" : "N/A")
-                        .font(.system(size: 22, weight: .bold, design: .rounded))
-                        .foregroundStyle(Color.primary)
-                        .monospacedDigit()
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                }
-
-                GeometryReader { geometry in
-                    ZStack(alignment: .leading) {
-                        Capsule()
-                            .fill(Color(nsColor: .separatorColor))
-                        Capsule()
-                            .fill(batteryColor)
-                            .frame(width: max(4, geometry.size.width * chargeProgress))
-                    }
-                }
-                .frame(height: 5)
-
-                HStack(spacing: 6) {
-                    batteryChip("Health", healthText, batteryColor)
-                    batteryChip("Cycles", battery.cycleCount > 0 ? "\(battery.cycleCount)" : "N/A", Color.accentBlue)
-                    batteryChip("Power", battery.wattage > 0 ? String(format: "%.1f W", battery.wattage) : "N/A", Color.accentAmber)
-                    batteryChip("Temp", battery.temperature > 0 ? String(format: "%.0f°C", battery.temperature) : "N/A", Color.secondary)
-                }
-            }
-        }
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(.thinMaterial)
-        )
-    }
-
-    private func batteryChip(_ label: String, _ value: String, _ color: Color) -> some View {
-        VStack(alignment: .leading, spacing: 1) {
-            Text(label)
-                .font(.system(size: 8, weight: .medium))
-                .foregroundStyle(Color.secondary.opacity(0.72))
-            Text(value)
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(color)
-                .lineLimit(1)
-                .minimumScaleFactor(0.78)
-        }
-        .padding(.horizontal, 7)
-        .padding(.vertical, 5)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 5, style: .continuous)
-                .fill(Color(nsColor: .windowBackgroundColor).opacity(0.58))
-        )
-    }
-}
-
-struct PopoverNetworkView: View {
-    @ObservedObject var monitor: SystemMonitor
-
-    private var networkColor: Color {
-        monitor.network.isActive ? .accentBlue : .textTertiaryLight
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Label("Network", systemImage: "network")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(Color.secondary)
-                Spacer()
-                Text(monitor.network.interfaceName)
-                    .font(.system(size: 9, weight: .medium))
-                    .foregroundStyle(networkColor)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 3)
-                    .background(RoundedRectangle(cornerRadius: 5, style: .continuous).fill(networkColor.opacity(0.10)))
-            }
-
-            HStack(spacing: 8) {
-                networkRate(icon: "arrow.down", title: "Down", value: NetworkInfo.formattedRate(monitor.network.downloadBytesPerSecond))
-                networkRate(icon: "arrow.up", title: "Up", value: NetworkInfo.formattedRate(monitor.network.uploadBytesPerSecond))
-            }
-
-        }
-        .padding(10)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.78))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .stroke(Color(nsColor: .separatorColor).opacity(0.72), lineWidth: 0.75)
-                )
-        )
-    }
-
-    private func networkRate(icon: String, title: String, value: String) -> some View {
-        HStack(spacing: 7) {
-            Image(systemName: icon)
-                .font(.system(size: 10, weight: .bold))
-                .foregroundStyle(networkColor)
-                .frame(width: 14)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(title)
-                    .font(.system(size: 9))
-                    .foregroundStyle(Color.secondary.opacity(0.72))
-                Text(value)
-                    .font(.system(size: 11, weight: .semibold).monospacedDigit())
-                    .foregroundStyle(Color.primary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.68)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 7)
-        .padding(.vertical, 8)
-        .frame(maxWidth: .infinity)
-        .background(
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(Color(nsColor: .windowBackgroundColor).opacity(0.58))
-        )
-    }
-}
-
-struct MiniSparkline: View {
-    let values: [Double]
-    let color: Color
-
-    var body: some View {
-        Canvas { ctx, size in
-            guard values.count > 1 else { return }
-            let maxV = values.max() ?? 1.0
-            let minV = values.min() ?? 0.0
-            let range = max(maxV - minV, 0.1)
-            var path = Path()
-            for (i, v) in values.enumerated() {
-                let x = CGFloat(i) / CGFloat(values.count - 1) * size.width
-                let y = size.height * (1 - CGFloat((v - minV) / range))
-                if i == 0 { path.move(to: CGPoint(x: x, y: y)) }
-                else { path.addLine(to: CGPoint(x: x, y: y)) }
-            }
-            
-            // Fill with gradient underneath
-            var fillPath = path
-            fillPath.addLine(to: CGPoint(x: size.width, y: size.height))
-            fillPath.addLine(to: CGPoint(x: 0, y: size.height))
-            fillPath.closeSubpath()
-            let gradient = Gradient(colors: [color.opacity(0.35), color.opacity(0.0)])
-            ctx.fill(fillPath, with: .linearGradient(gradient, startPoint: CGPoint(x: 0, y: 0), endPoint: CGPoint(x: 0, y: size.height)))
-            
-            // Stroke the main line
-            ctx.stroke(path, with: .color(color),
-                       style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
+        TimelineView(.animation(minimumInterval: isEditing && !reduceMotion ? 1.0 / 30.0 : 1.0)) { timeline in
+            card(
+                rotation: isEditing && !reduceMotion && !isDragging
+                    ? wiggleAngle(at: timeline.date)
+                    : .zero
+            )
         }
     }
-}
 
-struct PopoverTopProcessesView: View {
-    @ObservedObject var monitor: SystemMonitor
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Label("Top Activity", systemImage: "list.bullet.rectangle")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(Color.secondary)
-                Spacer()
-                Text("CPU & RAM")
-                    .font(.system(size: 9))
-                    .foregroundStyle(Color.secondary.opacity(0.72))
-            }
-
-            if monitor.topProcesses.isEmpty {
-                Text("Collecting foreground process activity")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Color.secondary.opacity(0.72))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, 4)
-            } else {
-                VStack(spacing: 6) {
-                    ForEach(monitor.topProcesses.prefix(3)) { proc in
-                        HStack(spacing: 8) {
-                            Circle()
-                                .fill(processColor(proc.cpuUsage))
-                                .frame(width: 6, height: 6)
-
-                            Text(proc.name)
-                                .font(.system(size: 11, weight: .medium))
-.foregroundStyle(Color.primary)
-                                .lineLimit(1)
-                                .truncationMode(.tail)
-
-                            Spacer()
-
-                            Text(String(format: "%.1f%%", proc.cpuUsage))
-                                .font(.system(size: 10, weight: .semibold).monospacedDigit())
-                                .foregroundStyle(processColor(proc.cpuUsage))
-                                .frame(width: 45, alignment: .trailing)
-
-                            Text(MemoryInfo.formatted(proc.memoryBytes))
-                                .font(.system(size: 10).monospacedDigit())
-                                .foregroundStyle(Color.secondary)
-                                .frame(width: 56, alignment: .trailing)
-                        }
-                        .padding(.horizontal, 9)
-                                .padding(.vertical, 5)
-                        .background(
-                            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                .fill(Color(nsColor: .windowBackgroundColor).opacity(0.58))
-                        )
-                    }
-                }
-            }
-        }
-        .padding(10)
-        .frame(maxHeight: .infinity, alignment: .top)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.78))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .stroke(Color(nsColor: .separatorColor).opacity(0.72), lineWidth: 0.75)
-                )
-        )
-    }
-
-    private func processColor(_ cpu: Double) -> Color {
-        if cpu > 55 { return .accentRed }
-        if cpu > 18 { return .accentAmber }
-        return .accentBlue
-    }
-}
-
-// MARK: - Popover Aesthetics
-
-struct PopoverFansView: View {
-    @ObservedObject var monitor: SystemMonitor
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Label("Cooling", systemImage: "fanblades")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(Color.secondary)
-                Spacer()
-                Text("\(monitor.fans.count) fans")
-                    .font(.system(size: 9))
-                    .foregroundStyle(Color.secondary.opacity(0.72))
-            }
-            
-            HStack(spacing: 8) {
-                ForEach(monitor.fans) { fan in
-                    VStack(spacing: 7) {
-                        HStack(spacing: 6) {
-                            Circle()
-                                .fill(rpmColor(fan))
-                                .frame(width: 6, height: 6)
-                            
-                            Text(fan.label)
-                                .font(.system(size: 11, weight: .medium))
-.foregroundStyle(Color.primary)
-                        }
-                        
-                        if fan.actualRPM > 0 {
-                            Text("\(fan.actualRPM)")
-                                .font(.system(size: 18, weight: .bold, design: .rounded))
-                                .foregroundStyle(rpmColor(fan))
-                            Text("RPM")
-                                .font(.system(size: 9))
-                                .foregroundStyle(Color.secondary)
-                        } else {
-                            Text("Auto")
-                                .font(.system(size: 14, weight: .medium))
-                                .foregroundStyle(Color.secondary)
-                            Text("MODE")
-                                .font(.system(size: 9))
-                                .foregroundStyle(Color.secondary)
-                        }
-                        
-                        ZStack(alignment: .leading) {
-                            RoundedRectangle(cornerRadius: 2)
-                                .fill(Color(nsColor: .separatorColor))
-                                .frame(width: 60, height: 3)
-                            RoundedRectangle(cornerRadius: 2)
-                                .fill(rpmColor(fan))
-                                .frame(width: max(3, 60 * fan.percentOfMax), height: 3)
-                        }
-                    }
-                    .padding(10)
-                    .frame(maxWidth: .infinity)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6, style: .continuous)
-                            .fill(Color(nsColor: .windowBackgroundColor).opacity(0.58))
-                    )
-                }
-            }
-        }
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(.thinMaterial)
-        )
-    }
-    
-    private func rpmColor(_ fan: FanInfo) -> Color {
-        let p = fan.percentOfMax
-        if p > 0.85 { return .accentRed }
-        if p > 0.6  { return .accentAmber }
-        return .accentGreen
-    }
-}
-
-struct PopoverTemperatureView: View {
-    @ObservedObject var monitor: SystemMonitor
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            let cpuHist = monitor.thermalHistory.map { $0.cpu }
-            let socHist = monitor.thermalHistory.map { $0.soc }
-            let battHist = monitor.thermalHistory.map { $0.battery }
-            
-            HStack(spacing: 12) {
-                tempColumn(label: "CPU", temp: monitor.thermal.cpuTemp, history: cpuHist, color: .accentRed)
-                tempColumn(label: "SoC", temp: monitor.thermal.socTemp, history: socHist, color: .accentBlue)
-                tempColumn(label: "BATT", temp: monitor.thermal.batteryTemp, history: battHist, color: .accentAmber)
-            }
-        }
-        .padding(10)
-        .frame(maxHeight: .infinity, alignment: .top)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.78))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .stroke(Color(nsColor: .separatorColor).opacity(0.72), lineWidth: 0.75)
-                )
-        )
-    }
-    
     @ViewBuilder
-    private func tempColumn(label: String, temp: Double, history: [Double], color: Color) -> some View {
-        VStack(spacing: 4) {
-            HStack(spacing: 2) {
-                Text(label).font(.system(size: 9, weight: .medium)).foregroundStyle(Color.secondary)
-                Spacer()
-                Text(temp > 0 ? String(format: "%.0f°", temp) : "N/A")
-                    .font(.system(size: 11, weight: .bold, design: .monospaced))
-                    .foregroundStyle(temp > 0 ? color : Color.secondary.opacity(0.65))
-            }
-            ZStack {
-                RoundedRectangle(cornerRadius: 5).fill(Color(nsColor: .windowBackgroundColor).opacity(0.58))
-                let validHistory = history.filter { $0 > 0 }
-                if validHistory.count > 1 {
-                    MiniSparkline(values: validHistory, color: color)
-                        .padding(3)
-                } else {
-                    Text("No data")
-                        .font(.system(size: 8, weight: .medium))
-                        .foregroundStyle(Color.secondary.opacity(0.55))
+    private func card(rotation: Angle) -> some View {
+        content
+            .overlay(alignment: .topLeading) {
+                if isEditing {
+                    Button(action: remove) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 18, weight: .semibold))
+                            .symbolRenderingMode(.palette)
+                            .foregroundStyle(Color.white, Color.red.opacity(0.88))
+                            .shadow(color: .black.opacity(0.12), radius: 2, y: 1)
+                    }
+                    .buttonStyle(.plain)
+                    .offset(x: -6, y: -6)
+                    .help("Remove \(module.title) card")
+                    .transition(.scale.combined(with: .opacity))
                 }
             }
-            .frame(height: 28)
+            .overlay(alignment: .trailing) {
+                if isEditing {
+                    Image(systemName: "line.3.horizontal")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(Color.textSecondaryLight)
+                        .frame(width: 28, height: 42)
+                        .background(.thinMaterial, in: Capsule())
+                        .shadow(color: .black.opacity(0.07), radius: 7, y: 3)
+                        .contentShape(Capsule())
+                        .offset(x: 5)
+                        .highPriorityGesture(
+                            DragGesture(minimumDistance: 1, coordinateSpace: .named("menuBarCards"))
+                                .onChanged(dragChanged)
+                                .onEnded { _ in dragEnded() }
+                        )
+                        .help("Hold and drag to reorder")
+                        .accessibilityLabel("Reorder \(module.title) card")
+                        .transition(.scale.combined(with: .opacity))
+                }
+            }
+            .rotationEffect(rotation)
+            .opacity(isDragging ? 0 : 1)
+            .animation(.easeInOut(duration: 0.16), value: isEditing)
+    }
+
+    private func wiggleAngle(at date: Date) -> Angle {
+        let cycle = date.timeIntervalSinceReferenceDate * 2 * Double.pi / 0.72
+        let phase = cycle + Double(index) * Double.pi * 0.58
+        return .degrees(sin(phase) * 0.26)
+    }
+}
+
+private struct MenuBarSystemBackdrop: View {
+    var body: some View {
+        ZStack {
+            Rectangle().fill(.thinMaterial)
+            LinearGradient(
+                colors: [
+                    Color.white.opacity(0.34),
+                    Color.accentBlue.opacity(0.055),
+                    Color.clear,
+                    Color.accentGreen.opacity(0.05)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            RadialGradient(
+                colors: [Color.accentBlue.opacity(0.11), Color.clear],
+                center: UnitPoint(x: 0.12, y: 0.08),
+                startRadius: 0,
+                endRadius: 245
+            )
+            RadialGradient(
+                colors: [Color.accentGreen.opacity(0.09), Color.clear],
+                center: UnitPoint(x: 0.92, y: 0.78),
+                startRadius: 0,
+                endRadius: 300
+            )
         }
-        .frame(maxWidth: .infinity)
+        .allowsHitTesting(false)
+    }
+}
+
+@MainActor
+private final class MenuBarOverflowMenuController: NSObject {
+    static let shared = MenuBarOverflowMenuController()
+
+    private var openMain: (() -> Void)?
+    private var openAbout: (() -> Void)?
+    private var quit: (() -> Void)?
+
+    func show(
+        openMain: @escaping () -> Void,
+        openAbout: @escaping () -> Void,
+        quit: @escaping () -> Void
+    ) {
+        self.openMain = openMain
+        self.openAbout = openAbout
+        self.quit = quit
+
+        let menu = NSMenu()
+        menu.addItem(item(title: "Open MacCleaner", action: #selector(openMainAction)))
+        menu.addItem(item(title: "About MacCleaner", action: #selector(openAboutAction)))
+        menu.addItem(.separator())
+        menu.addItem(item(title: "Quit MacCleaner", action: #selector(quitAction)))
+
+        if let event = NSApp.currentEvent, let view = event.window?.contentView {
+            NSMenu.popUpContextMenu(menu, with: event, for: view)
+        } else {
+            menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
+        }
+    }
+
+    private func item(title: String, action: Selector) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+        item.target = self
+        return item
+    }
+
+    @objc private func openMainAction() { openMain?() }
+    @objc private func openAboutAction() { openAbout?() }
+    @objc private func quitAction() { quit?() }
+}
+
+private struct MenuBarHoverChrome: ViewModifier {
+    let isSelected: Bool
+    @State private var isHovered = false
+
+    func body(content: Content) -> some View {
+        content
+            .background(
+                Color(nsColor: .controlBackgroundColor).opacity(isHovered ? 0.72 : 0),
+                in: RoundedRectangle(cornerRadius: 9, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .strokeBorder(
+                        isSelected ? Color.accentBlue.opacity(isHovered ? 0.28 : 0) : Color.primary.opacity(isHovered ? 0.10 : 0),
+                        lineWidth: 1
+                    )
+            }
+            .shadow(color: .black.opacity(isHovered ? 0.055 : 0), radius: 5, y: 2)
+            .animation(.easeOut(duration: 0.13), value: isHovered)
+            .onHover { isHovered = $0 }
+    }
+}
+
+private extension View {
+    func menuBarHoverChrome(isSelected: Bool = false) -> some View {
+        modifier(MenuBarHoverChrome(isSelected: isSelected))
     }
 }

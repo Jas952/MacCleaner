@@ -2,6 +2,39 @@ import Foundation
 import Combine
 import SwiftUI
 
+enum MenuBarDashboardModule: String, CaseIterable, Identifiable {
+    case cpu
+    case memory
+    case disk
+    case network
+    case graphics
+    case battery
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .cpu: return "CPU"
+        case .memory: return "Memory"
+        case .disk: return "Disk"
+        case .network: return "Network"
+        case .graphics: return "Graphics"
+        case .battery: return "Battery"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .cpu: return "cpu"
+        case .memory: return "memorychip"
+        case .disk: return "internaldrive"
+        case .network: return "network"
+        case .graphics: return "display"
+        case .battery: return "battery.75percent"
+        }
+    }
+}
+
 class SettingsManager: ObservableObject {
     static let shared = SettingsManager()
     
@@ -20,6 +53,9 @@ class SettingsManager: ObservableObject {
     @Published private(set) var menuBarGaugeDisplayStyles: [String: String] {
         didSet { defaults.set(menuBarGaugeDisplayStyles, forKey: Keys.menuBarGaugeDisplayStyles) }
     }
+    @Published private(set) var menuBarDashboardModuleIDs: [String] {
+        didSet { defaults.set(menuBarDashboardModuleIDs, forKey: Keys.menuBarDashboardModules) }
+    }
     @Published var clipboardHistoryInMenuBar: Bool {
         didSet { defaults.set(clipboardHistoryInMenuBar, forKey: Keys.clipboardHistoryInMenuBar) }
     }
@@ -32,6 +68,7 @@ class SettingsManager: ObservableObject {
         static let menuBarGaugeFormats = "menuBarGaugeFormats"
         static let menuBarGaugeDisplayStyles = "menuBarGaugeDisplayStyles"
         static let legacyMenuBarGaugeDisplayStyle = "menuBarGaugeDisplayStyle"
+        static let menuBarDashboardModules = "menuBarDashboardModules"
         static let clipboardHistoryInMenuBar = "clipboardHistoryInMenuBar"
     }
     
@@ -64,6 +101,10 @@ class SettingsManager: ObservableObject {
             let stored = storedStyles[gauge.rawValue].flatMap(MenuBarGaugeDisplayStyle.init(rawValue:))
             return (gauge.rawValue, (stored ?? legacyStyle).rawValue)
         })
+        let validModuleIDs = Set(MenuBarDashboardModule.allCases.map(\.rawValue))
+        let storedModules = defaults.stringArray(forKey: Keys.menuBarDashboardModules)
+            ?? MenuBarDashboardModule.allCases.map(\.rawValue)
+        menuBarDashboardModuleIDs = storedModules.filter(validModuleIDs.contains)
         clipboardHistoryInMenuBar = defaults.object(forKey: Keys.clipboardHistoryInMenuBar) as? Bool ?? true
     }
 
@@ -135,5 +176,34 @@ class SettingsManager: ObservableObject {
 
     func setDisplayStyle(_ style: MenuBarGaugeDisplayStyle, for gauge: MenuBarGauge) {
         menuBarGaugeDisplayStyles[gauge.rawValue] = style.rawValue
+    }
+
+    func moveMenuBarDashboardModule(_ sourceRawValue: String, to targetRawValue: String) {
+        guard
+            sourceRawValue != targetRawValue,
+            let sourceIndex = menuBarDashboardModuleIDs.firstIndex(of: sourceRawValue),
+            let targetIndex = menuBarDashboardModuleIDs.firstIndex(of: targetRawValue)
+        else { return }
+
+        let destination = targetIndex > sourceIndex ? targetIndex + 1 : targetIndex
+        menuBarDashboardModuleIDs.move(fromOffsets: IndexSet(integer: sourceIndex), toOffset: destination)
+    }
+
+    func setMenuBarDashboardModuleOrder(_ modules: [MenuBarDashboardModule]) {
+        let rawValues = modules.map(\.rawValue)
+        guard
+            rawValues.count == menuBarDashboardModuleIDs.count,
+            Set(rawValues) == Set(menuBarDashboardModuleIDs)
+        else { return }
+        menuBarDashboardModuleIDs = rawValues
+    }
+
+    func removeMenuBarDashboardModule(_ module: MenuBarDashboardModule) {
+        menuBarDashboardModuleIDs.removeAll { $0 == module.rawValue }
+    }
+
+    func restoreMenuBarDashboardModule(_ module: MenuBarDashboardModule) {
+        guard !menuBarDashboardModuleIDs.contains(module.rawValue) else { return }
+        menuBarDashboardModuleIDs.append(module.rawValue)
     }
 }
