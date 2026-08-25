@@ -21,15 +21,15 @@ MacCleaner is a native macOS utility for understanding what is happening on your
 
 It does not treat cleanup as a one-click promise. MacCleaner shows what it found, keeps potentially destructive choices visible, and uses bounded, cancellable scans so deeper analysis does not turn into uncontrolled full-disk work.
 
-### Current release — 1.0.6
+### Current release — 1.0.7
 
-The current build makes the cleanup and developer-workflow parts of MacCleaner substantially more actionable:
+The current build turns the menu bar into a configurable compact workspace and improves several everyday utilities:
 
-- **Reviewable cleanup reports:** Optimize and Storage/Junk now expose cleanup results as expandable category, subcategory, folder, and path lists with sizes and item counts. Safe-to-remove entries are preselected, while protected or rebuildable data remains clearly marked and out of bulk cleanup.
-- **Developer-focused storage analysis:** Xcode, SwiftPM, npm/pnpm, Python, Docker, Ollama, Hugging Face, browser caches, logs, and other tool data are identified separately instead of being presented as generic “junk.”
-- **Safer file handling:** Large-file deletion remains Trash-only, retries administrator authorization only after a normal permission failure, and protects MacCleaner data and sensitive project locations.
-- **Drop Shelf workflow:** Files, images, and text can be parked as session copies without moving the original. Drag-out uses a disposable export; destinations without drag support can use Copy for paste and `Cmd+V`.
-- **Agent visibility and system feedback:** Agents expose local footprint and process context, while system load alerts report CPU, temperature, and the processes contributing to high load through a native macOS notification panel.
+- **Dashboard in the menu bar:** CPU, memory, disk, network, graphics, and battery use the same compact cards as the main Dashboard.
+- **A workspace you control:** Edit mode supports animated reordering, hiding, and restoring cards while preserving the chosen layout.
+- **Cleaner status indicators:** Enabled readings are stacked into compact pairs; disabling all readings restores the MacCleaner app icon.
+- **More useful Tools:** The local BETA File Reader can preview PDF, image, text, and binary files without uploading or modifying the source.
+- **Honest hardware state:** Apple Silicon fan telemetry uses available SMC data and reports unavailable helper control instead of inventing placeholder readings.
 
 ## Understand, Clean, and Maintain
 
@@ -56,7 +56,7 @@ The remaining tools cover startup items, Desktop organization, fans and thermals
 | Permanent-delete fallback | **0** | If Trash fails, cleanup stops |
 | Scan modes | **2** | Efficient for speed; Thorough for wider coverage |
 | Exact-duplicate verification | **3 stages** | Metadata → 128 KB sample → full SHA-256 |
-| Safety and policy tests | **53 passing** | Current XCTest suite covers cleanup, storage, agents, clipboard, Drop Shelf, and system policy |
+| Safety and policy tests | **55 passing** | Current XCTest suite covers cleanup, storage, agents, clipboard, Drop Shelf, menu bar customization, and system policy |
 | Automatic update checks | **Every 6 hours** | HTTPS appcast with EdDSA verification |
 | Performance benchmark | **Pending** | Percentages require the same corpus and Mac |
 
