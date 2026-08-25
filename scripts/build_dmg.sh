@@ -9,6 +9,8 @@ APP_PATH="$BUILD_DIR/Release/MacCleaner.app"
 DMG_STAGING="$BUILD_DIR/dmg_content"
 DMG_PATH="$RELEASE_DIR/MacCleaner.dmg"
 SOURCE_PACKAGES_DIR="${SOURCE_PACKAGES_DIR:-$DERIVED_DATA/SourcePackages}"
+CODESIGN_IDENTITY="${CODESIGN_IDENTITY:?Set CODESIGN_IDENTITY to a Developer ID Application identity}"
+TEAM_IDENTIFIER="${TEAM_IDENTIFIER:?Set TEAM_IDENTIFIER to the Developer ID team identifier}"
 
 cd "$ROOT_DIR"
 
@@ -25,11 +27,12 @@ xcodebuild \
   -clonedSourcePackagesDirPath "$SOURCE_PACKAGES_DIR" \
   -disableAutomaticPackageResolution \
   CONFIGURATION_BUILD_DIR="$BUILD_DIR/Release" \
+  DEVELOPMENT_TEAM="$TEAM_IDENTIFIER" \
   CODE_SIGNING_ALLOWED=NO \
   -quiet
 
-echo "Ad-hoc signing app for unsigned distribution..."
-codesign --force --deep --options runtime --entitlements "$ROOT_DIR/MacCleaner/MacCleaner.entitlements" --sign - "$APP_PATH"
+echo "Signing app and privileged helper..."
+codesign --force --deep --options runtime --entitlements "$ROOT_DIR/MacCleaner/MacCleaner.entitlements" --sign "$CODESIGN_IDENTITY" "$APP_PATH"
 codesign --verify --deep --strict --verbose=2 "$APP_PATH"
 
 echo "Preparing DMG content..."

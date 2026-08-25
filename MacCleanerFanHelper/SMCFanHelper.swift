@@ -139,8 +139,7 @@ private final class SMCWriter {
 }
 
 private final class Helper: NSObject, NSXPCListenerDelegate, MacCleanerFanHelperProtocol {
-    private static let authorizedClientRequirement =
-        "identifier \"com.maccleaner.app\" and anchor apple generic"
+    private static let authorizedClientBundleIdentifier = "com.maccleaner.app"
     private let listener = NSXPCListener(machServiceName: "com.maccleaner.fanhelper")
     private let smc = SMCWriter()
     private var manualRPMByFan: [Int: Int] = [:]
@@ -183,9 +182,12 @@ private final class Helper: NSObject, NSXPCListenerDelegate, MacCleanerFanHelper
         guard SecCodeCopyGuestWithAttributes(nil, attributes, [], &guestCode) == errSecSuccess,
               let guestCode else { return false }
 
+        guard let teamIdentifier = Bundle.main.object(forInfoDictionaryKey: "MacCleanerAuthorizedTeamIdentifier") as? String,
+              !teamIdentifier.isEmpty else { return false }
+        let requirementString = "identifier \"\(Self.authorizedClientBundleIdentifier)\" and anchor apple generic and certificate leaf[subject.OU] = \"\(teamIdentifier)\""
         var requirement: SecRequirement?
         guard SecRequirementCreateWithString(
-            Self.authorizedClientRequirement as CFString,
+            requirementString as CFString,
             [],
             &requirement
         ) == errSecSuccess, let requirement else { return false }
@@ -197,12 +199,20 @@ private final class Helper: NSObject, NSXPCListenerDelegate, MacCleanerFanHelper
     }
 
     func setManualRPM(_ rpm: Int, fanIndex: Int, withReply reply: @escaping (Bool, String?) -> Void) {
+        guard (0..<16).contains(fanIndex) else {
+            reply(false, "Invalid fan index.")
+            return
+        }
         let result = smc?.setManual(rpm: rpm, fan: fanIndex) ?? (false, "SMC is unavailable.")
         if result.0 { manualRPMByFan[fanIndex] = rpm }
         reply(result.0, result.1)
     }
 
     func setAutomatic(fanIndex: Int, withReply reply: @escaping (Bool, String?) -> Void) {
+        guard (0..<16).contains(fanIndex) else {
+            reply(false, "Invalid fan index.")
+            return
+        }
         let result = smc?.setAuto(fan: fanIndex) ?? (false, "SMC is unavailable.")
         if result.0 { manualRPMByFan.removeValue(forKey: fanIndex) }
         reply(result.0, result.1)

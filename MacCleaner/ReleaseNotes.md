@@ -20,4 +20,4 @@ Other changes:
 2. Open the DMG and drag MacCleaner to Applications.
 3. Open MacCleaner from Applications. If macOS blocks the first launch, allow it in **System Settings → Privacy & Security**.
 
-This build is distributed without Developer ID notarization, so macOS may show an unknown-developer warning on first launch.
+This build is signed with Developer ID but is not notarized, so macOS may show an unknown-developer warning on first launch.

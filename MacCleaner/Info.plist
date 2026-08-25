@@ -5,7 +5,7 @@
 	<key>SMPrivilegedExecutables</key>
 	<dict>
 		<key>com.maccleaner.fanhelper</key>
-		<string>identifier "com.maccleaner.fanhelper" and anchor apple generic</string>
+		<string>identifier "com.maccleaner.fanhelper" and anchor apple generic and certificate leaf[subject.OU] = "$(DEVELOPMENT_TEAM)"</string>
 	</dict>
 	<key>CFBundleDisplayName</key>
 	<string>MacCleaner</string>
