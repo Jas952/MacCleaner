@@ -10,7 +10,7 @@ private let isAppleSilicon: Bool = {
     return val != 0
 }()
 
-// MARK: - SMC keys (Intel only)
+// MARK: - SMC keys
 
 private struct SMCKey {
     static let fanCount      = "FNum"
@@ -20,6 +20,11 @@ private struct SMCKey {
     static let fanTargetRPM  = "F%dTg"
     static let fanSafeRPM    = "F%dSf"
     static let fanMode       = "FS! "
+    // Apple Silicon exposes the same fan data keys through AppleSMC, but the
+    // mode key is firmware-dependent. Probe both spellings at runtime.
+    static let appleSiliconModeUpper = "F%dMd"
+    static let appleSiliconModeLower = "F%dmd"
+    static let appleSiliconForceTest = "Ftst"
     static let cpuTemp       = "TC0P"
     static let cpuDieTemp    = "TC0D"
     static let gpuTemp       = "TG0P"
@@ -135,10 +140,8 @@ final class SMCService {
     // MARK: - Read
 
     func readFans() -> [FanInfo] {
-        // On Apple Silicon, SMC fan keys are inaccessible without private entitlements.
-        // Detect if this Mac model has fans and return a placeholder based on thermals.
         if isAppleSilicon {
-            return appleSiliconFanPlaceholders()
+            return readAppleSiliconFans()
         }
         guard isOpen else { return [] }
         var count = readUInt8(key: SMCKey.fanCount)
@@ -161,37 +164,29 @@ final class SMCService {
         return fans
     }
 
-    // Returns fan count based on Mac model for Apple Silicon Macs
-    // MacBook Air (fanless): Mac14,2 / Mac14,15 / Mac15,12 / Mac15,13
-    // MacBook Pro (fans):    Mac14,x / Mac15,x / Mac16,x (most)
-    // Mac mini (fans): Mac14,3 / Mac14,12
-    // iMac (fans): iMac21,1 / iMac21,2
-    private func macModelHasFans() -> Int {
-        var size = 0
-        sysctlbyname("hw.model", nil, &size, nil, 0)
-        var model = [CChar](repeating: 0, count: size)
-        sysctlbyname("hw.model", &model, &size, nil, 0)
-        let id = String(cString: model)
-        // Fanless: MacBook Air M-series
-        let fanlessPrefixes = ["Mac14,2", "Mac14,15", "Mac15,12", "Mac15,13", "Mac16,12", "Mac16,13"]
-        for prefix in fanlessPrefixes {
-            if id.hasPrefix(prefix) { return 0 }
-        }
-        // MacBook Pro — 2 fans
-        if id.hasPrefix("MacBookPro") || id.hasPrefix("Mac14,") || id.hasPrefix("Mac15,") || id.hasPrefix("Mac16,") {
-            return 2
-        }
-        // Mac mini / Mac Pro / iMac — 1-2 fans
-        if id.hasPrefix("Macmini") || id.hasPrefix("Mac14,3") || id.hasPrefix("Mac14,12") { return 1 }
-        if id.hasPrefix("MacPro") || id.hasPrefix("iMac") || id.hasPrefix("Mac13,") { return 1 }
-        return 0
-    }
+    /// Reads real Apple Silicon fan telemetry. Do not infer fan presence from
+    /// the model identifier: that produced false fans on new machines and
+    /// fabricated RPM values in the UI. `FNum`/`FpNm` are the hardware source
+    /// of truth; if the firmware does not expose them, the correct result is
+    /// an empty list (monitoring unavailable), not a placeholder.
+    private func readAppleSiliconFans() -> [FanInfo] {
+        guard isOpen else { return [] }
+        var count = readUInt8(key: SMCKey.fanCount)
+        if count == 0 { count = readUInt8(key: "FpNm") }
+        guard count > 0, count < 16 else { return [] }
 
-    private func appleSiliconFanPlaceholders() -> [FanInfo] {
-        let count = macModelHasFans()
-        guard count > 0 else { return [] }
-        return (0..<count).map { i in
-            return FanInfo(id: i, actualRPM: 0, minRPM: 1200, maxRPM: 6800, safeRPM: 1200, targetRPM: 0)
+        return (0..<Int(count)).compactMap { i in
+            let actualKey = String(format: SMCKey.fanActualRPM, i)
+            let actual = readFPE2(key: actualKey)
+            let max = readFPE2(key: String(format: SMCKey.fanMaxRPM, i))
+            let min = readFPE2(key: String(format: SMCKey.fanMinRPM, i))
+            let safe = readFPE2(key: String(format: SMCKey.fanSafeRPM, i))
+            let target = readFPE2(key: String(format: SMCKey.fanTargetRPM, i))
+            // A missing actual-RPM key means this is not a usable fan record.
+            guard readKey(key: actualKey) != nil else { return nil }
+            return FanInfo(id: i, actualRPM: Int(actual), minRPM: Int(min),
+                           maxRPM: max > 0 ? Int(max) : 1,
+                           safeRPM: Int(safe), targetRPM: Int(target))
         }
     }
 
@@ -217,24 +212,29 @@ final class SMCService {
         return t
     }
 
-    // MARK: - Write fan target (requires no sandbox, may need root on AS)
+    // MARK: - Legacy Intel writes
+
+    // Apple Silicon writes are intentionally excluded from this class. They
+    // must go through FanControlXPCClient -> MacCleanerFanHelper so the main
+    // process never attempts restricted SMC writes without the helper.
 
     @discardableResult
     func setFanTarget(fanIndex: Int, rpm: Int) -> Bool {
-        guard isOpen else { return false }
+        guard !isAppleSilicon, isOpen, fanIndex >= 0, fanIndex < 16,
+              (0...20_000).contains(rpm) else { return false }
         let key = String(format: SMCKey.fanTargetRPM, fanIndex)
         return writeFPE2(key: key, value: Float(rpm))
     }
 
     @discardableResult
     func setFanAutoMode() -> Bool {
-        guard isOpen else { return false }
+        guard !isAppleSilicon, isOpen else { return false }
         return writeUInt16(key: SMCKey.fanMode, value: 0)
     }
 
     @discardableResult
     func setFanManualMode(fanIndex: Int) -> Bool {
-        guard isOpen else { return false }
+        guard !isAppleSilicon, isOpen, fanIndex >= 0, fanIndex < 16 else { return false }
         let currentMode = readUInt16(key: SMCKey.fanMode)
         let newMode = currentMode | UInt16(1 << fanIndex)
         return writeUInt16(key: SMCKey.fanMode, value: newMode)

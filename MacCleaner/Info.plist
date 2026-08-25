@@ -2,6 +2,11 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>SMPrivilegedExecutables</key>
+	<dict>
+		<key>com.maccleaner.fanhelper</key>
+		<string>identifier "com.maccleaner.fanhelper" and anchor apple generic</string>
+	</dict>
 	<key>CFBundleDisplayName</key>
 	<string>MacCleaner</string>
 	<key>CFBundleExecutable</key>

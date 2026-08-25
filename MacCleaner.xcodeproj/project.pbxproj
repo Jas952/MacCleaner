@@ -76,6 +76,10 @@
 		A059_DLS /* DiagnosticLogStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F059_DLS /* DiagnosticLogStore.swift */; };
 		A060_TLAS /* ThermalLoadAlertService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F060_TLAS /* ThermalLoadAlertService.swift */; };
 		A061_TLAP /* ThermalLoadAlertPanelController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F061_TLAP /* ThermalLoadAlertPanelController.swift */; };
+		A062_FCXPC /* FanControlXPC.swift in Sources */ = {isa = PBXBuildFile; fileRef = F062_FCXPC /* FanControlXPC.swift */; };
+		A063_HELPER /* SMCFanHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = F063_HELPER /* SMCFanHelper.swift */; };
+		A064_FHI /* FanHelperInstaller.swift in Sources */ = {isa = PBXBuildFile; fileRef = F064_FHI /* FanHelperInstaller.swift */; };
+		A065_HELPER_COPY /* MacCleanerFanHelper in Embed Helper */ = {isa = PBXBuildFile; fileRef = PROD_HELPER /* MacCleanerFanHelper */; settings = {ATTRIBUTES = (); }; };
 		A_SPARKLE /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = P_SPARKLE /* Sparkle */; };
 /* End PBXBuildFile section */
 
@@ -86,6 +90,13 @@
 			proxyType = 1;
 			remoteGlobalIDString = TARGET;
 			remoteInfo = MacCleaner;
+		};
+		HELPER_PROXY /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = PROJECT /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = HELPER_TARGET;
+			remoteInfo = MacCleanerFanHelper;
 		};
 /* End PBXContainerItemProxy section */
 
@@ -158,6 +169,12 @@
 		F059_DLS /* DiagnosticLogStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticLogStore.swift; sourceTree = "<group>"; };
 		F060_TLAS /* ThermalLoadAlertService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThermalLoadAlertService.swift; sourceTree = "<group>"; };
 		F061_TLAP /* ThermalLoadAlertPanelController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThermalLoadAlertPanelController.swift; sourceTree = "<group>"; };
+		F062_FCXPC /* FanControlXPC.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FanControlXPC.swift; sourceTree = "<group>"; };
+		F063_HELPER /* SMCFanHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SMCFanHelper.swift; sourceTree = "<group>"; };
+		F064_FHI /* FanHelperInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FanHelperInstaller.swift; sourceTree = "<group>"; };
+		F064_HELPER_PLIST /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		F065_HELPER_ENT /* MacCleanerFanHelper.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = MacCleanerFanHelper.entitlements; sourceTree = "<group>"; };
+		PROD_HELPER /* MacCleanerFanHelper */ = {isa = PBXFileReference; explicitFileType = compiled.mach-o.executable; includeInIndex = 0; path = MacCleanerFanHelper; sourceTree = BUILT_PRODUCTS_DIR; };
 		F010 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		F_RELEASE_NOTES /* ReleaseNotes.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = ReleaseNotes.md; sourceTree = "<group>"; };
 		F011 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -171,6 +188,7 @@
 			children = (
 				G_APP /* MacCleaner */,
 				G_TESTS /* MacCleanerTests */,
+				G_HELPER /* MacCleanerFanHelper */,
 				G_PROD /* Products */,
 			);
 			sourceTree = "<group>";
@@ -180,6 +198,7 @@
 			children = (
 				PROD /* MacCleaner.app */,
 				PROD_TEST /* MacCleanerTests.xctest */,
+				PROD_HELPER /* MacCleanerFanHelper */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -207,6 +226,16 @@
 				F_TEST_SAFETY /* SafetyPolicyTests.swift */,
 			);
 			path = MacCleanerTests;
+			sourceTree = "<group>";
+		};
+		G_HELPER /* MacCleanerFanHelper */ = {
+			isa = PBXGroup;
+			children = (
+				F063_HELPER /* SMCFanHelper.swift */,
+				F064_HELPER_PLIST /* Info.plist */,
+				F065_HELPER_ENT /* MacCleanerFanHelper.entitlements */,
+			);
+			path = MacCleanerFanHelper;
 			sourceTree = "<group>";
 		};
 		G_MODELS /* Models */ = {
@@ -252,6 +281,8 @@
 				F059_DLS /* DiagnosticLogStore.swift */,
 				F060_TLAS /* ThermalLoadAlertService.swift */,
 				F061_TLAP /* ThermalLoadAlertPanelController.swift */,
+				F062_FCXPC /* FanControlXPC.swift */,
+				F064_FHI /* FanHelperInstaller.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -303,10 +334,12 @@
 				PHASE_SRC /* Sources */,
 				PHASE_RES /* Resources */,
 				PHASE_FWK /* Frameworks */,
+				PHASE_COPY_HELPER /* Embed Helper */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				DEP_HELPER /* Embed helper target */,
 			);
 			name = MacCleaner;
 			packageProductDependencies = (
@@ -315,6 +348,22 @@
 			productName = MacCleaner;
 			productReference = PROD /* MacCleaner.app */;
 			productType = "com.apple.product-type.application";
+		};
+		HELPER_TARGET /* MacCleanerFanHelper */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = CFGLIST_HELPER;
+			buildPhases = (
+				PHASE_HELPER_SRC /* Sources */,
+				PHASE_HELPER_FRAMEWORKS /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = MacCleanerFanHelper;
+			productName = MacCleanerFanHelper;
+			productReference = PROD_HELPER /* MacCleanerFanHelper */;
+			productType = "com.apple.product-type.tool";
 		};
 		TEST_TARGET /* MacCleanerTests */ = {
 			isa = PBXNativeTarget;
@@ -341,6 +390,11 @@
 			isa = PBXTargetDependency;
 			target = TARGET /* MacCleaner */;
 			targetProxy = TEST_PROXY /* PBXContainerItemProxy */;
+		};
+		DEP_HELPER /* Embed helper target */ = {
+			isa = PBXTargetDependency;
+			target = HELPER_TARGET /* MacCleanerFanHelper */;
+			targetProxy = HELPER_PROXY /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -379,6 +433,7 @@
 			targets = (
 				TARGET /* MacCleaner */,
 				TEST_TARGET /* MacCleanerTests */,
+				HELPER_TARGET /* MacCleanerFanHelper */,
 			);
 		};
 /* End PBXProject section */
@@ -397,6 +452,16 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		PHASE_COPY_HELPER /* Embed Helper */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "$(BUILT_PRODUCTS_DIR)/$(PRODUCT_NAME).app/Contents/Library/LaunchServices";
+			dstSubfolderSpec = 0;
+			files = (
+				A065_HELPER_COPY /* MacCleanerFanHelper in Embed Helper */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -473,6 +538,8 @@
 				A059_DLS /* DiagnosticLogStore.swift in Sources */,
 				A060_TLAS /* ThermalLoadAlertService.swift in Sources */,
 				A061_TLAP /* ThermalLoadAlertPanelController.swift in Sources */,
+				A062_FCXPC /* FanControlXPC.swift in Sources */,
+				A064_FHI /* FanHelperInstaller.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -481,6 +548,14 @@
 			buildActionMask = 2147483647;
 			files = (
 				A_TEST_SAFETY /* SafetyPolicyTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		PHASE_HELPER_SRC /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A063_HELPER /* SMCFanHelper.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -496,6 +571,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		TEST_PHASE_FWK /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		PHASE_HELPER_FRAMEWORKS /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -681,6 +763,41 @@
 			};
 			name = Release;
 		};
+		CFG_HELPER_DEBUG /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = MacCleanerFanHelper/MacCleanerFanHelper.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CREATE_INFOPLIST_SECTION_IN_BINARY = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = MacCleanerFanHelper/Info.plist;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.maccleaner.fanhelper;
+				PRODUCT_NAME = MacCleanerFanHelper;
+				SDKROOT = macosx;
+				SWIFT_VERSION = 5.0;
+				SUPPORTED_PLATFORMS = macosx;
+			};
+			name = Debug;
+		};
+		CFG_HELPER_RELEASE /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = MacCleanerFanHelper/MacCleanerFanHelper.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CREATE_INFOPLIST_SECTION_IN_BINARY = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = MacCleanerFanHelper/Info.plist;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.maccleaner.fanhelper;
+				PRODUCT_NAME = MacCleanerFanHelper;
+				SDKROOT = macosx;
+				SWIFT_VERSION = 5.0;
+				SUPPORTED_PLATFORMS = macosx;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -707,6 +824,15 @@
 			buildConfigurations = (
 				CFG_TEST_DEBUG /* Debug */,
 				CFG_TEST_RELEASE /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		CFGLIST_HELPER /* Build configuration list for PBXNativeTarget "MacCleanerFanHelper" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				CFG_HELPER_DEBUG /* Debug */,
+				CFG_HELPER_RELEASE /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

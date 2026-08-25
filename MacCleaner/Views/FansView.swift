@@ -188,6 +188,7 @@ struct FanHubView: View {
 
 struct FansView: View {
     @ObservedObject var monitor: SystemMonitor
+    @State private var fanActionMessage: String?
 
     private var hasFans: Bool { !monitor.fans.isEmpty }
 
@@ -249,6 +250,23 @@ struct FansView: View {
     private var fansPanel: some View {
         ScrollView(showsIndicators: false) {
         VStack(spacing: 16) {
+            if FanControlXPCClient.shared.availability == .helperNotInstalled {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Manual fan control requires a one-time administrator approval.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Color.textSecondaryLight)
+                    Button("Install Fan Control Helper") {
+                        FanControlXPCClient.shared.installHelper { success, message in
+                            fanActionMessage = success ? "Fan helper installed." : (message ?? "Could not install fan helper.")
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(12)
+                .background(RoundedRectangle(cornerRadius: 10).fill(Color.white))
+            }
+
             // ── Вентиляторы (фиксированная высота) ───────────────
             HStack(spacing: 12) {
                 ForEach(monitor.fans) { fan in
@@ -295,6 +313,34 @@ struct FansView: View {
                                 .animation(.easeInOut(duration: 0.5), value: fan.actualRPM)
                         }
                         .frame(width: 120)
+
+                        if FanControlXPCClient.shared.availability != .notAppleSilicon {
+                            HStack(spacing: 6) {
+                                Button("Auto") {
+                                    FanControlXPCClient.shared.setAutomatic(fanIndex: fan.id) { success, message in
+                                        DispatchQueue.main.async {
+                                            fanActionMessage = success ? "Automatic fan control restored." : (message ?? "Fan helper failed.")
+                                            monitor.refresh(forceSensors: true)
+                                        }
+                                    }
+                                }
+                                .buttonStyle(.bordered)
+
+                                Menu("Manual") {
+                                    ForEach([2000, 3000, 4000, 5000, 6000], id: \.self) { rpm in
+                                        Button("\(rpm) RPM") {
+                                            FanControlXPCClient.shared.setManualRPM(rpm, fanIndex: fan.id) { success, message in
+                                                DispatchQueue.main.async {
+                                                    fanActionMessage = success ? "Fan set to \(rpm) RPM." : (message ?? "Fan helper failed.")
+                                                    monitor.refresh(forceSensors: true)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                .menuStyle(.borderlessButton)
+                            }
+                        }
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 18)
@@ -304,6 +350,13 @@ struct FansView: View {
                             .shadow(color: Color.shadowLight, radius: 8, x: 0, y: 2)
                     )
                 }
+            }
+
+            if let fanActionMessage {
+                Text(fanActionMessage)
+                    .font(.system(size: 10))
+                    .foregroundStyle(Color.textTertiaryLight)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             // ── Температурные индикаторы ──────────────────────────
