@@ -52,11 +52,13 @@
 
 Статус: принято
 
-Решение: фактический элемент системной строки создаётся через AppKit `NSStatusItem`, а содержимое popover остаётся на SwiftUI. `StatusBarController` собирает каждый модуль в его собственном сохранённом стиле. `Battery` использует подписанный вертикальный gauge image: заполнение снизу вверх отражает load/heat, semantic color — severity, а compact marker (`%/C`, `%/G`, `%/°`, `C/F`, `%/clock`) делает выбранный формат видимым. `Values` выводит рядом с той же короткой подписью непосредственное процентное или числовое значение monospaced шрифтом. Тонкие системные разделители отделяют модули; AppKit attachments имеют явный baseline offset. Settings не содержит отдельного глобального `Display style`: style и format выбираются icon-only segmented controls непосредственно в каждой строке, а прежнее глобальное значение мигрирует на все gauges. Порядок включённых модулей меняется pointer-drag и сохраняется в `SettingsManager`. Если пользователь отключил все gauges, status item использует bundle icon приложения через `NSApplication.applicationIconImage`.
+Решение: фактический элемент системной строки создаётся через AppKit `NSStatusItem`, а содержимое popover остаётся на SwiftUI. `StatusBarController` размещает passthrough `NSHostingView` внутри `NSStatusBarButton`: gauges без разделителей объединяются по два в вертикальные колонки и сохраняют индивидуальные `Battery / Values` и format-настройки. Если пользователь отключил все gauges, status item использует bundle icon приложения через `NSApplication.applicationIconImage`.
+
+Popover больше не имеет Watch-score и трёхчастного Overview/Details/Tools. System переиспользует реальные `DashboardMetricCard`, `MemoryDashboardCard` и `BatteryDashboardCard`, а отдельный Tools сохраняет быстрые утилиты. Это исключает вторую сокращённую модель карточек и сохраняет одинаковые размеры, данные, графики и accessory battery rings. System/Tools стали icon-only controls возле bundle icon. В Edit drag-handle запускает локальный high-priority direct-drag: исходная точка захвата сохраняется как offset, ScrollView не перехватывает вертикальное перемещение, поднятая карточка следует за указателем без центрирования, а geometry preferences соседних карточек формируют пружинно анимированный временный порядок. После отпускания поднятая копия сначала анимируется к конечной frame, затем одной transaction без анимации заменяется уже находящейся под ней основной карточкой. `SettingsManager` принимает только полный набор модулей без потерь и дубликатов. Один постоянно существующий `TimelineView` использует непрерывную синусоиду только в Edit, поэтому `Done` не меняет identity карточки и гарантированно прекращает колебание. Remove control и dashed restore menu остаются доступны только в Edit.
 
 Обоснование: SwiftUI `MenuBarExtra` обрезал динамическую составную подпись до первого модуля, хотя preview настроек показывал все модули. AppKit-мост сохраняет нативное поведение и даёт предсказуемый контроль реальной ширины status item.
 
-Последствия: контроллер наблюдает общий `SystemMonitor` и `SettingsManager`, поэтому отдельный sampler не создаётся. Сам клик по status item показывает transient popover без активации приложения и не поднимает главное окно. Для закрытия по клику в другом приложении используется временный глобальный mouse monitor, который не перехватывает события и удаляется делегатом сразу после закрытия popover. Открытие главного окна, Shelf и Settings передаётся в SwiftUI popover отдельными явными действиями; только действия, которым действительно нужно окно приложения, вызывают его активацию.
+Последствия: контроллер наблюдает общий `SystemMonitor` и `SettingsManager`, поэтому отдельный sampler не создаётся. `MenuBarRefreshDriver` coalesce-ит burst опубликованных monitor-полей, status item обновляется не чаще раза в секунду, а hosting controller не пересоздаётся при каждом клике — это ограничивает SwiftUI layout churn в menu bar. Сам клик по status item показывает transient popover без активации приложения и не поднимает главное окно. Для закрытия по клику в другом приложении используется временный global mouse monitor. Порядок и видимость dashboard-карточек хранятся отдельно от состава status-item gauges; удаление карточки не отключает сборщик и не меняет gauges в menu bar. Визуальная подложка строится на системном `.thinMaterial` и сдержанных semantic tint-слоях, а не на обводках и разделителях, поэтому остаётся адаптивной к фону macOS; короткая alpha-mask ScrollView скрывает оба резких края без отдельного размытого overlay. Header/footer controls имеют стабильную одинаковую hit-area, а рамка и фон возникают только при hover, не меняя layout.
 
 Связанные файлы: `MacCleaner/MacCleanerApp.swift`, `MacCleaner/Settings/SettingsView.swift`.
 
@@ -210,6 +212,20 @@ Startup намеренно убран из левого списка: Optimize �
 
 Связанные файлы: `MacCleaner/Services/CleanerService.swift`, `MacCleaner/Views/CleanerView.swift`.
 
+## Apple Silicon fan control requires a privileged helper
+
+Статус: в работе
+
+Решение: мониторинг вентиляторов на Apple Silicon должен читать реальные SMC-ключи `FNum`/`FpNm` и `F%dAc`, не создавать модельные placeholder-записи. Запись ручного режима не выполняется из SwiftUI-процесса: для M-чипов нужен постоянный подписанный privileged helper с XPC/SMJobBless, который пробует `F%dMd` и `F%dmd`, а на поколениях с `Ftst` поддерживает диагностическую последовательность и восстановление Auto после сна/завершения.
+
+Обоснование: текущий Intel-путь `FS! `/`F%dTg` не управляет Apple Silicon и создавал ложные RPM. Ограничение записи связано с root/firmware thermal policy, а не с платной подпиской само по себе; Developer ID нужен для установки и подписания privileged helper через SMJobBless и для нормального распространения.
+
+Последствия: до добавления helper приложение показывает только фактически доступную телеметрию и не обещает ручное управление. Реализация control path должна быть отдельным target/helper с безопасным IPC, arbitration нескольких клиентов и обязательным возвратом в системный режим.
+
+Связанные файлы: `MacCleaner/Services/SMCService.swift`, `docs/knowledge/Opportunities.md`.
+
+Дополнение: helper теперь является отдельным Xcode target `MacCleanerFanHelper`, встраивается в `Contents/Library/LaunchServices`, а установка вызывается через `SMJobBless` с `SMPrivilegedExecutables`/`SMAuthorizedClients`. Сборка без подписи намеренно проверяет только структуру и компиляцию; end-to-end bless требует Developer ID-сертификат и реальный Apple Silicon Mac.
+
 ## Retire legacy root helper
 
 Статус: принято
@@ -262,7 +278,7 @@ Startup намеренно убран из левого списка: Optimize �
 
 Последствия: обновления могут скачиваться из GitHub, проверяться EdDSA и устанавливаться без Developer ID, если приложение находится в записываемом месте, например `/Applications`, а не запущено с read-only DMG. Текущая GitHub DMG распространяется с ad-hoc подписью и предупреждением неизвестного разработчика при первой установке. Developer ID signing и notarization остаются отдельным улучшением доверия и распространения, но не блокируют сам Sparkle update flow.
 
-Release Notes хранятся в единственном файле `MacCleaner/ReleaseNotes.md`, который использует UI и release workflow.
+Release Notes хранятся в единственном публикуемом файле `MacCleaner/ReleaseNotes.md`, который использует release workflow. Updates UI показывает состояние Sparkle без второй копии changelog. Формат и процедура публикации закреплены в `docs/knowledge/github/GitHubAndReleases.md`.
 
 Связанные файлы: `MacCleaner/Services/UpdateService.swift`, `MacCleaner/Info.plist`, `MacCleaner/ReleaseNotes.md`, `.github/workflows/release.yml`, `MacCleaner.xcodeproj/project.pbxproj`.
 
