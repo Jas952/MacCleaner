@@ -224,7 +224,7 @@ Startup намеренно убран из левого списка: Optimize �
 
 Связанные файлы: `MacCleaner/Services/SMCService.swift`, `docs/knowledge/Opportunities.md`.
 
-Дополнение: helper теперь является отдельным Xcode target `MacCleanerFanHelper`, встраивается в `Contents/Library/LaunchServices`, а установка вызывается через `SMJobBless` с `SMPrivilegedExecutables`/`SMAuthorizedClients`. Сборка без подписи намеренно проверяет только структуру и компиляцию; end-to-end bless требует Developer ID-сертификат и реальный Apple Silicon Mac.
+Дополнение: helper теперь является отдельным Xcode target `MacCleanerFanHelper`, встраивается в `Contents/Library/LaunchServices`, а установка вызывается через `SMJobBless` с `SMPrivilegedExecutables`/`SMAuthorizedClients` и встроенным launchd plist для Mach service. Helper отклоняет XPC-клиентов, не соответствующих code-signing requirement MacCleaner, проверяет FPE2 bounds до преобразования и при неудачной записи RPM возвращает fan mode и `Ftst` в Auto. Сборка без подписи намеренно проверяет только структуру и компиляцию; end-to-end bless требует Developer ID-сертификат и реальный Apple Silicon Mac.
 
 ## Retire legacy root helper
 

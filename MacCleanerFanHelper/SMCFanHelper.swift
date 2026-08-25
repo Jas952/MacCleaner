@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import IOKit
+import Security
 
 @objc protocol MacCleanerFanHelperProtocol {
     func status(withReply reply: @escaping (Bool, String?) -> Void)
@@ -43,10 +44,13 @@ private final class SMCWriter {
 
     func setManual(rpm: Int, fan: Int) -> (Bool, String?) {
         guard fan >= 0, fan < 16, let modeKey = modeKey(for: fan) else { return (false, "Fan mode key is unavailable.") }
+        guard (0...16_383).contains(rpm) else { return (false, "Fan target is outside the FPE2 range.") }
+        var forceTestEnabled = false
         if !writeUInt8(key: modeKey, value: 1) {
             guard hasForceTest, writeUInt8(key: "Ftst", value: 1) else {
                 return (false, "Firmware rejected manual mode.")
             }
+            forceTestEnabled = true
             // thermalmonitord yields asynchronously after Ftst is enabled.
             // Keep the retry bounded so a broken firmware cannot hang the UI.
             let deadline = Date().addingTimeInterval(10)
@@ -55,10 +59,17 @@ private final class SMCWriter {
                 if writeUInt8(key: modeKey, value: 1) { unlocked = true; break }
                 usleep(100_000)
             }
-            guard unlocked else { return (false, "Timed out waiting for thermal management to yield control.") }
+            guard unlocked else {
+                _ = writeUInt8(key: "Ftst", value: 0)
+                return (false, "Timed out waiting for thermal management to yield control.")
+            }
         }
         let targetKey = String(format: "F%dTg", fan)
-        guard writeFPE2(key: targetKey, value: rpm) else { return (false, "Firmware rejected the fan target.") }
+        guard writeFPE2(key: targetKey, value: rpm) else {
+            _ = writeUInt8(key: modeKey, value: 0)
+            if forceTestEnabled { _ = writeUInt8(key: "Ftst", value: 0) }
+            return (false, "Firmware rejected the fan target; automatic mode was restored.")
+        }
         return (true, nil)
     }
 
@@ -112,8 +123,8 @@ private final class SMCWriter {
     }
 
     private func writeFPE2(key: String, value: Int) -> Bool {
-        guard let info = readKeyInfo(key: key) else { return false }
-        let raw = UInt16(max(0, min(value, 20_000)) * 4)
+        guard (0...16_383).contains(value), let info = readKeyInfo(key: key) else { return false }
+        let raw = UInt16(value * 4)
         var input = SMCKeyData(); var output = SMCKeyData()
         input.key = code(key); input.infoSize = info.infoSize; input.data8 = 6
         input.bytes.0 = UInt8(raw >> 8); input.bytes.1 = UInt8(raw & 0xff)
@@ -128,6 +139,8 @@ private final class SMCWriter {
 }
 
 private final class Helper: NSObject, NSXPCListenerDelegate, MacCleanerFanHelperProtocol {
+    private static let authorizedClientRequirement =
+        "identifier \"com.maccleaner.app\" and anchor apple generic"
     private let listener = NSXPCListener(machServiceName: "com.maccleaner.fanhelper")
     private let smc = SMCWriter()
     private var manualRPMByFan: [Int: Int] = [:]
@@ -153,12 +166,30 @@ private final class Helper: NSObject, NSXPCListenerDelegate, MacCleanerFanHelper
     }
 
     func listener(_ listener: NSXPCListener, shouldAcceptNewConnection connection: NSXPCConnection) -> Bool {
+        guard isAuthorizedClient(connection) else { return false }
         connection.exportedInterface = NSXPCInterface(with: MacCleanerFanHelperProtocol.self)
         connection.exportedObject = self
         connection.invalidationHandler = { [weak self] in _ = self?.smc?.setAllAuto() }
         connection.interruptionHandler = { [weak self] in _ = self?.smc?.setAllAuto() }
         connection.resume()
         return true
+    }
+
+    private func isAuthorizedClient(_ connection: NSXPCConnection) -> Bool {
+        let attributes = [
+            kSecGuestAttributePid as String: NSNumber(value: connection.processIdentifier)
+        ] as CFDictionary
+        var guestCode: SecCode?
+        guard SecCodeCopyGuestWithAttributes(nil, attributes, [], &guestCode) == errSecSuccess,
+              let guestCode else { return false }
+
+        var requirement: SecRequirement?
+        guard SecRequirementCreateWithString(
+            Self.authorizedClientRequirement as CFString,
+            [],
+            &requirement
+        ) == errSecSuccess, let requirement else { return false }
+        return SecCodeCheckValidity(guestCode, [], requirement) == errSecSuccess
     }
 
     func status(withReply reply: @escaping (Bool, String?) -> Void) {

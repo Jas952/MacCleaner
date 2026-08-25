@@ -42,11 +42,12 @@ final class FanControlXPCClient {
 
     var availability: FanControlAvailability {
         guard ProcessInfo.processInfo.isAppleSilicon else { return .notAppleSilicon }
-        return connection == nil ? .helperNotInstalled : .ready
+        let installedPath = "/Library/PrivilegedHelperTools/\(machServiceName)"
+        return FileManager.default.isExecutableFile(atPath: installedPath) ? .ready : .helperNotInstalled
     }
 
     func setManualRPM(_ rpm: Int, fanIndex: Int, completion: @escaping (Bool, String?) -> Void) {
-        guard (0...20_000).contains(rpm), fanIndex >= 0 else {
+        guard (0...16_383).contains(rpm), fanIndex >= 0 else {
             completion(false, "The requested fan value is outside the safe range.")
             return
         }

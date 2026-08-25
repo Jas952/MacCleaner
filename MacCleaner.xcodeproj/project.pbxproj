@@ -174,6 +174,7 @@
 		F064_FHI /* FanHelperInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FanHelperInstaller.swift; sourceTree = "<group>"; };
 		F064_HELPER_PLIST /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		F065_HELPER_ENT /* MacCleanerFanHelper.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = MacCleanerFanHelper.entitlements; sourceTree = "<group>"; };
+		F066_HELPER_LAUNCHD /* Launchd.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Launchd.plist; sourceTree = "<group>"; };
 		PROD_HELPER /* MacCleanerFanHelper */ = {isa = PBXFileReference; explicitFileType = compiled.mach-o.executable; includeInIndex = 0; path = MacCleanerFanHelper; sourceTree = BUILT_PRODUCTS_DIR; };
 		F010 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		F_RELEASE_NOTES /* ReleaseNotes.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = ReleaseNotes.md; sourceTree = "<group>"; };
@@ -234,6 +235,7 @@
 				F063_HELPER /* SMCFanHelper.swift */,
 				F064_HELPER_PLIST /* Info.plist */,
 				F065_HELPER_ENT /* MacCleanerFanHelper.entitlements */,
+				F066_HELPER_LAUNCHD /* Launchd.plist */,
 			);
 			path = MacCleanerFanHelper;
 			sourceTree = "<group>";
@@ -772,6 +774,12 @@
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = MacCleanerFanHelper/Info.plist;
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				OTHER_LDFLAGS = (
+					"-sectcreate",
+					__TEXT,
+					__launchd_plist,
+					"$(SRCROOT)/MacCleanerFanHelper/Launchd.plist",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.maccleaner.fanhelper;
 				PRODUCT_NAME = MacCleanerFanHelper;
 				SDKROOT = macosx;
@@ -790,6 +798,12 @@
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = MacCleanerFanHelper/Info.plist;
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				OTHER_LDFLAGS = (
+					"-sectcreate",
+					__TEXT,
+					__launchd_plist,
+					"$(SRCROOT)/MacCleanerFanHelper/Launchd.plist",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.maccleaner.fanhelper;
 				PRODUCT_NAME = MacCleanerFanHelper;
 				SDKROOT = macosx;

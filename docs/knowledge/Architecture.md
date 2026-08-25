@@ -109,7 +109,7 @@ Storage предварительно создаётся один раз и со�
 
 ### Apple Silicon fan control boundary
 
-`MacCleanerFanHelper/SMCFanHelper.swift` — отдельный privileged Swift executable. Он открывает `AppleSMC`, пробует firmware-dependent mode keys (`F%dMd`/`F%dmd`), выполняет bounded `Ftst` unlock на поколениях, где это требуется, и возвращает все вентиляторы в Auto при разрыве клиента. После wake активные ручные RPM восстанавливаются. `FanHelperInstaller` устанавливает helper через `SMJobBless`; без установленного или корректно подписанного helper UI сообщает об ошибке, а не имитирует успешную запись.
+`MacCleanerFanHelper/SMCFanHelper.swift` — отдельный privileged Swift executable. Он открывает `AppleSMC`, пробует firmware-dependent mode keys (`F%dMd`/`F%dmd`), выполняет bounded `Ftst` unlock на поколениях, где это требуется, и возвращает все вентиляторы в Auto при разрыве клиента. Встроенный launchd plist регистрирует только Mach service `com.maccleaner.fanhelper`, а каждое входящее XPC-соединение проходит проверку code-signing requirement основного приложения. Ошибка записи target RPM откатывает режим в Auto и снимает `Ftst`; FPE2-значение проверяется до преобразования. После wake активные ручные RPM восстанавливаются. `FanHelperInstaller` устанавливает helper через `SMJobBless`; наличие установленного executable проверяется отдельно от lifecycle XPC connection. Без установленного или корректно подписанного helper UI сообщает об ошибке, а не имитирует успешную запись.
 
 ### Drop Shelf
 
