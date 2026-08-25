@@ -275,16 +275,18 @@ struct DesktopManagerView: View {
 
             // Breadcrumb
             HStack(spacing: 2) {
-                ForEach(Array(service.breadcrumbs.enumerated()), id: \.offset) { i, url in
+                let breadcrumbs = service.breadcrumbs
+                ForEach(breadcrumbs.indices, id: \.self) { i in
+                    let url = breadcrumbs[i]
                     if i > 0 {
                         Image(systemName: "chevron.right")
                             .font(.system(size: 9, weight: .medium))
                             .foregroundStyle(Color.textTertiaryLight)
                     }
                     Button(action: { service.navigate(to: url) }) {
-                        Text(url == service.desktopURL ? "Desktop" : url.lastPathComponent)
-                            .font(.system(size: 12, weight: i == service.breadcrumbs.count - 1 ? .semibold : .regular))
-                            .foregroundStyle(i == service.breadcrumbs.count - 1 ? Color.textPrimaryLight : Color.textSecondaryLight)
+                        Text(url == service.rootURL ? "Desktop" : url.lastPathComponent)
+                            .font(.system(size: 12, weight: i == breadcrumbs.count - 1 ? .semibold : .regular))
+                            .foregroundStyle(i == breadcrumbs.count - 1 ? Color.textPrimaryLight : Color.textSecondaryLight)
                             .lineLimit(1)
                     }.buttonStyle(.plain)
                 }
@@ -1374,7 +1376,7 @@ struct DesktopCanvasView: View {
 
     // Только файлы прямо в Desktop, не из вложенных папок
     private var desktopFiles: [DesktopFile] {
-        let desktopPath = service.desktopURL.path
+        let desktopPath = service.rootURL.path
         return service.files.filter {
             $0.url.deletingLastPathComponent().path == desktopPath
         }

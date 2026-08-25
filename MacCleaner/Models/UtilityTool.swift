@@ -36,7 +36,11 @@ enum UtilityToolID: String, CaseIterable, Identifiable, Codable {
 
     // Beta tools remain visible in Settings for transparency, but are not
     // enabled in the working Tools sidebar until their implementation is ready.
-    var isAvailableInTools: Bool { !isBeta }
+    // File Reader is a usable BETA prototype; only the unfinished media,
+    // audio and charge tools stay out of the working Tools sidebar.
+    var isAvailableInTools: Bool {
+        ![.mediaCompressor, .audioMixer, .chargeLimit].contains(self)
+    }
 
     var title: String {
         switch self {

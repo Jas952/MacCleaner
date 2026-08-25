@@ -345,7 +345,7 @@ struct AppModalOverlay<ModalContent: View>: View {
 
     var body: some View {
         ZStack {
-            Color.black.opacity(0.08)
+            Color.black.opacity(0.18)
                 .ignoresSafeArea()
                 .contentShape(Rectangle())
                 .onTapGesture(perform: onDismiss)
@@ -368,9 +368,8 @@ struct AppModalOverlay<ModalContent: View>: View {
                             .font(.system(size: 11, weight: .bold))
                             .foregroundStyle(Color.textSecondaryLight)
                             .frame(width: 30, height: 30)
-                            .background(Color.surfaceSecondary)
-                            .clipShape(Circle())
-                            .contentShape(Circle())
+                            .background(Color.borderLight.opacity(0.55))
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .keyboardShortcut(.cancelAction)
@@ -382,7 +381,7 @@ struct AppModalOverlay<ModalContent: View>: View {
                 Rectangle().fill(Color.borderLight).frame(height: 1)
 
                 if scrollsContent {
-                    ScrollView(.vertical, showsIndicators: false) {
+                    ScrollView(.vertical, showsIndicators: true) {
                         modalContent()
                             .padding(22)
                             .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -390,22 +389,14 @@ struct AppModalOverlay<ModalContent: View>: View {
                 } else {
                     modalContent()
                         .padding(22)
-                        .frame(
-                            maxWidth: .infinity,
-                            maxHeight: .infinity,
-                            alignment: .topLeading
-                        )
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 }
             }
             .frame(width: width, height: height)
             .background(Color.surfaceLight)
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .strokeBorder(Color.borderLight, lineWidth: 1)
-            )
+            .overlay(Rectangle().strokeBorder(Color.borderLight, lineWidth: 1))
             .shadow(color: .black.opacity(0.20), radius: 22, y: 8)
-            .transition(.scale(scale: 0.96).combined(with: .opacity))
+            .transition(.opacity)
         }
         .zIndex(100)
         .animation(.easeInOut(duration: 0.24), value: true)
@@ -516,21 +507,16 @@ struct AppFooter: View {
             Button {
                 showUpdates()
             } label: {
-                HStack(spacing: 5) {
-                    Image(systemName: "info.circle")
-                        .font(.system(size: 12))
-
-                    Text(updateService.status.footerText)
-                        .font(.system(size: 11, weight: updateService.status == .upToDate ? .regular : .medium))
-                }
-                .foregroundStyle(footerStatusColor)
-                .padding(.horizontal, 3)
-                .padding(.vertical, 2)
-                .contentShape(Rectangle())
+                Image(systemName: "info.circle")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Color.textSecondaryLight)
             }
             .buttonStyle(.plain)
             .help("About and Updates")
-            .accessibilityLabel("About and Updates")
+
+            Text(updateService.status.footerText)
+                .font(.system(size: 11, weight: updateService.status == .upToDate ? .regular : .medium))
+                .foregroundStyle(footerStatusColor)
 
             Spacer()
         }

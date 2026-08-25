@@ -145,16 +145,16 @@ class DesktopService: ObservableObject {
     private var history: [URL] = []
     private var forwardStack: [URL] = []
 
-    let desktopURL: URL = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first!
+    let rootURL: URL
 
     var canGoBack: Bool    { !history.isEmpty }
     var canGoForward: Bool { !forwardStack.isEmpty }
-    var isAtDesktop: Bool  { currentURL == desktopURL }
+    var isAtDesktop: Bool  { currentURL == rootURL }
 
     var breadcrumbs: [URL] {
         var parts: [URL] = []
         var url = currentURL
-        while url.path != desktopURL.deletingLastPathComponent().path {
+        while url.path != rootURL.deletingLastPathComponent().path {
             parts.insert(url, at: 0)
             let parent = url.deletingLastPathComponent()
             if parent == url { break }
@@ -163,8 +163,9 @@ class DesktopService: ObservableObject {
         return parts
     }
 
-    init() {
-        self.currentURL = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first!
+    init(rootURL: URL = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first!) {
+        self.rootURL = rootURL
+        self.currentURL = rootURL
     }
 
     // MARK: - Рекурсивный подсчёт всего Desktop
@@ -172,7 +173,7 @@ class DesktopService: ObservableObject {
     func scanDesktopSummary() {
         guard !isScanningDesktopSummary else { return }
         isScanningDesktopSummary = true
-        let root = desktopURL
+        let root = rootURL
         Task.detached(priority: .utility) {
             let fm = FileManager.default
             let protectionPolicy = SafeDeletionService.currentProtectionPolicy()
@@ -366,7 +367,7 @@ class DesktopService: ObservableObject {
     }
 
     func scan() {
-        scan(url: desktopURL)
+        scan(url: rootURL)
     }
 
     private func scan(url: URL) {
@@ -449,7 +450,7 @@ class DesktopService: ObservableObject {
     // Called explicitly when Canvas tab opens — loads real Finder positions without blocking regular scan
     func loadCanvasPositions() {
         Task.detached(priority: .background) {
-            let positions = Self.readAllFinderPositions(in: self.desktopURL)
+            let positions = Self.readAllFinderPositions(in: self.rootURL)
             guard !positions.isEmpty else { return }
             await MainActor.run {
                 self.files = self.files.map { f in
@@ -594,7 +595,7 @@ class DesktopService: ObservableObject {
 
             for file in toOrganize {
                 let folderName = file.category.rawValue
-                let destFolder = self.desktopURL.appendingPathComponent(folderName)
+                let destFolder = self.rootURL.appendingPathComponent(folderName)
 
                 // Create folder if needed
                 if !fm.fileExists(atPath: destFolder.path) {
