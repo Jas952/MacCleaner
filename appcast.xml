@@ -3,18 +3,38 @@
     <channel>
         <title>MacCleaner</title>
         <item>
-            <title>1.0.6</title>
-            <pubDate>Mon, 20 Jul 2026 18:21:33 +0000</pubDate>
+            <title>1.0.7</title>
+            <pubDate>Tue, 25 Aug 2026 20:02:17 +0000</pubDate>
             <link>https://github.com/Jas952/MacCleaner</link>
-            <sparkle:version>8</sparkle:version>
-            <sparkle:shortVersionString>1.0.6</sparkle:shortVersionString>
+            <sparkle:version>9</sparkle:version>
+            <sparkle:shortVersionString>1.0.7</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[# MacCleaner 1.0.6
+            <description sparkle:format="markdown"><![CDATA[# MacCleaner 1.0.7
 
-- Other improvements and bug fixes across the Tools workspace, settings, diagnostics, and utility interactions.
+## What's new
+
+New tools:
+
+- Added the local BETA File Reader to Tools for previewing PDF, image, text, and binary files without uploading or modifying the source.
+
+Other changes:
+
+- Rebuilt the menu bar popover as a compact system dashboard with the same CPU, memory, disk, network, graphics, and battery cards used in MacCleaner.
+- Added Edit mode for reordering, hiding, and restoring menu bar dashboard cards, with smoother drag, settling, scrolling, and hover behavior.
+- Stacked status indicators into compact pairs and kept the MacCleaner app icon visible when all indicators are disabled.
+- Improved Apple Silicon fan telemetry and now reports helper availability instead of showing placeholder fan data.
+- Refined the update panel, Desktop workflow, companion Browser Monitor card, and general interface reliability.
+
+## Install
+
+1. Download `MacCleaner.dmg` below.
+2. Open the DMG and drag MacCleaner to Applications.
+3. Open MacCleaner from Applications. If macOS blocks the first launch, allow it in **System Settings → Privacy & Security**.
+
+This build uses ad-hoc signing and is not notarized, so macOS may show an unknown-developer warning on first launch. Privileged manual fan control requires a future Developer ID build; fan telemetry remains available.
 ]]></description>
-            <enclosure url="https://github.com/Jas952/MacCleaner/releases/download/v1.0.6/MacCleaner.dmg" length="9290043" type="application/octet-stream" sparkle:edSignature="4UAGNMFow+T2x2cwagpuU1nPrPRKCv+bWN3GaM2HOgbGpD2PSYc+TRkytHP2p1o9edsJE4/i90eYTnpXM85wCA=="/>
+            <enclosure url="https://github.com/Jas952/MacCleaner/releases/download/v1.0.7/MacCleaner.dmg" length="9406987" type="application/octet-stream" sparkle:edSignature="/H2GOInFu55tmjUwzW2PHMeEzqxLJzP+XDjEjX/2ZUOdwxiUgZALF51HEK/IK5CWWGHw0wVxIWguAjryJnLxAw=="/>
         </item>
     </channel>
 </rss>
