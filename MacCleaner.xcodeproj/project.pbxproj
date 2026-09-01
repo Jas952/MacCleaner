@@ -11,6 +11,9 @@
 		A004_SM /* SettingsManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = F004_SM /* SettingsManager.swift */; };
 		A005_SV /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F005_SV /* SettingsView.swift */; };
 		A002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F002 /* ContentView.swift */; };
+		A067_MBG /* MenuBarGraphsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F067_MBG /* MenuBarGraphsView.swift */; };
+		A068_MPH /* MenuBarProcessHistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F068_MPH /* MenuBarProcessHistoryView.swift */; };
+		A069_PHS /* ProcessHistoryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F069_PHS /* ProcessHistoryStore.swift */; };
 		A003 /* SystemInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = F003 /* SystemInfo.swift */; };
 		A004 /* SystemMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = F004 /* SystemMonitor.swift */; };
 		A005 /* OverviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F005 /* OverviewView.swift */; };
@@ -105,6 +108,9 @@
 		F004_SM /* SettingsManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Settings/SettingsManager.swift; sourceTree = "<group>"; };
 		F005_SV /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Settings/SettingsView.swift; sourceTree = "<group>"; };
 		F002 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		F067_MBG /* MenuBarGraphsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarGraphsView.swift; sourceTree = "<group>"; };
+		F068_MPH /* MenuBarProcessHistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarProcessHistoryView.swift; sourceTree = "<group>"; };
+		F069_PHS /* ProcessHistoryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessHistoryStore.swift; sourceTree = "<group>"; };
 		F003 /* SystemInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemInfo.swift; sourceTree = "<group>"; };
 		F004 /* SystemMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemMonitor.swift; sourceTree = "<group>"; };
 		F005 /* OverviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverviewView.swift; sourceTree = "<group>"; };
@@ -213,6 +219,7 @@
 				G_MODELS /* Models */,
 				G_SERVICES /* Services */,
 				G_VIEWS /* Views */,
+				G_MENUBAR /* MenuBar */,
 				F010 /* Assets.xcassets */,
 				F_RELEASE_NOTES /* ReleaseNotes.md */,
 				F011 /* Info.plist */,
@@ -250,6 +257,16 @@
 				F055_UTM /* UtilityTool.swift */,
 			);
 			path = Models;
+			sourceTree = "<group>";
+		};
+		G_MENUBAR /* MenuBar */ = {
+			isa = PBXGroup;
+			children = (
+				F067_MBG /* MenuBarGraphsView.swift */,
+				F068_MPH /* MenuBarProcessHistoryView.swift */,
+				F069_PHS /* ProcessHistoryStore.swift */,
+			);
+			path = MenuBar;
 			sourceTree = "<group>";
 		};
 		G_SERVICES /* Services */ = {
@@ -474,6 +491,9 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A067_MBG /* MenuBarGraphsView.swift in Sources */,
+				A068_MPH /* MenuBarProcessHistoryView.swift in Sources */,
+				A069_PHS /* ProcessHistoryStore.swift in Sources */,
 				A004 /* SystemMonitor.swift in Sources */,
 				A005 /* OverviewView.swift in Sources */,
 				A001 /* MacCleanerApp.swift in Sources */,

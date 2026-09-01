@@ -50,6 +50,36 @@ struct FanInfo: Identifiable {
     var label: String { id == 0 ? "Left Side" : "Right Side" }
 }
 
+/// Decodes the numeric formats returned by AppleSMC. Apple Silicon fan keys
+/// use native little-endian IEEE-754 floats, while Intel fan keys commonly use
+/// big-endian 14.2 fixed point (`fpe2`).
+enum SMCNumericDecoder {
+    static func decode(dataType: String, bytes: [UInt8]) -> Float {
+        guard !bytes.isEmpty else { return 0 }
+        switch dataType {
+        case "flt ":
+            guard bytes.count >= 4 else { return 0 }
+            let bits = UInt32(bytes[0])
+                | UInt32(bytes[1]) << 8
+                | UInt32(bytes[2]) << 16
+                | UInt32(bytes[3]) << 24
+            let value = Float(bitPattern: bits)
+            return value.isFinite ? value : 0
+        case "fpe2":
+            guard bytes.count >= 2 else { return 0 }
+            let raw = UInt16(bytes[0]) << 8 | UInt16(bytes[1])
+            return Float(raw) / 4
+        case "ui8 ":
+            return Float(bytes[0])
+        case "ui16":
+            guard bytes.count >= 2 else { return 0 }
+            return Float(UInt16(bytes[0]) << 8 | UInt16(bytes[1]))
+        default:
+            return 0
+        }
+    }
+}
+
 enum SensorCategory: String {
     case airflow  = "Airflow"
     case cpuCore  = "CPU Cores"
@@ -76,37 +106,47 @@ struct ThermalInfo {
 
 // MARK: - Legacy SMC I/O
 
-// Exact layout matching the C SMCParamStruct used by Apple's SMC driver.
-// Byte-for-byte compatible with smcFanControl / SMCKit.
-// SMCParamStruct — exactly 80 bytes (verified: stride=80)
-// key(4)+vers(6)+pLim(14)+info(9)+iAttr+result+status+data8(4)+pad(2)+data32(4)+bytes(32)=80
+private struct SMCVersion {
+    var major: UInt8 = 0
+    var minor: UInt8 = 0
+    var build: UInt8 = 0
+    var reserved: UInt8 = 0
+    var release: UInt16 = 0
+}
+
+private struct SMCPowerLimitData {
+    var version: UInt16 = 0
+    var length: UInt16 = 0
+    var cpuPLimit: UInt32 = 0
+    var gpuPLimit: UInt32 = 0
+    var memPLimit: UInt32 = 0
+}
+
+private struct SMCKeyInfo {
+    var dataSize: UInt32 = 0
+    var dataType: UInt32 = 0
+    var dataAttributes: UInt8 = 0
+}
+
+// Exact 80-byte layout matching Apple's SMCParamStruct. Keeping the nested
+// structs is significant: flattening these fields changes Swift's alignment
+// and shifts `data8`/`bytes`, making every hardware read appear empty.
 private struct SMCKeyData {
-    var key:      UInt32 = 0   // +0
-    var vers0:    UInt8  = 0   // +4
-    var vers1:    UInt8  = 0   // +5
-    var vers2:    UInt8  = 0   // +6
-    var vers3:    UInt8  = 0   // +7
-    var vers4:    UInt16 = 0   // +8  → 10
-    var pLim0:    UInt16 = 0   // +10 → 12
-    var pLim1:    UInt16 = 0   // +12 → 14
-    var pLim2:    UInt32 = 0   // +14 → 18
-    var pLim3:    UInt32 = 0   // +18 → 22
-    var pLim4:    UInt32 = 0   // +22 → 26
-    var infoSize: UInt32 = 0   // +26 → 30
-    var infoType: UInt32 = 0   // +30 → 34
-    var infoAttr: UInt8  = 0   // +34
-    var result:   UInt8  = 0   // +35
-    var status:   UInt8  = 0   // +36
-    var data8:    UInt8  = 0   // +37
-    var _pad0:    UInt8  = 0   // +38 (padding for data32 UInt32 alignment)
-    var _pad1:    UInt8  = 0   // +39
-    var data32:   UInt32 = 0   // +40 → 44
+    var key: UInt32 = 0
+    var version = SMCVersion()
+    var pLimitData = SMCPowerLimitData()
+    var keyInfo = SMCKeyInfo()
+    var padding: UInt16 = 0
+    var result: UInt8 = 0
+    var status: UInt8 = 0
+    var data8: UInt8 = 0
+    var data32: UInt32 = 0
     var bytes: (UInt8,UInt8,UInt8,UInt8,UInt8,UInt8,UInt8,UInt8,
                 UInt8,UInt8,UInt8,UInt8,UInt8,UInt8,UInt8,UInt8,
                 UInt8,UInt8,UInt8,UInt8,UInt8,UInt8,UInt8,UInt8,
                 UInt8,UInt8,UInt8,UInt8,UInt8,UInt8,UInt8,UInt8) = (
         0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0)  // stride=80 verified
+        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0)
 }
 
 private let KERNEL_INDEX_SMC: UInt32 = 2
@@ -118,6 +158,7 @@ private let SMC_CMD_READ_KEYINFO: UInt8 = 9
 
 final class SMCService {
     static let shared = SMCService()
+    static let protocolDataStride = MemoryLayout<SMCKeyData>.stride
     private var conn: io_connect_t = 0
     private(set) var isOpen = false
 
@@ -149,11 +190,11 @@ final class SMCService {
         guard count > 0 else { return [] }
         var fans: [FanInfo] = []
         for i in 0..<Int(count) {
-            let actual = readFPE2(key: String(format: SMCKey.fanActualRPM, i))
-            let min    = readFPE2(key: String(format: SMCKey.fanMinRPM, i))
-            let max    = readFPE2(key: String(format: SMCKey.fanMaxRPM, i))
-            let safe   = readFPE2(key: String(format: SMCKey.fanSafeRPM, i))
-            let target = readFPE2(key: String(format: SMCKey.fanTargetRPM, i))
+            let actual = readNumeric(key: String(format: SMCKey.fanActualRPM, i))
+            let min    = readNumeric(key: String(format: SMCKey.fanMinRPM, i))
+            let max    = readNumeric(key: String(format: SMCKey.fanMaxRPM, i))
+            let safe   = readNumeric(key: String(format: SMCKey.fanSafeRPM, i))
+            let target = readNumeric(key: String(format: SMCKey.fanTargetRPM, i))
             fans.append(FanInfo(id: i,
                                 actualRPM: Int(actual),
                                 minRPM: Int(min),
@@ -177,11 +218,11 @@ final class SMCService {
 
         return (0..<Int(count)).compactMap { i in
             let actualKey = String(format: SMCKey.fanActualRPM, i)
-            let actual = readFPE2(key: actualKey)
-            let max = readFPE2(key: String(format: SMCKey.fanMaxRPM, i))
-            let min = readFPE2(key: String(format: SMCKey.fanMinRPM, i))
-            let safe = readFPE2(key: String(format: SMCKey.fanSafeRPM, i))
-            let target = readFPE2(key: String(format: SMCKey.fanTargetRPM, i))
+            let actual = readNumeric(key: actualKey)
+            let max = readNumeric(key: String(format: SMCKey.fanMaxRPM, i))
+            let min = readNumeric(key: String(format: SMCKey.fanMinRPM, i))
+            let safe = readNumeric(key: String(format: SMCKey.fanSafeRPM, i))
+            let target = readNumeric(key: String(format: SMCKey.fanTargetRPM, i))
             // A missing actual-RPM key means this is not a usable fan record.
             guard readKey(key: actualKey) != nil else { return nil }
             return FanInfo(id: i, actualRPM: Int(actual), minRPM: Int(min),
@@ -266,9 +307,11 @@ final class SMCService {
         var inputData = SMCKeyData()
         var outputData = SMCKeyData()
         inputData.key = fourCharCode(key)
-        inputData.infoSize = outputInfo.infoSize
+        inputData.keyInfo.dataSize = outputInfo.keyInfo.dataSize
         inputData.data8 = SMC_CMD_READ_BYTES
         guard callSMC(input: &inputData, output: &outputData) else { return nil }
+        // Preserve the type discovered by READ_KEYINFO for format-aware decode.
+        outputData.keyInfo = outputInfo.keyInfo
         return outputData
     }
 
@@ -288,6 +331,24 @@ final class SMCService {
         return Float(raw) / 4.0
     }
 
+    private func readNumeric(key: String) -> Float {
+        guard let data = readKey(key: key) else { return 0 }
+        return SMCNumericDecoder.decode(
+            dataType: fourCharString(data.keyInfo.dataType),
+            bytes: [data.bytes.0, data.bytes.1, data.bytes.2, data.bytes.3]
+        )
+    }
+
+    private func fourCharString(_ value: UInt32) -> String {
+        let bytes = [
+            UInt8((value >> 24) & 0xff),
+            UInt8((value >> 16) & 0xff),
+            UInt8((value >> 8) & 0xff),
+            UInt8(value & 0xff)
+        ]
+        return String(bytes: bytes, encoding: .ascii) ?? ""
+    }
+
     private func readSP78(key: String) -> Double {
         guard let data = readKey(key: key) else { return 0 }
         let i16 = Int16(bitPattern: UInt16(data.bytes.0) << 8 | UInt16(data.bytes.1))
@@ -304,7 +365,7 @@ final class SMCService {
         infoInput.data8 = SMC_CMD_READ_KEYINFO
         guard callSMC(input: &infoInput, output: &infoOutput) else { return false }
         input.key = fourCharCode(key)
-        input.infoSize = infoOutput.infoSize
+        input.keyInfo.dataSize = infoOutput.keyInfo.dataSize
         input.data8 = SMC_CMD_WRITE_BYTES
         input.bytes.0 = UInt8((raw >> 8) & 0xFF)
         input.bytes.1 = UInt8(raw & 0xFF)
@@ -320,7 +381,7 @@ final class SMCService {
         infoInput.data8 = SMC_CMD_READ_KEYINFO
         guard callSMC(input: &infoInput, output: &infoOutput) else { return false }
         input.key = fourCharCode(key)
-        input.infoSize = infoOutput.infoSize
+        input.keyInfo.dataSize = infoOutput.keyInfo.dataSize
         input.data8 = SMC_CMD_WRITE_BYTES
         input.bytes.0 = UInt8((value >> 8) & 0xFF)
         input.bytes.1 = UInt8(value & 0xFF)

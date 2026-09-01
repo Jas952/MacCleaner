@@ -6,7 +6,7 @@ import SystemConfiguration
 
 final class SystemMonitor: ObservableObject {
     enum Consumer: Hashable {
-        case dashboard, processes, windows, fans, ai
+        case dashboard, processes, windows, fans, ai, graphs
     }
     @Published var memory: MemoryInfo = .init(total: 0, used: 0, free: 0, wired: 0, compressed: 0, cached: 0)
     @Published var cpu: CPUInfo = .init(totalUsage: 0, coreUsages: [], processorCount: 0)
@@ -18,7 +18,7 @@ final class SystemMonitor: ObservableObject {
     @Published var ramHistory: [Double] = Array(repeating: 0, count: 60)
     @Published var fans: [FanInfo] = []
     @Published var thermal: ThermalInfo = ThermalInfo()
-    @Published var thermalHistory: [(date: Date, cpu: Double, soc: Double, battery: Double)] = []
+    @Published var thermalHistory: [(date: Date, cpu: Double, soc: Double, gpu: Double, battery: Double)] = []
     @Published var battery: BatteryInfo = BatteryInfo()
     @Published var network: NetworkInfo = NetworkInfo()
     @Published var networkHistory: [(down: Double, up: Double)] = Array(repeating: (down: 0, up: 0), count: 60)
@@ -33,6 +33,9 @@ final class SystemMonitor: ObservableObject {
     private var cachedPrimaryNetworkInterface: (name: String, refreshedAt: Date)?
     private var cachedExternalBatteryDevices: (devices: [BatteryDeviceInfo], refreshedAt: Date)?
     private var isRefreshInFlight = false
+    private var pendingForceProcesses = false
+    private var pendingForceSensors = false
+    private var pendingForceBattery = false
     private var activeConsumers: Set<Consumer> = []
 
     /// Tick counter: expensive tasks run less often than CPU/RAM sampling.
@@ -43,7 +46,8 @@ final class SystemMonitor: ObservableObject {
     private static let idleSensorInterval = 8         // every 2 minutes
     private static let liveProcessInterval = 2        // every 30 seconds in Processes / Windows
     private static let summaryProcessInterval = 4     // every 60 seconds on Dashboard / AI summaries
-    private static let idleProcessInterval = 120      // every 30 minutes in the background
+    private static let idleProcessInterval = 10       // every 5 minutes while foreground-idle
+    private static let backgroundHistoryProcessInterval = 5 // every 5 minutes on the 60-second background timer
     private static let batteryInterval = 40           // every 10 minutes
     private static let externalBatteryInterval = 1_440 // every 6 hours; system_profiler is expensive
     private static let networkInterfaceCacheTTL: TimeInterval = 60
@@ -103,8 +107,13 @@ final class SystemMonitor: ObservableObject {
         timer?.tolerance = min(3, interval * 0.15)
     }
 
-    func refresh(forceProcesses: Bool = false, forceSensors: Bool = false) {
-        guard !isRefreshInFlight else { return }
+    func refresh(forceProcesses: Bool = false, forceSensors: Bool = false, forceBattery: Bool = false) {
+        guard !isRefreshInFlight else {
+            pendingForceProcesses = pendingForceProcesses || forceProcesses
+            pendingForceSensors = pendingForceSensors || forceSensors
+            pendingForceBattery = pendingForceBattery || forceBattery
+            return
+        }
         isRefreshInFlight = true
         refreshTick += 1
 
@@ -114,17 +123,27 @@ final class SystemMonitor: ObservableObject {
         let networkInfo = fetchNetwork()
 
         // ── Determine what else to fetch ──
-        let wantsLiveProcesses = !isBackgroundSuspended && !activeConsumers.isDisjoint(with: [.processes, .windows])
+        let wantsGraphProcesses = !isBackgroundSuspended && activeConsumers.contains(.graphs)
+        let wantsLiveProcesses = !isBackgroundSuspended && !activeConsumers.isDisjoint(with: [.processes, .windows, .graphs])
         let wantsSummaryProcesses = !isBackgroundSuspended && !activeConsumers.isDisjoint(with: [.dashboard, .ai])
-        let wantsFrequentSensors = !isBackgroundSuspended && !activeConsumers.isDisjoint(with: [.dashboard, .fans, .ai])
-        let processInterval = wantsLiveProcesses
+        let wantsGraphSensors = !isBackgroundSuspended && activeConsumers.contains(.graphs)
+        let wantsFrequentSensors = !isBackgroundSuspended && !activeConsumers.isDisjoint(with: [.dashboard, .fans, .ai, .graphs])
+        let processInterval = wantsGraphProcesses
+            ? 1
+            : (wantsLiveProcesses
             ? Self.liveProcessInterval
-            : (wantsSummaryProcesses ? Self.summaryProcessInterval : Self.idleProcessInterval)
-        let sensorInterval = isBackgroundSuspended ? 2 : (wantsFrequentSensors ? Self.activeSensorInterval : Self.idleSensorInterval)
+            : (wantsSummaryProcesses ? Self.summaryProcessInterval : Self.idleProcessInterval))
+        let sensorInterval = isBackgroundSuspended ? 2 : (wantsGraphSensors ? 1 : (wantsFrequentSensors ? Self.activeSensorInterval : Self.idleSensorInterval))
         let runSensors = forceSensors || (refreshTick > 1 && refreshTick % sensorInterval == 0)
-        let runProcesses = !isBackgroundSuspended && (forceProcesses || refreshTick == 1 || (refreshTick > 1 && refreshTick % processInterval == 0))
-        let runDisks = !isBackgroundSuspended && (refreshTick == 1 || runProcesses)
-        let runBattery = !isBackgroundSuspended && (refreshTick == 1 || refreshTick % Self.batteryInterval == 0)
+        let runBackgroundHistoryProcesses = isBackgroundSuspended
+            && (refreshTick == 1 || refreshTick % Self.backgroundHistoryProcessInterval == 0)
+        let runProcesses = runBackgroundHistoryProcesses
+            || (!isBackgroundSuspended && (forceProcesses || refreshTick == 1 || (refreshTick > 1 && refreshTick % processInterval == 0)))
+        let includeProcessWindows = !isBackgroundSuspended
+            && !activeConsumers.isDisjoint(with: [.processes, .windows])
+        let runDisks = !isBackgroundSuspended
+            && (refreshTick == 1 || (activeConsumers.contains(.dashboard) && runProcesses))
+        let runBattery = !isBackgroundSuspended && (forceBattery || refreshTick == 1 || refreshTick % Self.batteryInterval == 0)
         let runExternalBattery = !isBackgroundSuspended && refreshTick > 1 && refreshTick % Self.externalBatteryInterval == 0
         let runGPU = runSensors && !isBackgroundSuspended
 
@@ -158,10 +177,10 @@ final class SystemMonitor: ObservableObject {
             }
 
             if runProcesses {
-                // Single call to fetchWindows — reused for both processNodes and windows
-                let wins = ProcessTreeService.fetchWindows()
-                windowsResult = wins
-                // Single /bin/ps call — replaces both fetchTopProcesses and fetchFlatProcesses
+                // Background history intentionally skips the window collector and performs only
+                // the bounded process snapshot needed for the four-hour graph.
+                let wins = includeProcessWindows ? ProcessTreeService.fetchWindows() : []
+                if includeProcessWindows { windowsResult = wins }
                 nodesResult = ProcessTreeService.fetchFlatProcesses(cachedWindows: wins)
             }
 
@@ -181,6 +200,9 @@ final class SystemMonitor: ObservableObject {
                 if let disks = disksResult { self.disks = disks }
                 if let nodes = nodesResult {
                     self.processNodes = nodes
+                    Task { @MainActor in
+                        ProcessHistoryStore.shared.record(nodes: nodes)
+                    }
                     // Derive topProcesses from processNodes — no second /bin/ps!
                     self.topProcesses = nodes
                         .sorted { $0.cpuUsage > $1.cpuUsage }
@@ -206,8 +228,16 @@ final class SystemMonitor: ObservableObject {
                 if let thermalResult {
                     self.thermal = thermalResult
                 }
-                if let thermalResult, thermalResult.cpuTemp > 0 {
-                    self.thermalHistory.append((date: Date(), cpu: thermalResult.cpuTemp, soc: thermalResult.socTemp, battery: thermalResult.batteryTemp))
+                if let thermalResult,
+                   [thermalResult.cpuTemp, thermalResult.socTemp, thermalResult.gpuTemp, thermalResult.batteryTemp]
+                    .contains(where: { $0 > 0 }) {
+                    self.thermalHistory.append((
+                        date: Date(),
+                        cpu: thermalResult.cpuTemp,
+                        soc: thermalResult.socTemp,
+                        gpu: thermalResult.gpuTemp,
+                        battery: thermalResult.batteryTemp
+                    ))
                     if self.thermalHistory.count > 120 { self.thermalHistory.removeFirst() }  // 6 min max (was 1200 = 1 hour!)
                 }
 
@@ -235,6 +265,20 @@ final class SystemMonitor: ObservableObject {
                             "diskWrittenBytes": "\(diskWritten)",
                             "thermalCPU": String(format: "%.1f", self.thermal.cpuTemp)
                         ]
+                    )
+                }
+
+                let forceProcessesAgain = self.pendingForceProcesses
+                let forceSensorsAgain = self.pendingForceSensors
+                let forceBatteryAgain = self.pendingForceBattery
+                self.pendingForceProcesses = false
+                self.pendingForceSensors = false
+                self.pendingForceBattery = false
+                if forceProcessesAgain || forceSensorsAgain || forceBatteryAgain {
+                    self.refresh(
+                        forceProcesses: forceProcessesAgain,
+                        forceSensors: forceSensorsAgain,
+                        forceBattery: forceBatteryAgain
                     )
                 }
             }
@@ -458,6 +502,37 @@ final class SystemMonitor: ObservableObject {
             info.amperage = Double(Int32(truncatingIfNeeded: rawAmp)) / 1000.0
             let rawTemp   = intProp("Temperature")   // 0.01 °C
             info.temperature = Double(rawTemp) / 100.0
+
+            if let controllers = IORegistryEntryCreateCFProperty(
+                service,
+                "PortControllerInfo" as CFString,
+                kCFAllocatorDefault,
+                0
+            )?.takeRetainedValue() as? [[String: Any]],
+               let active = controllers.enumerated().max(by: {
+                   ($0.element["PortControllerMaxPower"] as? Int ?? 0)
+                       < ($1.element["PortControllerMaxPower"] as? Int ?? 0)
+               }) {
+                let milliwatts = active.element["PortControllerMaxPower"] as? Int ?? 0
+                if milliwatts > 0 {
+                    info.adapterWatts = milliwatts / 1_000
+                    if let fedDetails = IORegistryEntryCreateCFProperty(
+                        service,
+                        "FedDetails" as CFString,
+                        kCFAllocatorDefault,
+                        0
+                    )?.takeRetainedValue() as? [[String: Any]],
+                       fedDetails.indices.contains(active.offset) {
+                        info.powerVendorID = fedDetails[active.offset]["FedVendorID"] as? Int ?? 0
+                    }
+                    // Mac15,6 exposes controllers in IORegistry as USB-C 1, USB-C 2,
+                    // MagSafe 3, USB-C 3. Unknown models deliberately stay generic.
+                    info.powerPort = MacBookPowerPort.resolved(
+                        modelIdentifier: HardwareInfo.macModel,
+                        controllerIndex: active.offset
+                    )
+                }
+            }
         }
         return info
     }

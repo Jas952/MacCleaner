@@ -82,6 +82,292 @@ final class SafetyPolicyTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(idle, active * 2)
     }
 
+    func testProcessHistoryMergesDuplicateIdentitiesInsteadOfCrashingChart() {
+        let first = ProcessGraphPoint(
+            id: "Cyberpunk2077|/Applications/Cyberpunk2077.app",
+            pid: 101,
+            name: "Cyberpunk2077",
+            executablePath: "/Applications/Cyberpunk2077.app",
+            cpu: 82.5,
+            memoryBytes: 700_000_000,
+            instanceCount: 1
+        )
+        let duplicate = ProcessGraphPoint(
+            id: first.id,
+            pid: 202,
+            name: first.name,
+            executablePath: first.executablePath,
+            cpu: 117.5,
+            memoryBytes: 500_000_000,
+            instanceCount: 1
+        )
+
+        let indexed = ProcessGraphSample.indexedProcesses([first, duplicate])
+
+        XCTAssertEqual(indexed.count, 1)
+        XCTAssertEqual(indexed[first.id]?.cpu ?? -1, 200, accuracy: 0.001)
+        XCTAssertEqual(indexed[first.id]?.memoryBytes, 1_200_000_000)
+        XCTAssertEqual(indexed[first.id]?.instanceCount, 2)
+    }
+
+    func testProcessGraphMetricsUseWholeMacCapacity() {
+        let processorCount = Double(max(1, Foundation.ProcessInfo.processInfo.processorCount))
+        let process = ProcessGraphPoint(
+            id: "load|/Applications/Load.app",
+            pid: 303,
+            name: "Load",
+            executablePath: "/Applications/Load.app",
+            cpu: processorCount * 25,
+            memoryBytes: 2 * 1_073_741_824,
+            instanceCount: 1
+        )
+
+        XCTAssertEqual(ProcessGraphMetric.cpu.value(for: process), 25, accuracy: 0.001)
+        XCTAssertEqual(ProcessGraphMetric.memory.value(for: process), 2, accuracy: 0.001)
+        XCTAssertEqual(
+            ProcessGraphMetric.memory.systemCapacity,
+            Double(Foundation.ProcessInfo.processInfo.physicalMemory) / 1_073_741_824,
+            accuracy: 0.001
+        )
+        XCTAssertTrue(ProcessGraphMetric.cpu.isMinor(0.5))
+        XCTAssertFalse(ProcessGraphMetric.cpu.isMinor(1.5))
+    }
+
+    func testProcessGraphLogScaleExpandsSmallLoadsAndRemainsReversible() {
+        let linear = ProcessGraphScaleMode.linear.normalized(1, upperBound: 100, softening: 0.25)
+        let logarithmic = ProcessGraphScaleMode.logarithmic.normalized(1, upperBound: 100, softening: 0.25)
+        let restored = ProcessGraphScaleMode.logarithmic.value(
+            atNormalizedPosition: logarithmic,
+            upperBound: 100,
+            softening: 0.25
+        )
+
+        XCTAssertGreaterThan(logarithmic, linear)
+        XCTAssertEqual(restored, 1, accuracy: 0.001)
+    }
+
+    func testFourHourProcessGraphBucketsSamplesWithoutArtificialZeroDrops() throws {
+        let now = Date(timeIntervalSince1970: 2_000_000_000)
+        let samples = (0..<240).map { index in
+            let cpu = index.isMultiple(of: 7) ? 220.0 : 55.0
+            let process = ProcessGraphPoint(
+                id: "game|/Applications/Game.app",
+                pid: 404,
+                name: "Game",
+                executablePath: "/Applications/Game.app",
+                cpu: cpu,
+                memoryBytes: 2 * 1_073_741_824,
+                instanceCount: 1
+            )
+            return ProcessGraphSample(
+                date: now.addingTimeInterval(-ProcessGraphInterval.fourHours.duration + Double(index * 60)),
+                processes: [process]
+            )
+        }
+
+        let chart = ProcessHistoryChartData(
+            samples: samples,
+            metric: .cpu,
+            interval: .fourHours,
+            hidesMinorProcesses: false,
+            now: now
+        )
+        let process = try XCTUnwrap(chart.series.first)
+        let points = chart.segmentsByProcessID[process.id, default: []].flatMap { $0 }
+
+        XCTAssertFalse(points.isEmpty)
+        XCTAssertLessThanOrEqual(points.count, 72)
+        XCTAssertTrue(points.allSatisfy { $0.value > 0 })
+    }
+
+    func testShortProcessHistoryGapCreatesAnExplicitBridge() throws {
+        let now = Date(timeIntervalSince1970: 2_000_000_000)
+        let offsets: [TimeInterval] = [-600, -580, -560, -240, -220, -200]
+        let samples = offsets.map { offset in
+            ProcessGraphSample(
+                date: now.addingTimeInterval(offset),
+                processes: [
+                    ProcessGraphPoint(
+                        id: "browser|/Applications/Browser.app",
+                        pid: 505,
+                        name: "Browser",
+                        executablePath: "/Applications/Browser.app",
+                        cpu: 55,
+                        memoryBytes: 1_073_741_824,
+                        instanceCount: 1
+                    )
+                ]
+            )
+        }
+
+        let chart = ProcessHistoryChartData(
+            samples: samples,
+            metric: .cpu,
+            interval: .thirtyMinutes,
+            hidesMinorProcesses: false,
+            now: now
+        )
+        let process = try XCTUnwrap(chart.series.first)
+
+        XCTAssertEqual(chart.segmentsByProcessID[process.id]?.count, 2)
+        XCTAssertEqual(chart.bridgesByProcessID[process.id]?.count, 1)
+    }
+
+    func testElevenMinuteCollectorOutageCreatesAnExplicitBridge() throws {
+        let now = Date(timeIntervalSince1970: 2_000_000_000)
+        let offsets: [TimeInterval] = [-1_000, -980, -960, -300, -280, -260]
+        let samples = offsets.map { offset in
+            ProcessGraphSample(
+                date: now.addingTimeInterval(offset),
+                processes: [
+                    ProcessGraphPoint(
+                        id: "browser|/Applications/Browser.app",
+                        pid: 505,
+                        name: "Browser",
+                        executablePath: "/Applications/Browser.app",
+                        cpu: 55,
+                        memoryBytes: 1_073_741_824,
+                        instanceCount: 1
+                    )
+                ]
+            )
+        }
+
+        let chart = ProcessHistoryChartData(
+            samples: samples,
+            metric: .cpu,
+            interval: .thirtyMinutes,
+            hidesMinorProcesses: false,
+            now: now
+        )
+        let process = try XCTUnwrap(chart.series.first)
+
+        XCTAssertEqual(chart.segmentsByProcessID[process.id]?.count, 2)
+        XCTAssertEqual(chart.bridgesByProcessID[process.id]?.count, 1)
+    }
+
+    func testProcessAbsenceDuringHealthyCollectionRemainsABreak() throws {
+        let now = Date(timeIntervalSince1970: 2_000_000_000)
+        let tracked = ProcessGraphPoint(
+            id: "browser|/Applications/Browser.app",
+            pid: 505,
+            name: "Browser",
+            executablePath: "/Applications/Browser.app",
+            cpu: 55,
+            memoryBytes: 1_073_741_824,
+            instanceCount: 1
+        )
+        let other = ProcessGraphPoint(
+            id: "helper|/usr/bin/helper",
+            pid: 506,
+            name: "Helper",
+            executablePath: "/usr/bin/helper",
+            cpu: 3,
+            memoryBytes: 20_000_000,
+            instanceCount: 1
+        )
+        let offsets = [-1_000, -980, -960, -760, -560, -360, -300, -280, -260]
+        let samples = offsets.map { offset in
+            ProcessGraphSample(
+                date: now.addingTimeInterval(TimeInterval(offset)),
+                processes: offset > -900 && offset < -320 ? [other] : [tracked, other]
+            )
+        }
+
+        let chart = ProcessHistoryChartData(
+            samples: samples,
+            metric: .cpu,
+            interval: .thirtyMinutes,
+            hidesMinorProcesses: false,
+            now: now
+        )
+        let process = try XCTUnwrap(chart.series.first(where: { $0.id == tracked.id }))
+
+        XCTAssertEqual(chart.segmentsByProcessID[process.id]?.count, 2)
+        XCTAssertTrue(chart.bridgesByProcessID[process.id, default: []].isEmpty)
+    }
+
+    func testLatestProcessAppearsBeforeStabilityThreshold() throws {
+        let now = Date(timeIntervalSince1970: 2_000_000_000)
+        var samples = (1...10).map { index in
+            ProcessGraphSample(
+                date: now.addingTimeInterval(Double(-index * 60)),
+                processes: [
+                    ProcessGraphPoint(
+                        id: "older|/Applications/Older.app",
+                        pid: 606,
+                        name: "Older",
+                        executablePath: "/Applications/Older.app",
+                        cpu: 44,
+                        memoryBytes: 900_000_000,
+                        instanceCount: 1
+                    )
+                ]
+            )
+        }
+        samples.append(
+            ProcessGraphSample(
+                date: now,
+                processes: [
+                    ProcessGraphPoint(
+                        id: "current|/Applications/Current.app",
+                        pid: 607,
+                        name: "Current",
+                        executablePath: "/Applications/Current.app",
+                        cpu: 110,
+                        memoryBytes: 2 * 1_073_741_824,
+                        instanceCount: 1
+                    )
+                ]
+            )
+        )
+
+        let chart = ProcessHistoryChartData(
+            samples: samples,
+            metric: .cpu,
+            interval: .thirtyMinutes,
+            hidesMinorProcesses: true,
+            now: now
+        )
+        let current = try XCTUnwrap(chart.series.first(where: { $0.name == "Current" }))
+
+        XCTAssertEqual(chart.segmentsByProcessID[current.id]?.flatMap { $0 }.count, 1)
+    }
+
+    func testMac156PowerControllerOrderMatchesVerifiedPortLayout() {
+        XCTAssertEqual(MacBookPowerPort.resolved(modelIdentifier: "Mac15,6", controllerIndex: 0), .leftUSBCTop)
+        XCTAssertEqual(MacBookPowerPort.resolved(modelIdentifier: "Mac15,6", controllerIndex: 1), .leftUSBCBottom)
+        XCTAssertEqual(MacBookPowerPort.resolved(modelIdentifier: "Mac15,6", controllerIndex: 2), .magSafe)
+        XCTAssertEqual(MacBookPowerPort.resolved(modelIdentifier: "Mac15,6", controllerIndex: 3), .rightUSBC)
+    }
+
+    func testAppleSiliconFanRPMDecodesLittleEndianFloat() {
+        let expected = Float(4_766)
+        let bits = expected.bitPattern
+        let bytes = [
+            UInt8(bits & 0xff),
+            UInt8((bits >> 8) & 0xff),
+            UInt8((bits >> 16) & 0xff),
+            UInt8((bits >> 24) & 0xff)
+        ]
+
+        XCTAssertEqual(SMCNumericDecoder.decode(dataType: "flt ", bytes: bytes), expected, accuracy: 0.1)
+        XCTAssertEqual(SMCService.protocolDataStride, 80)
+    }
+
+    func testIntelFanRPMStillDecodesFPE2() {
+        let expected = 2_317
+        let raw = UInt16(expected * 4)
+        let bytes = [UInt8((raw >> 8) & 0xff), UInt8(raw & 0xff)]
+
+        XCTAssertEqual(SMCNumericDecoder.decode(dataType: "fpe2", bytes: bytes), Float(expected), accuracy: 0.1)
+    }
+
+    func testUnknownMacNeverClaimsPhysicalPowerPortFromControllerIndex() {
+        XCTAssertEqual(MacBookPowerPort.resolved(modelIdentifier: "Mac99,1", controllerIndex: 2), .usbCUnknown)
+        XCTAssertEqual(MacBookPowerPort.resolved(modelIdentifier: "Mac15,6", controllerIndex: 99), .usbCUnknown)
+    }
+
     func testReviewCategoriesAreNotSelectedByDefault() {
         XCTAssertFalse(CleanCategory.devCache.isSelectedByDefault)
         XCTAssertFalse(CleanCategory.aiTools.isSelectedByDefault)
@@ -1046,6 +1332,37 @@ final class SafetyPolicyTests: XCTestCase {
         }
 
         wait(for: [finished], timeout: 2)
+    }
+
+    @MainActor
+    func testProcessHistoryPersistsOnlyTheLatestFourHours() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("MacCleaner-ProcessHistory-\(UUID().uuidString)", isDirectory: true)
+        let storageURL = directory.appendingPathComponent("history.json")
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let now = Date(timeIntervalSince1970: 2_000_000_000)
+        let point = ProcessGraphPoint(
+            id: "editor|/Applications/Editor.app/Contents/MacOS/Editor",
+            pid: 42,
+            name: "Editor",
+            executablePath: "/Applications/Editor.app/Contents/MacOS/Editor",
+            cpu: 18,
+            memoryBytes: 512 * 1_024 * 1_024,
+            instanceCount: 1
+        )
+        let store = ProcessHistoryStore(storageURL: storageURL, now: now)
+        store.append(
+            ProcessGraphSample(date: now.addingTimeInterval(-(ProcessHistoryStore.retentionInterval + 1)), processes: [point]),
+            now: now
+        )
+        store.append(ProcessGraphSample(date: now.addingTimeInterval(-60), processes: [point]), now: now)
+        store.flushPersistenceForTesting()
+
+        let restored = ProcessHistoryStore(storageURL: storageURL, now: now)
+        XCTAssertEqual(restored.samples.count, 1)
+        XCTAssertEqual(restored.samples.first?.date, now.addingTimeInterval(-60))
+        XCTAssertEqual(restored.samples.first?.processes.first?.executablePath, point.executablePath)
     }
 
     private func jpegData(from url: URL, compression: Double) throws -> Data {

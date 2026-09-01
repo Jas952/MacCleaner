@@ -65,6 +65,9 @@ struct BatteryInfo {
     var chargePercent: Int      = 0
     var timeRemaining: Int      = 0   // minutes, -1 = calculating
     var devices: [BatteryDeviceInfo] = []
+    var powerPort: MacBookPowerPort?
+    var adapterWatts: Int = 0
+    var powerVendorID: Int = 0
 
     var healthPercent: Double {
         guard designCapacity > 0 else { return 0 }
@@ -87,6 +90,37 @@ struct BatteryInfo {
     }
 
     var wattage: Double { abs(voltage * amperage) }
+}
+
+enum MacBookPowerPort: String {
+    case leftUSBCTop
+    case leftUSBCBottom
+    case rightUSBC
+    case magSafe
+    case usbCUnknown
+
+    var displayName: String {
+        switch self {
+        case .leftUSBCTop: return "Left USB-C · rear"
+        case .leftUSBCBottom: return "Left USB-C · front"
+        case .rightUSBC: return "Right USB-C"
+        case .magSafe: return "MagSafe 3"
+        case .usbCUnknown: return "USB-C power"
+        }
+    }
+
+    static func resolved(modelIdentifier: String, controllerIndex: Int) -> MacBookPowerPort {
+        guard modelIdentifier == "Mac15,6" else { return .usbCUnknown }
+        let verifiedControllerOrder: [MacBookPowerPort] = [
+            .leftUSBCTop,
+            .leftUSBCBottom,
+            .magSafe,
+            .rightUSBC
+        ]
+        return verifiedControllerOrder.indices.contains(controllerIndex)
+            ? verifiedControllerOrder[controllerIndex]
+            : .usbCUnknown
+    }
 }
 
 struct BatteryDeviceInfo: Identifiable, Equatable {

@@ -12,19 +12,30 @@ struct MacCleanerApp: App {
 
     var body: some Scene {
         WindowGroup(id: "main") {
-            ContentView(monitor: sharedMonitor)
-                .frame(
-                    minWidth: 1300,
-                    idealWidth: 1300,
-                    maxWidth: 1300,
-                    minHeight: 760,
-                    idealHeight: 760,
-                    maxHeight: 760,
-                    alignment: .topLeading
-                )
-                .background {
-                    StatusBarSceneBridge(monitor: sharedMonitor, appDelegate: appDelegate)
+            Group {
+                #if DEBUG
+                if ProcessInfo.processInfo.arguments.contains(where: {
+                    $0.hasPrefix("--debug-process-history-") || $0.hasPrefix("--debug-thermal-")
+                }) {
+                    MenuBarPopover(
+                        monitor: sharedMonitor,
+                        openMain: {},
+                        openShelf: {},
+                        openSettings: {},
+                        openAbout: {},
+                        quit: {}
+                    )
+                    .frame(width: 456, height: 646)
+                } else {
+                    mainContent
                 }
+                #else
+                mainContent
+                #endif
+            }
+            .background {
+                StatusBarSceneBridge(monitor: sharedMonitor, appDelegate: appDelegate)
+            }
                 .onChange(of: scenePhase) { phase in
                     sharedMonitor.setBackgroundSuspended(phase != .active)
                 }
@@ -56,6 +67,19 @@ struct MacCleanerApp: App {
             SettingsView(monitor: sharedMonitor)
         }
     }
+
+    private var mainContent: some View {
+        ContentView(monitor: sharedMonitor)
+            .frame(
+                minWidth: 1300,
+                idealWidth: 1300,
+                maxWidth: 1300,
+                minHeight: 760,
+                idealHeight: 760,
+                maxHeight: 760,
+                alignment: .topLeading
+            )
+    }
 }
 
 class AppDelegate: NSObject, NSApplicationDelegate {
@@ -78,6 +102,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 openShelf: openShelf,
                 openSettings: openSettings
             )
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains(where: {
+                $0.hasPrefix("--debug-thermal-") || $0.hasPrefix("--debug-process-history-")
+            }) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.65) { [weak self] in
+                    self?.statusBarController?.showPopoverForDebug()
+                }
+            }
+            #endif
         }
         installUtilityRuntime()
     }
@@ -337,6 +370,14 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         }
     }
+
+    #if DEBUG
+    func showPopoverForDebug() {
+        guard let button = statusItem.button, !popover.isShown else { return }
+        NSApp.activate(ignoringOtherApps: true)
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+    }
+    #endif
 
     private func updateStatusItem() {
         guard let button = statusItem.button, let labelHost else { return }
@@ -834,6 +875,13 @@ struct MenuBarPopover: View {
         self.openAbout = openAbout
         self.quit = quit
         _refreshDriver = StateObject(wrappedValue: MenuBarRefreshDriver(monitor: monitor))
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains(where: {
+            $0.hasPrefix("--debug-thermal-") || $0.hasPrefix("--debug-process-history-")
+        }) {
+            _selectedTab = State(initialValue: .graphs)
+        }
+        #endif
     }
 
     private var visibleModules: [MenuBarDashboardModule] {
@@ -859,6 +907,8 @@ struct MenuBarPopover: View {
                 switch selectedTab {
                 case .system:
                     systemTab
+                case .graphs:
+                    MenuBarGraphsView(monitor: monitor)
                 case .tools:
                     toolsTab
                 }
@@ -871,7 +921,6 @@ struct MenuBarPopover: View {
                 .background(.ultraThinMaterial)
         }
         .background(.regularMaterial)
-        .animation(.easeInOut(duration: 0.18), value: selectedTab)
         .onChange(of: isEditing) { editing in
             if !editing { finishCardDrag() }
         }
@@ -1381,11 +1430,24 @@ struct MenuBarPopover: View {
 
 private enum MenuBarPopoverTab: String, CaseIterable, Identifiable {
     case system
+    case graphs
     case tools
 
     var id: String { rawValue }
-    var title: String { self == .system ? "System" : "Tools" }
-    var icon: String { self == .system ? "rectangle.stack" : "wrench.and.screwdriver" }
+    var title: String {
+        switch self {
+        case .system: return "System"
+        case .graphs: return "Graphs"
+        case .tools: return "Tools"
+        }
+    }
+    var icon: String {
+        switch self {
+        case .system: return "rectangle.stack"
+        case .graphs: return "chart.xyaxis.line"
+        case .tools: return "wrench.and.screwdriver"
+        }
+    }
 }
 
 private struct MenuBarCardDragSession {
