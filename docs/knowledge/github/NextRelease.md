@@ -5,6 +5,14 @@ description: Проверенные пользовательские измен�
 
 # Следующий релиз
 
-Target release: следующий patch после `1.0.7`.
+Target release: `1.0.8`.
 
-После публикации `1.0.7` очередь пуста. Добавлять сюда можно только фактически реализованное и проверенное пользовательское поведение. Публикуемый текст формируется в `MacCleaner/ReleaseNotes.md` по правилам [[GitHubAndReleases]].
+Проверенные изменения:
+
+- [x] Новый раздел Graphs в menu bar popover.
+- [x] Process History для CPU, Memory и Energy с интервалами 30 минут/4 часа, фильтром мелких процессов, linear/log шкалой и hover-информацией.
+- [x] Интерактивная Thermal Surface с доступными температурными зонами, компонентным слоем, fan airflow и доступной power/display телеметрией.
+- [x] Consumer-aware cadence, bounded history, приостановка скрытой thermal-анимации и проверка нагрузки Release-сборки.
+- [x] Визуальные снимки Process History и Thermal Surface для GitHub Release.
+
+Публикуемый текст хранится в `MacCleaner/ReleaseNotes.md` по правилам [[GitHubAndReleases]]. После публикации `v1.0.8` очередь необходимо очистить и переключить на следующий patch.

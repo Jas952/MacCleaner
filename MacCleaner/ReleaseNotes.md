@@ -1,18 +1,21 @@
-# MacCleaner 1.0.7
+# MacCleaner 1.0.8
 
 ## What's new
 
-New tools:
+Menu bar graphs:
 
-- Added the local BETA File Reader to Tools for previewing PDF, image, text, and binary files without uploading or modifying the source.
+- Added a new **Graphs** section to the menu bar popover with **Process History** and **Thermal Surface** views.
+- Process History tracks CPU, memory, and relative energy activity for active applications over the last 30 minutes or four hours. It includes linear and logarithmic scales, minor-process filtering, per-process colors, hover details, and honest indications for gaps in collected data.
+- Thermal Surface maps available Mac temperature sensors onto an interactive 3D chassis view. You can rotate and zoom the surface, separate the heat and component layers, inspect internal zones, and view temperature severity, fan airflow, charging-port activity, and connected-display information when macOS exposes it.
+
+![Process History](https://raw.githubusercontent.com/Jas952/MacCleaner/v1.0.8/docs/readme-media/releases/v1.0.8/process-history.png)
+
+![Thermal Surface](https://raw.githubusercontent.com/Jas952/MacCleaner/v1.0.8/docs/readme-media/releases/v1.0.8/thermal-surface.png)
 
 Other changes:
 
-- Rebuilt the menu bar popover as a compact system dashboard with the same CPU, memory, disk, network, graphics, and battery cards used in MacCleaner.
-- Added Edit mode for reordering, hiding, and restoring menu bar dashboard cards, with smoother drag, settling, scrolling, and hover behavior.
-- Stacked status indicators into compact pairs and kept the MacCleaner app icon visible when all indicators are disabled.
-- Improved Apple Silicon fan telemetry and now reports helper availability instead of showing placeholder fan data.
-- Refined the update panel, Desktop workflow, companion Browser Monitor card, and general interface reliability.
+- Reduced unnecessary menu bar refresh work, reused the existing system monitor, bounded the local four-hour history, and paused hidden thermal animation to keep background overhead low.
+- Improved process-history continuity, startup behavior, switching responsiveness, sensor and fan decoding, and layout alignment in both light and dark appearances.
 
 ## Install
 

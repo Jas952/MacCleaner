@@ -21,7 +21,7 @@ description: Единые правила GitHub-контента, версий, 
 - `MINOR` — заметная новая пользовательская возможность;
 - `MAJOR` — несовместимое изменение продукта, данных или основного сценария.
 
-Перед релизом одна версия должна быть установлена в app target, helper, `README.md`, `docs/knowledge/Product.md`, `MacCleaner/ReleaseNotes.md`, Git tag и GitHub Release.
+Перед релизом одна версия должна быть установлена в app target, helper, `README.md`, `docs/knowledge/Product.md`, `MacCleaner/ReleaseNotes.md`, Git tag и GitHub Release. Заголовок GitHub Release совпадает с tag (`vX.Y.Z`), а первая строка release notes сохраняет формат `# MacCleaner X.Y.Z` для workflow и Sparkle.
 
 ## Единый шаблон GitHub Release
 
@@ -56,6 +56,8 @@ This build is distributed without Developer ID notarization, so macOS may show a
 4. Разделить реализацию, документацию и release metadata на связные коммиты.
 5. Отправить ветку, объединить её с `main`, создать и отправить новый неизменяемый tag `vX.Y.Z`.
 6. Дождаться release workflow, затем проверить страницу GitHub Release, `MacCleaner.dmg`, appcast и фактический URL загрузки.
+
+Скриншоты интерфейса можно показывать прямо в описании Release через Markdown image links. Для воспроизводимого релиза изображения хранятся в `docs/readme-media/releases/vX.Y.Z/`, а notes ссылаются на immutable tag URL, а не на изменяемую ветку `main`.
 
 Приватный Sparkle EdDSA key хранится только в GitHub Actions secret `SPARKLE_PRIVATE_KEY`. Его нельзя печатать или добавлять в Git. Текущий ad-hoc DMG не заменяет Developer ID signing/notarization.
 

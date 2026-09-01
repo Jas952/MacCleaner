@@ -60,12 +60,12 @@ jobs:
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" release/MacCleaner.dmg --clobber
             gh release edit "$GITHUB_REF_NAME" \
-              --title "MacCleaner ${GITHUB_REF_NAME#v}" \
+              --title "$GITHUB_REF_NAME" \
               --notes-file MacCleaner/ReleaseNotes.md
           else
             gh release create "$GITHUB_REF_NAME" \
               release/MacCleaner.dmg \
-              --title "MacCleaner ${GITHUB_REF_NAME#v}" \
+              --title "$GITHUB_REF_NAME" \
               --notes-file MacCleaner/ReleaseNotes.md \
               --verify-tag
           fi

@@ -52,7 +52,7 @@ Tools также является персональной локальной ut
 - macOS 13.0+
 - Swift 5
 - SwiftUI с точечным использованием AppKit, CoreGraphics, IOKit, AVFoundation и Vision
-- Версия target: `1.0.7` (`CURRENT_PROJECT_VERSION = 9`)
+- Версия target: `1.0.8` (`CURRENT_PROJECT_VERSION = 10`)
 
 ## Связанные материалы
 
