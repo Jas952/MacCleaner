@@ -371,6 +371,7 @@ private struct MenuBarThermalSurfaceView: View {
     @State private var zoom = 1.0
     @State private var surfaceOpacity = 1.0
     @State private var componentsOnly = false
+    @State private var realisticBaseMix = 0.0
     @State private var zoomExpanded = false
     @State private var externalDisplay = ExternalDisplaySnapshot.current
     @State private var hoveredCell: ThermalSurfaceCellID?
@@ -397,8 +398,15 @@ private struct MenuBarThermalSurfaceView: View {
         if arguments.contains("--debug-thermal-hover-board") {
             _hoveredComponentID = State(initialValue: "logic-board")
         }
+        if arguments.contains("--debug-thermal-hover-surface") {
+            _hoveredCell = State(initialValue: ThermalSurfaceCellID(column: 9, row: 4))
+            _hoverLocation = State(initialValue: CGPoint(x: 212, y: 150))
+        }
         if arguments.contains("--debug-thermal-zoom") {
             _zoomExpanded = State(initialValue: true)
+        }
+        if arguments.contains("--debug-thermal-realistic") {
+            _realisticBaseMix = State(initialValue: 1)
         }
         #endif
     }
@@ -436,10 +444,10 @@ private struct MenuBarThermalSurfaceView: View {
                 }
                 Spacer()
                 HStack(spacing: 12) {
-                    metric(value: "\(field.activeSensorCount)", label: "zones", color: .secondary)
+                    metric(value: "\(field.activeSensorCount)", label: "sensors", color: .secondary)
                     metric(
                         value: field.maximumTemperature > 0 ? String(format: "%.0f°C", field.maximumTemperature) : "—",
-                        label: "peak",
+                        label: "sensor peak",
                         color: field.color(for: field.maximumTemperature)
                     )
                 }
@@ -458,6 +466,7 @@ private struct MenuBarThermalSurfaceView: View {
                             elevation: displayedElevation,
                             layerSeparation: layerSeparation,
                             zoom: zoom,
+                            realisticBaseMix: realisticBaseMix,
                             surfaceOpacity: surfaceOpacity,
                             hoveredCell: hoveredCell,
                             hoveredComponentID: hoveredComponentID,
@@ -497,6 +506,19 @@ private struct MenuBarThermalSurfaceView: View {
                         }
                         .disabled(isTransitioning)
 
+                        if HardwareInfo.macModel == "Mac15,6" {
+                            surfaceControl(
+                                icon: realisticBaseMix > 0.5 ? "square.grid.3x3" : "photo",
+                                selected: realisticBaseMix > 0.5,
+                                help: realisticBaseMix > 0.5 ? "Show schematic component layer" : "Show realistic component layer"
+                            ) {
+                                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.28)) {
+                                    realisticBaseMix = realisticBaseMix > 0.5 ? 0 : 1
+                                }
+                            }
+                            .disabled(isTransitioning)
+                        }
+
                         surfaceControl(
                             icon: "arrow.counterclockwise",
                             selected: false,
@@ -519,8 +541,8 @@ private struct MenuBarThermalSurfaceView: View {
                     } else if let hoveredCell, let hoverLocation {
                         temperatureTooltip(for: hoveredCell)
                             .position(
-                                x: min(max(hoverLocation.x, 42), geometry.size.width - 42),
-                                y: max(hoverLocation.y - 24, 18)
+                                x: min(max(hoverLocation.x, 110), geometry.size.width - 110),
+                                y: min(max(hoverLocation.y - 54, 50), geometry.size.height - 50)
                             )
                             .allowsHitTesting(false)
                     }
@@ -551,7 +573,7 @@ private struct MenuBarThermalSurfaceView: View {
                 .clipShape(Capsule())
 
                 HStack {
-                    Text("OK ≤42°")
+                    Text("Cool ≤42°")
                     Spacer()
                     Text("Warm 58°")
                     Spacer()
@@ -563,12 +585,12 @@ private struct MenuBarThermalSurfaceView: View {
             .font(.system(size: 8, weight: .medium))
             .foregroundStyle(.secondary)
 
-            Text("X: chassis width · Y: hinge to palm rest · Z: sensor temperature")
+            Text("X: chassis width · Y: hinge to palm rest · Z: temperature")
                 .font(.system(size: 9))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
 
-            Text("Heat uses sensor readings only. Memory load is not a RAM temperature.")
+            Text("Measured sensors · Spatially interpolated surface · Component regions")
                 .font(.system(size: 8))
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
@@ -709,20 +731,30 @@ private struct MenuBarThermalSurfaceView: View {
 
     private func temperatureTooltip(for cell: ThermalSurfaceCellID) -> some View {
         let temperature = field.temperature(x: cell.normalizedX, y: cell.normalizedY)
-        return HStack(spacing: 5) {
-            Circle()
-                .fill(field.color(for: temperature))
-                .frame(width: 6, height: 6)
-            Text(String(format: "%.1f°C", temperature))
-                .font(.system(size: 10, weight: .bold, design: .monospaced))
-            Text(ThermalColorScale.status(for: temperature))
-                .font(.system(size: 9, weight: .medium))
-                .foregroundStyle(.secondary)
+        let nearest = field.nearestZone(x: cell.normalizedX, y: cell.normalizedY)
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 5) {
+                Circle().fill(field.color(for: temperature)).frame(width: 6, height: 6)
+                Text(String(format: "≈%.0f°C", temperature))
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                Spacer(minLength: 3)
+                Text("Interpolated").font(.system(size: 8)).foregroundStyle(.secondary)
+            }
+            if let nearest {
+                HStack {
+                    Text("Nearest sensor").foregroundStyle(.secondary)
+                    Spacer(minLength: 3)
+                    Text(String(format: "%.1f°C", nearest.reading.value)).fontWeight(.semibold)
+                }
+                .font(.system(size: 9, design: .monospaced))
+                Text("\(nearest.reading.source) · \(nearest.reading.sourceID)")
+                    .font(.system(size: 8)).foregroundStyle(.secondary).lineLimit(2)
+            }
         }
-        .padding(.horizontal, 8)
-        .frame(height: 24)
-        .background(.regularMaterial, in: Capsule())
-        .overlay(Capsule().strokeBorder(Color.primary.opacity(0.10)))
+        .padding(9)
+        .frame(width: 208)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.primary.opacity(0.10)))
     }
 
     private func updateHover(_ phase: HoverPhase, size: CGSize) {
@@ -884,6 +916,7 @@ private struct MenuBarThermalSurfaceView: View {
 
     private func componentInfo(_ component: MacBookComponent) -> some View {
         let index = (field.components.firstIndex(where: { $0.id == component.id }) ?? 0) + 1
+        let readings = field.readings(for: component.id).sorted { $0.value > $1.value }
         return VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 6) {
                 Circle().fill(component.tint).frame(width: 7, height: 7)
@@ -897,18 +930,39 @@ private struct MenuBarThermalSurfaceView: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             if component.kind == .fan {
-                Text("\(field.fanRPM(for: component.id)) RPM")
-                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
-            } else if component.kind == .board {
-                Text("\(field.activeSensorCount) readings · peak \(Int(field.boardPeakTemperature.rounded()))°C")
+                Text(field.fanRPMs[component.id].map { "\($0) RPM · Measured" } ?? "RPM unavailable")
                     .font(.system(size: 9, weight: .semibold, design: .monospaced))
             } else if component.kind == .battery {
                 Text("Charge \(monitor.battery.chargePercent)% · \(monitor.battery.cycleCount) cycles")
                     .font(.system(size: 9, weight: .semibold, design: .monospaced))
             }
+            if readings.isEmpty {
+                Text("No mapped temperature sensor")
+                    .font(.system(size: 8)).foregroundStyle(.secondary)
+            } else {
+                Text("MEASURED · \(readings.count) SENSOR\(readings.count == 1 ? "" : "S")")
+                    .font(.system(size: 7, weight: .semibold)).foregroundStyle(.secondary)
+                ForEach(Array(readings.prefix(3))) { reading in
+                    VStack(alignment: .leading, spacing: 1) {
+                        HStack(alignment: .firstTextBaseline, spacing: 4) {
+                            Text(reading.name).lineLimit(1)
+                            Spacer(minLength: 2)
+                            Text(String(format: "%.1f°C", reading.value))
+                                .fontWeight(.semibold).monospacedDigit()
+                        }
+                        .font(.system(size: 9))
+                        Text("\(reading.source) · \(reading.sourceID)")
+                            .font(.system(size: 7)).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                }
+                if readings.count > 3 {
+                    Text("Top 3 by temperature · All readings in Fans")
+                        .font(.system(size: 7)).foregroundStyle(.secondary)
+                }
+            }
         }
         .padding(9)
-        .frame(width: 164, alignment: .leading)
+        .frame(width: 206, alignment: .leading)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 11, style: .continuous)
@@ -947,6 +1001,7 @@ private struct MenuBarThermalSurfaceCanvas: View {
     var elevation: Double
     var layerSeparation: Double
     var zoom: Double
+    var realisticBaseMix: Double
     var surfaceOpacity: Double
     let hoveredCell: ThermalSurfaceCellID?
     let hoveredComponentID: String?
@@ -955,15 +1010,19 @@ private struct MenuBarThermalSurfaceCanvas: View {
     let animationTime: TimeInterval
     let reduceMotion: Bool
 
-    var animatableData: AnimatablePair<Double, AnimatablePair<Double, AnimatablePair<Double, Double>>> {
+    var animatableData: AnimatablePair<Double, AnimatablePair<Double, AnimatablePair<Double, AnimatablePair<Double, Double>>>> {
         get {
-            AnimatablePair(azimuth, AnimatablePair(elevation, AnimatablePair(layerSeparation, zoom)))
+            AnimatablePair(
+                azimuth,
+                AnimatablePair(elevation, AnimatablePair(layerSeparation, AnimatablePair(zoom, realisticBaseMix)))
+            )
         }
         set {
             azimuth = newValue.first
             elevation = newValue.second.first
             layerSeparation = newValue.second.second.first
-            zoom = newValue.second.second.second
+            zoom = newValue.second.second.second.first
+            realisticBaseMix = newValue.second.second.second.second
         }
     }
 
@@ -979,7 +1038,18 @@ private struct MenuBarThermalSurfaceCanvas: View {
             )
             drawCoordinateFrame(context: &context, projector: projector)
             drawDeck(context: &context, projector: projector)
-            drawComponents(context: &context, projector: projector)
+            if realisticBaseMix < 0.999 {
+                context.drawLayer { schematicLayer in
+                    schematicLayer.opacity = 1 - realisticBaseMix
+                    drawComponents(context: &schematicLayer, projector: projector)
+                }
+            }
+            if realisticBaseMix > 0.001 {
+                context.drawLayer { realisticLayer in
+                    realisticLayer.opacity = realisticBaseMix
+                    drawRealisticBase(context: &realisticLayer, projector: projector)
+                }
+            }
             drawChargingConnections(context: &context, projector: projector)
             if surfaceOpacity > 0.001 {
                 context.drawLayer { thermalLayer in
@@ -1073,6 +1143,23 @@ private struct MenuBarThermalSurfaceCanvas: View {
         }
     }
 
+    private func drawRealisticBase(context: inout GraphicsContext, projector: IsometricProjector) {
+        let origin = projector.point(x: 0, y: 0, height: 0.006, layer: .base)
+        let xEdge = projector.point(x: 1, y: 0, height: 0.006, layer: .base)
+        let yEdge = projector.point(x: 0, y: 1, height: 0.006, layer: .base)
+        let transform = CGAffineTransform(
+            a: xEdge.x - origin.x,
+            b: xEdge.y - origin.y,
+            c: yEdge.x - origin.x,
+            d: yEdge.y - origin.y,
+            tx: origin.x,
+            ty: origin.y
+        )
+        let image = context.resolve(Image("thermal_realistic_m3pro"))
+        context.concatenate(transform)
+        context.draw(image, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+    }
+
     private func drawSurface(context: inout GraphicsContext, projector: IsometricProjector) {
         for quadData in thermalSurfaceQuads(field: field, projector: projector).sorted(by: { $0.depth < $1.depth }) {
             let isHovered = quadData.id == hoveredCell
@@ -1117,7 +1204,7 @@ private struct MenuBarThermalSurfaceCanvas: View {
                 let value = Double(index) / 4
                 let point = projector.point(x: 0, y: 1, height: value, layer: .axis)
                 context.draw(
-                    Text("\(Int(25 + value * 70))°")
+                    Text("\(Int(25 + value * (field.temperatureCeiling - 25)))°")
                         .font(.system(size: 6, weight: .medium, design: .monospaced))
                         .foregroundColor(.primary.opacity(0.42)),
                     at: CGPoint(x: point.x - 11, y: point.y)
@@ -1529,6 +1616,7 @@ private func thermalSurfaceQuads(
     field: MacBookThermalField,
     projector: IsometricProjector
 ) -> [ThermalSurfaceQuad] {
+    guard !field.zones.isEmpty else { return [] }
     var quads: [ThermalSurfaceQuad] = []
     for row in 0..<ThermalSurfaceCellID.rows {
         for column in 0..<ThermalSurfaceCellID.columns {
@@ -1605,184 +1693,7 @@ private enum ThermalSeries: String, CaseIterable, Identifiable {
     }
 }
 
-private struct MacBookThermalZone {
-    let id: String
-    let shortTitle: String
-    let center: CGPoint
-    let radius: CGSize
-    let temperature: Double
-    let color: Color
-}
-
-private struct MacBookThermalField {
-    let zones: [MacBookThermalZone]
-    let components: [MacBookComponent]
-    let layoutName: String
-    let fanRPMs: [String: Int]
-    let sensorCount: Int
-
-    init(thermal: ThermalInfo, fans: [FanInfo], modelIdentifier: String) {
-        let grouped = Dictionary(grouping: thermal.sensors, by: \SensorReading.category)
-        func average(_ category: SensorCategory, fallback: Double) -> Double {
-            let values = (grouped[category] ?? []).map(\.value).filter { $0 > 0 }
-            guard !values.isEmpty else { return fallback }
-            return values.reduce(0, +) / Double(values.count)
-        }
-
-        let cpu = average(.cpuCore, fallback: thermal.cpuTemp)
-        let soc = average(.soc, fallback: thermal.socTemp > 0 ? thermal.socTemp : thermal.gpuTemp)
-        let gpuReadings = thermal.sensors.filter { $0.name.localizedCaseInsensitiveContains("gpu") }.map(\.value).filter { $0 > 0 }
-        let gpu = gpuReadings.isEmpty ? thermal.gpuTemp : gpuReadings.reduce(0, +) / Double(gpuReadings.count)
-        let battery = average(.battery, fallback: thermal.batteryTemp)
-        let storageFallback = [cpu, soc].filter { $0 > 0 }.min().map { max(0, $0 - 8) } ?? 0
-        let storage = average(.storage, fallback: storageFallback)
-        let airflow = average(.airflow, fallback: max(0, min(cpu, soc) - 12))
-        let isAir = modelIdentifier.hasPrefix("MacBookAir")
-            || modelIdentifier == "Mac14,2"
-            || modelIdentifier == "Mac15,12"
-            || modelIdentifier == "Mac15,13"
-
-        let layout = MacBookComponentLayout(isAir: isAir)
-        components = layout.components
-        layoutName = layout.name
-        sensorCount = thermal.sensors.filter { $0.value > 0 }.count
-        fanRPMs = Dictionary(uniqueKeysWithValues: fans.map { fan in
-            (fan.id == 0 ? "fan-left" : "fan-right", fan.actualRPM)
-        })
-
-        var result: [MacBookThermalZone] = [
-            .init(id: "gpu", shortTitle: "GPU", center: CGPoint(x: 0.55, y: 0.22), radius: CGSize(width: 0.10, height: 0.09), temperature: gpu > 0 ? gpu : soc, color: .accentPurple),
-            .init(id: "storage", shortTitle: "SSD", center: CGPoint(x: 0.65, y: 0.22), radius: CGSize(width: 0.11, height: 0.10), temperature: storage, color: .accentBlue),
-            .init(id: "battery", shortTitle: "Battery", center: CGPoint(x: 0.50, y: 0.66), radius: CGSize(width: 0.42, height: 0.28), temperature: battery, color: .accentGreen)
-        ]
-        let cpuSensors = (grouped[.cpuCore] ?? []).filter { $0.value > 0 }
-        for (index, sensor) in cpuSensors.enumerated() {
-            let column = index % 5
-            let row = index / 5
-            result.append(.init(
-                id: "cpu-\(index)",
-                shortTitle: sensor.name,
-                center: CGPoint(x: 0.38 + Double(column) * 0.032, y: 0.18 + Double(row) * 0.055),
-                radius: CGSize(width: 0.055, height: 0.05),
-                temperature: sensor.value,
-                color: .accentRed
-            ))
-        }
-        if cpuSensors.isEmpty, cpu > 0 {
-            result.append(.init(id: "cpu", shortTitle: "CPU", center: CGPoint(x: 0.45, y: 0.22), radius: CGSize(width: 0.13, height: 0.11), temperature: cpu, color: .accentRed))
-        }
-        let socSensors = (grouped[.soc] ?? []).filter { $0.value > 0 }
-        for (index, sensor) in socSensors.enumerated() {
-            result.append(.init(
-                id: "soc-\(index)",
-                shortTitle: sensor.name,
-                center: CGPoint(x: 0.52 + Double(index % 4) * 0.042, y: 0.27 + Double(index / 4) * 0.05),
-                radius: CGSize(width: 0.065, height: 0.05),
-                temperature: sensor.value,
-                color: .accentAmber
-            ))
-        }
-        if socSensors.isEmpty, soc > 0 {
-            result.append(.init(id: "soc", shortTitle: "SoC", center: CGPoint(x: 0.53, y: 0.27), radius: CGSize(width: 0.16, height: 0.12), temperature: soc, color: .accentAmber))
-        }
-        if !isAir {
-            result.append(.init(id: "fan-left", shortTitle: "Fan L", center: CGPoint(x: 0.18, y: 0.20), radius: CGSize(width: 0.13, height: 0.13), temperature: airflow, color: .accentBlue))
-            result.append(.init(id: "fan-right", shortTitle: "Fan R", center: CGPoint(x: 0.82, y: 0.20), radius: CGSize(width: 0.13, height: 0.13), temperature: airflow, color: .accentBlue))
-        }
-        zones = result.filter { $0.temperature > 0 }
-    }
-
-    private init(
-        zones: [MacBookThermalZone],
-        components: [MacBookComponent],
-        layoutName: String,
-        fanRPMs: [String: Int]
-        , sensorCount: Int
-    ) {
-        self.zones = zones
-        self.components = components
-        self.layoutName = layoutName
-        self.fanRPMs = fanRPMs
-        self.sensorCount = sensorCount
-    }
-
-    var maximumTemperature: Double {
-        zones.map(\.temperature).max() ?? 0
-    }
-
-    var activeSensorCount: Int { sensorCount }
-    var hasFanTelemetry: Bool { !fanRPMs.isEmpty }
-    var hasActiveFans: Bool { fanRPMs.values.contains(where: { $0 > 0 }) }
-    var fanStatusText: String {
-        components
-            .filter { $0.kind == .fan }
-            .map { component in
-                let side = component.id == "fan-left" ? "L" : "R"
-                return "\(side) \(fanRPM(for: component.id))"
-            }
-            .joined(separator: " · ") + " RPM"
-    }
-    var boardPeakTemperature: Double {
-        zones
-            .filter { $0.id != "battery" && !$0.id.hasPrefix("fan-") }
-            .map(\.temperature)
-            .max() ?? 0
-    }
-
-    func fanRPM(for componentID: String) -> Int {
-        fanRPMs[componentID] ?? 0
-    }
-
-    func temperature(x: Double, y: Double) -> Double {
-        guard !zones.isEmpty else { return 0 }
-        var weightedTemperature = 0.0
-        var weightTotal = 0.0
-        for zone in zones {
-            let dx = (x - zone.center.x) / max(0.01, zone.radius.width)
-            let dy = (y - zone.center.y) / max(0.01, zone.radius.height)
-            let weight = exp(-(dx * dx + dy * dy) * 1.7)
-            weightedTemperature += zone.temperature * weight
-            weightTotal += weight
-        }
-        let ambient = max(22, (zones.map(\.temperature).min() ?? 30) - 14)
-        let ambientWeight = 0.32
-        return (weightedTemperature + ambient * ambientWeight) / (weightTotal + ambientWeight)
-    }
-
-    func height(for temperature: Double) -> Double {
-        guard temperature > 0 else { return 0 }
-        return min(max((temperature - 25) / 70, 0), 1)
-    }
-
-    func interpolated(to target: MacBookThermalField, progress: Double) -> MacBookThermalField {
-        let eased = min(max(progress, 0), 1)
-        let sourceTemperatures = Dictionary(uniqueKeysWithValues: zones.map { ($0.id, $0.temperature) })
-        let blendedZones = target.zones.map { zone in
-            let start = sourceTemperatures[zone.id] ?? zone.temperature
-            return MacBookThermalZone(
-                id: zone.id,
-                shortTitle: zone.shortTitle,
-                center: zone.center,
-                radius: zone.radius,
-                temperature: start + (zone.temperature - start) * eased,
-                color: zone.color
-            )
-        }
-        return MacBookThermalField(
-            zones: blendedZones,
-            components: target.components,
-            layoutName: target.layoutName,
-            fanRPMs: target.fanRPMs
-            , sensorCount: target.sensorCount
-        )
-    }
-
-    func color(for temperature: Double) -> Color {
-        ThermalColorScale.color(for: temperature)
-    }
-}
-
-private enum ThermalColorScale {
+enum ThermalColorScale {
     private struct Stop {
         let temperature: Double
         let red: Double
@@ -1833,7 +1744,7 @@ private enum ThermalColorScale {
     }
 }
 
-private enum MacBookComponentKind {
+enum MacBookComponentKind {
     case board
     case storage
     case fan
@@ -1867,7 +1778,7 @@ private enum MacBookComponentKind {
     }
 }
 
-private struct MacBookComponent {
+struct MacBookComponent {
     let id: String
     let title: String
     let frame: CGRect
@@ -1876,33 +1787,33 @@ private struct MacBookComponent {
     var outline: [CGPoint]? = nil
 }
 
-private struct MacBookComponentLayout {
+struct MacBookComponentLayout {
     let name: String
     let components: [MacBookComponent]
 
     init(isAir: Bool) {
         let structural: [MacBookComponent] = [
-            .init(id: "vent", title: "VENT", frame: CGRect(x: 0.08, y: 0.055, width: 0.84, height: 0.035), kind: .vent, tint: .white),
-            .init(id: "speaker-left", title: "", frame: CGRect(x: 0.035, y: 0.17, width: 0.060, height: 0.34), kind: .speaker, tint: .white),
-            .init(id: "speaker-right", title: "", frame: CGRect(x: 0.905, y: 0.17, width: 0.060, height: 0.34), kind: .speaker, tint: .white),
+            .init(id: "vent", title: "VENT", frame: CGRect(x: 0.055, y: 0.045, width: 0.89, height: 0.035), kind: .vent, tint: .white),
+            .init(id: "speaker-left", title: "", frame: CGRect(x: 0.025, y: 0.29, width: 0.070, height: 0.37), kind: .speaker, tint: .white),
+            .init(id: "speaker-right", title: "", frame: CGRect(x: 0.905, y: 0.29, width: 0.070, height: 0.37), kind: .speaker, tint: .white),
             .init(
                 id: "battery-pack",
                 title: "BATTERY PACK",
-                frame: CGRect(x: 0.11, y: 0.42, width: 0.78, height: 0.43),
+                frame: CGRect(x: 0.105, y: 0.48, width: 0.79, height: 0.45),
                 kind: .battery,
                 tint: .accentGreen,
                 outline: [
-                    CGPoint(x: 0.11, y: 0.42),
-                    CGPoint(x: 0.89, y: 0.42),
-                    CGPoint(x: 0.89, y: 0.85),
-                    CGPoint(x: 0.68, y: 0.85),
-                    CGPoint(x: 0.68, y: 0.62),
-                    CGPoint(x: 0.32, y: 0.62),
-                    CGPoint(x: 0.32, y: 0.85),
-                    CGPoint(x: 0.11, y: 0.85)
+                    CGPoint(x: 0.105, y: 0.48),
+                    CGPoint(x: 0.895, y: 0.48),
+                    CGPoint(x: 0.895, y: 0.93),
+                    CGPoint(x: 0.69, y: 0.93),
+                    CGPoint(x: 0.69, y: 0.61),
+                    CGPoint(x: 0.31, y: 0.61),
+                    CGPoint(x: 0.31, y: 0.93),
+                    CGPoint(x: 0.105, y: 0.93)
                 ]
             ),
-            .init(id: "trackpad", title: "TRACKPAD", frame: CGRect(x: 0.35, y: 0.63, width: 0.30, height: 0.23), kind: .trackpad, tint: .white)
+            .init(id: "trackpad", title: "TRACKPAD", frame: CGRect(x: 0.33, y: 0.61, width: 0.34, height: 0.29), kind: .trackpad, tint: .white)
         ]
 
         if isAir {
@@ -1914,9 +1825,9 @@ private struct MacBookComponentLayout {
         } else {
             name = "MacBook Pro dual-fan layout"
             components = [
-                .init(id: "fan-left", title: "FAN L", frame: CGRect(x: 0.09, y: 0.115, width: 0.18, height: 0.18), kind: .fan, tint: .accentBlue),
-                .init(id: "logic-board", title: "LOGIC BOARD", frame: CGRect(x: 0.29, y: 0.12, width: 0.42, height: 0.22), kind: .board, tint: .accentAmber),
-                .init(id: "fan-right", title: "FAN R", frame: CGRect(x: 0.73, y: 0.115, width: 0.18, height: 0.18), kind: .fan, tint: .accentBlue)
+                .init(id: "fan-left", title: "FAN L", frame: CGRect(x: 0.075, y: 0.105, width: 0.225, height: 0.245), kind: .fan, tint: .accentBlue),
+                .init(id: "logic-board", title: "LOGIC BOARD", frame: CGRect(x: 0.275, y: 0.09, width: 0.45, height: 0.36), kind: .board, tint: .accentAmber),
+                .init(id: "fan-right", title: "FAN R", frame: CGRect(x: 0.70, y: 0.105, width: 0.225, height: 0.245), kind: .fan, tint: .accentBlue)
             ] + structural
         }
     }
@@ -1960,6 +1871,11 @@ private enum IsometricLayer {
 }
 
 private struct IsometricProjector {
+    /// Matches the uncropped chassis bounds of `thermal_realistic_m3pro`.
+    /// Keeping this in world geometry prevents the reference image from being
+    /// squeezed while every schematic/thermal coordinate stays normalized.
+    private static let chassisAspectRatio = 900.0 / 659.0
+
     let size: CGSize
     let azimuthDegrees: Double
     let elevationDegrees: Double
@@ -1969,11 +1885,18 @@ private struct IsometricProjector {
     func point(x: Double, y: Double, height: Double, layer: IsometricLayer) -> CGPoint {
         let azimuth = azimuthDegrees * Double.pi / 180
         let elevation = elevationDegrees * Double.pi / 180
-        let worldX = x - 0.5
+        let worldX = (x - 0.5) * Self.chassisAspectRatio
         let worldY = y - 0.5
         let rotatedX = worldX * cos(azimuth) - worldY * sin(azimuth)
         let rotatedY = worldX * sin(azimuth) + worldY * cos(azimuth)
-        let scale = min(size.width * 0.76, size.height * 0.72) * zoom
+        let horizontalSpan = abs(Self.chassisAspectRatio * cos(azimuth)) + abs(sin(azimuth))
+        let projectedDepthSpan = (
+            abs(Self.chassisAspectRatio * sin(azimuth)) + abs(cos(azimuth))
+        ) * max(abs(sin(elevation)), 0.18)
+        let scale = min(
+            size.width * 0.86 / horizontalSpan,
+            size.height * 0.62 / projectedDepthSpan
+        ) * zoom
         let separation: Double
         switch layer {
         case .base: separation = -layerSeparation * 0.06

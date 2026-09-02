@@ -119,7 +119,7 @@ Storage предварительно создаётся один раз и со�
 
 ## UI-инфраструктура
 
-`MacCleaner/Views/DesignSystem.swift` содержит semantic colors, typography, графики, button styles, `AppSegmentedControl`, footer и общий `AppModalOverlay`. `AppModalCoordinator` централизует информационные и feature overlays. Код полноразмерных графиков menu bar и их локального архива изолирован в `MacCleaner/MenuBar/`.
+`MacCleaner/Views/DesignSystem.swift` содержит semantic colors, typography, графики, button styles, `AppSegmentedControl`, footer и общий `AppModalOverlay`. `AppModalCoordinator` централизует информационные и feature overlays. Код полноразмерных графиков menu bar и их локального архива изолирован в `MacCleaner/MenuBar/`. Модель-специфичные визуальные основы Thermal Surface хранятся в asset catalog и не создают отдельный sampler или источник телеметрии.
 
 ### Модульные Tools и menu bar
 
@@ -135,6 +135,8 @@ Process-series roster ранжируется по накопленному зн�
 
 Актуализация Thermal Surface: `SystemMonitor` при открытии Graphs принудительно обновляет battery source и на Mac15,6 читает активный `PortControllerInfo` в проверенном IORegistry-порядке USB-C 1, USB-C 2, MagSafe 3, USB-C 3; неизвестные модели не получают выдуманной стороны порта. Canvas рисует только один активный power route, а единственный внешний `NSScreen` может дополнить USB-C подпись системным именем и разрешением. Sensor field использует отдельные CPU Core/SoC Block readings внутри общей logic-board зоны и никогда не смешивает memory load с температурой. Battery layout рассматривается как единый top-case pack без заявления о числе физических cells. Zoom-control раскрывается из icon-only кнопки; component inspection использует последовательность top-down camera → fade mesh, а обратный переход сначала возвращает перспективу.
 
+Основа Thermal Surface по умолчанию остаётся векторной схемой. На проверенной модели Mac15,6 отдельная icon-only кнопка плавно заменяет её модель-специфичной фотореалистичной текстурой, проецируемой тем же `IsometricProjector`. World-space корпуса использует натуральное отношение сторон asset `900:659`; схема, mesh, оси и hit-testing строятся в этой же прямоугольной системе координат, поэтому фотография не сжимается до квадрата. Тепловая mesh, hover, airflow, charging overlay и нижняя температурная легенда являются общими для двух основ и не пересоздаются при переключении.
+
 Системная логика новых инструментов вынесена в `UtilityToolServices.swift` и `ClipboardHistoryService.swift`. Floating Shelf и Clipboard History принадлежат самостоятельным nonactivating `NSPanel`, поэтому `⌥S` и `⌥C` показывают только нужную utility-панель, не открывая и не поднимая главное окно. Hotkeys регистрируются при запуске процесса, а не при появлении SwiftUI-сцены; они продолжают работать, пока MacCleaner запущен в menu bar или фоне. Узкий `NSViewRepresentable` меняет уровень Shelf между `.floating` и `.normal`; закрепление хранится локально и по умолчанию включено. Carbon использует физические key codes, поэтому команды не зависят от английской/русской раскладки и не требуют глобального чтения клавиатуры.
 
 Команды Shelf в Tools представлены общим `SubtleToolIconButton`: нейтральная icon-only поверхность усиливается только при hover, а название действия сохранено в tooltip и accessibility label. Empty state floating panel использует три коротких ярлыка — Drop in, Drag out и Safe copy — вместо длинной инструкции; заполненные строки дополнительно показывают Drag out. Действия верхних Shelf/Clipboard-карточек находятся непосредственно после их заголовков и используют компактный размер. Парная высота определяется через SwiftUI preference как максимум естественных высот обеих карточек, поэтому они совпадают без жёсткой константы и адаптируются к шрифту и содержимому. Pin toggle использует `MutedSwitchStyle`: компактную нейтральную capsule без зависимости от яркого system accent color.
@@ -149,7 +151,7 @@ Menu bar использует существующий `SystemMonitor`, поэт
 
 Обычный клик по `NSStatusItem` показывает transient popover без `NSApp.activate`, поэтому существующее главное окно не поднимается поверх текущего приложения. Пока popover видим, `StatusBarController` держит временный global mouse monitor: внешний клик закрывает меню, а monitor удаляется через `NSPopoverDelegate` сразу после закрытия. Активация сохраняется только у явных действий `Open MacCleaner` и `Settings…`.
 
-Визуально каждый status-item gauge сохраняет short label + vertical battery + marker либо short label + monospaced direct value, но SwiftUI-слой внутри `NSStatusBarButton` уменьшает каждую строку до половины высоты menu bar и объединяет показатели попарно. Passthrough hosting view не перехватывает клик у AppKit-кнопки. Temperature добавляет термометр только в battery-композиции; числовой режим уже содержит единицу измерения. Settings preview использует тот же выбранный стиль.
+Визуально каждый status-item gauge сохраняет short label + vertical battery + marker либо short label + monospaced direct value, но SwiftUI-слой внутри `NSStatusBarButton` уменьшает каждую строку до половины высоты menu bar и объединяет показатели попарно. Внутри пары short label и значение занимают стабильные колонки, а строки используют нулевой вертикальный интервал: обновление цифр не меняет выравнивание CPU/RAM и не расширяет status item скачками. Passthrough hosting view не перехватывает клик у AppKit-кнопки. Temperature добавляет термометр только в battery-композиции; числовой режим уже содержит единицу измерения. Settings preview использует тот же выбранный стиль.
 
 Media Compressor, App Audio Report и Charge Limit временно исключены из runtime-каталога и обозначены beta только в Settings. Их код не считается доступной пользовательской функцией до отдельного возвращения. Screen Text и Awake Profiles также отсутствуют в runtime-каталоге.
 
@@ -186,7 +188,7 @@ Large Files сначала использует обычный пользова�
 
 ## Тесты
 
-`MacCleanerTests/SafetyPolicyTests.swift` содержит 55 XCTest-тестов. Они проверяют path boundaries, защиту данных MacCleaner, Trash semantics и исчезновение временного файла между сканированием и очисткой, scan budgets, cleanup ranking, exact duplicates, similar photos, cloud reclaim, startup items, process aggregation, RAM policy, reset-контракты, глубокий Large Files scan, Opt root selection/cache, запрет сохранения увеличившегося результата Media Compressor, исключение beta-инструментов из workspace, компактные форматы, два стиля menu bar gauges, сохранение выбранного gauge-порядка, reorder/remove/restore dashboard-карточек, валидацию полного порядка direct-drag, а также полный pasteboard representation round-trip.
+`MacCleanerTests/SafetyPolicyTests.swift` содержит 74 XCTest-тестов. Они проверяют path boundaries, защиту данных MacCleaner, Trash semantics и исчезновение временного файла между сканированием и очисткой, scan budgets, cleanup ranking, exact duplicates, similar photos, cloud reclaim, startup items, process aggregation, RAM policy, reset-контракты, глубокий Large Files scan, Opt root selection/cache, запрет сохранения увеличившегося результата Media Compressor, исключение beta-инструментов из workspace, компактные форматы, два стиля menu bar gauges, сохранение выбранного gauge-порядка, reorder/remove/restore dashboard-карточек, валидацию полного порядка direct-drag, а также полный pasteboard representation round-trip.
 
 Проверка 2026-07-18:
 
@@ -206,3 +208,13 @@ TEST SUCCEEDED
 - [[Features]]
 - [[Decisions]]
 - [[Opportunities]]
+
+### Реальные датчики и пространственная поверхность
+
+`MenuBar/ThermalSurfaceModel.swift` отделяет thermal field от представления. Вход — только валидные `ThermalInfo.sensors` со стабильным `source:sourceID`; сводные CPU/GPU/SoC поля не создают дополнительные датчики. `SMCService` сохраняет исходные HID Product/SMC key, не дублирует tdev как airflow и не копирует CPU в GPU. Недокументированные номера HID каналов не называются номерами физических ядер.
+
+Пространственная интерполяция сочетает Gaussian influence с inverse-distance weights, сохраняет одиночные опорные значения и затухает к минимальному измеренному значению. Это визуальная базовая температура, не ambient-измерение и не физическая модель теплопроводности. Совпадающие region anchors усредняются только для mesh, исходные readings остаются отдельными. Геометрия и порядок компонентов не изменены; координаты sensor channels являются стабильными привязками к областям, а не точными координатами датчиков. Нераспознанные датчики остаются в Fans и не получают выдуманную позицию.
+
+Анимация меняет только отображаемое поле. Hover компонентов показывает текущие readings с `Measured`, источником и исходным ID; hover mesh отдельно показывает `Interpolated` и ближайший реальный sensor. Z-scale расширяется для readings выше 95°C. Новых sampler, CLI-процессов и зависимостей не добавлено.
+
+Проверка 2026-09-02: macOS XCTest — 74 passed, 0 failed, включая 6 новых thermal regression-тестов. Debug build/run прошёл. На M3 Pro визуально проверены component hover и surface hover с живой HID-телеметрией: 21 исходный датчик после удаления двух искусственных airflow-дубликатов. Геометрия компонентов сохранена; runtime performance benchmark в этой проверке не выполнялся.

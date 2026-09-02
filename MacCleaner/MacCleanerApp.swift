@@ -586,7 +586,7 @@ struct MenuBarLabel: View {
                     .frame(width: 17, height: 17)
             }
             ForEach(Array(gaugeColumns.enumerated()), id: \.offset) { _, column in
-                VStack(alignment: .leading, spacing: -1) {
+                VStack(alignment: .leading, spacing: 0) {
                     ForEach(column) { gauge in
                         gaugeView(gauge)
                     }
@@ -606,24 +606,30 @@ struct MenuBarLabel: View {
             Text(gauge.shortTitle)
                 .font(.system(size: 8.5, weight: .semibold, design: .rounded))
                 .foregroundStyle(.primary)
-            if settings.displayStyle(for: gauge) == .battery {
-                MenuBarBatteryIndicator(progress: data.progress, color: data.color)
-                    .scaleEffect(0.62)
-                    .frame(width: 7, height: 9)
-                if gauge == .temperature {
-                    Image(systemName: "thermometer.medium")
-                        .font(.system(size: 7, weight: .semibold))
-                        .foregroundStyle(.primary)
+                .frame(width: 20, alignment: .leading)
+            Group {
+                if settings.displayStyle(for: gauge) == .battery {
+                    HStack(spacing: 1.5) {
+                        MenuBarBatteryIndicator(progress: data.progress, color: data.color)
+                            .scaleEffect(0.62)
+                            .frame(width: 7, height: 9)
+                        if gauge == .temperature {
+                            Image(systemName: "thermometer.medium")
+                                .font(.system(size: 7, weight: .semibold))
+                                .foregroundStyle(.primary)
+                        }
+                        MenuBarFormatMarker(marker: gauge.formatMarker(for: settings.valueFormat(for: gauge)))
+                            .scaleEffect(0.78)
+                            .frame(width: 6, height: 9)
+                    }
+                } else {
+                    Text(data.value)
+                        .font(.system(size: 8.5, weight: .semibold, design: .monospaced))
+                        .monospacedDigit()
+                        .foregroundStyle(data.color)
                 }
-                MenuBarFormatMarker(marker: gauge.formatMarker(for: settings.valueFormat(for: gauge)))
-                    .scaleEffect(0.78)
-                    .frame(width: 6, height: 9)
-            } else {
-                Text(data.value)
-                    .font(.system(size: 8.5, weight: .semibold, design: .monospaced))
-                    .monospacedDigit()
-                    .foregroundStyle(data.color)
             }
+            .frame(width: 27, alignment: .leading)
         }
         .frame(height: 10, alignment: .center)
         .fixedSize()

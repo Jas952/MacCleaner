@@ -14,6 +14,7 @@
 		A067_MBG /* MenuBarGraphsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F067_MBG /* MenuBarGraphsView.swift */; };
 		A068_MPH /* MenuBarProcessHistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F068_MPH /* MenuBarProcessHistoryView.swift */; };
 		A069_PHS /* ProcessHistoryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F069_PHS /* ProcessHistoryStore.swift */; };
+		A070_TSM /* ThermalSurfaceModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F070_TSM /* ThermalSurfaceModel.swift */; };
 		A003 /* SystemInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = F003 /* SystemInfo.swift */; };
 		A004 /* SystemMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = F004 /* SystemMonitor.swift */; };
 		A005 /* OverviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F005 /* OverviewView.swift */; };
@@ -111,6 +112,7 @@
 		F067_MBG /* MenuBarGraphsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarGraphsView.swift; sourceTree = "<group>"; };
 		F068_MPH /* MenuBarProcessHistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarProcessHistoryView.swift; sourceTree = "<group>"; };
 		F069_PHS /* ProcessHistoryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessHistoryStore.swift; sourceTree = "<group>"; };
+		F070_TSM /* ThermalSurfaceModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThermalSurfaceModel.swift; sourceTree = "<group>"; };
 		F003 /* SystemInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemInfo.swift; sourceTree = "<group>"; };
 		F004 /* SystemMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemMonitor.swift; sourceTree = "<group>"; };
 		F005 /* OverviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverviewView.swift; sourceTree = "<group>"; };
@@ -265,6 +267,7 @@
 				F067_MBG /* MenuBarGraphsView.swift */,
 				F068_MPH /* MenuBarProcessHistoryView.swift */,
 				F069_PHS /* ProcessHistoryStore.swift */,
+				F070_TSM /* ThermalSurfaceModel.swift */,
 			);
 			path = MenuBar;
 			sourceTree = "<group>";
@@ -494,6 +497,7 @@
 				A067_MBG /* MenuBarGraphsView.swift in Sources */,
 				A068_MPH /* MenuBarProcessHistoryView.swift in Sources */,
 				A069_PHS /* ProcessHistoryStore.swift in Sources */,
+				A070_TSM /* ThermalSurfaceModel.swift in Sources */,
 				A004 /* SystemMonitor.swift in Sources */,
 				A005 /* OverviewView.swift in Sources */,
 				A001 /* MacCleanerApp.swift in Sources */,

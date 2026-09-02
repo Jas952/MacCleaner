@@ -5,6 +5,90 @@ import XCTest
 @testable import MacCleaner
 
 final class SafetyPolicyTests: XCTestCase {
+    func testThermalSurfaceDoesNotFabricateMissingSensors() {
+        var thermal = ThermalInfo()
+        thermal.cpuTemp = 80
+        thermal.gpuTemp = 80
+        let empty = MacBookThermalField(thermal: thermal, fans: [], modelIdentifier: "Mac15,6")
+        XCTAssertTrue(empty.zones.isEmpty, "Summary values are not independent sensor readings")
+        thermal.sensors = [SensorReading.hid(name: "tdie1", temperature: 80)]
+        let field = MacBookThermalField(thermal: thermal, fans: [], modelIdentifier: "Mac15,6")
+        XCTAssertEqual(field.zones.count, 1)
+        XCTAssertTrue(field.readings(for: "battery-pack").isEmpty)
+        XCTAssertTrue(field.readings(for: "fan-left").isEmpty)
+        XCTAssertEqual(field.zones.first?.reading.sourceID, "tdie1")
+        XCTAssertFalse(field.hasFanTelemetry)
+    }
+
+    func testHIDChannelsKeepIdentityWithoutInventedGPUOrAirflow() {
+        let first = SensorReading.hid(name: "tdev7", temperature: 45)
+        let second = SensorReading.hid(name: "tdev7", temperature: 46)
+        XCTAssertEqual(first.id, second.id)
+        XCTAssertEqual(first.category, .soc)
+        XCTAssertEqual(first.sourceID, "tdev7")
+        XCTAssertEqual(first.source, "HID")
+        XCTAssertFalse(first.name.contains("GPU"))
+        XCTAssertFalse(first.name.contains("Airflow"))
+        XCTAssertEqual(SensorReading.hid(name: "left unknown", temperature: 40).category, .other)
+    }
+
+    func testThermalSpatialInterpolationPreservesAnchorsAndMeasuredBounds() {
+        var thermal = ThermalInfo()
+        thermal.sensors = [SensorReading.hid(name: "tdie1", temperature: 80),
+                           SensorReading.hid(name: "gas gauge", temperature: 35)]
+        let field = MacBookThermalField(thermal: thermal, fans: [], modelIdentifier: "Mac15,6")
+        for zone in field.zones {
+            XCTAssertEqual(field.temperature(x: zone.center.x, y: zone.center.y), zone.reading.value, accuracy: 0.0001)
+        }
+        for row in 0...20 {
+            for column in 0...20 {
+                let value = field.temperature(x: Double(column) / 20, y: Double(row) / 20)
+                XCTAssertTrue(value.isFinite && value >= 35 && value <= 80)
+            }
+        }
+        let nearCPU = field.temperature(x: 0.40, y: 0.18)
+        let farCPU = field.temperature(x: 0.10, y: 0.18)
+        XCTAssertGreaterThan(nearCPU, farCPU)
+    }
+
+    func testThermalAnimationDoesNotChangeLiveHoverReadingsOrLayout() {
+        var initial = ThermalInfo()
+        initial.sensors = [SensorReading.hid(name: "tdie1", temperature: 50)]
+        let first = MacBookThermalField(thermal: initial, fans: [], modelIdentifier: "Mac15,6")
+        initial.sensors = [SensorReading.hid(name: "tdie1", temperature: 80),
+                           SensorReading.hid(name: "tdie2", temperature: 60)]
+        let next = MacBookThermalField(thermal: initial, fans: [], modelIdentifier: "Mac15,6")
+        let midway = first.interpolated(to: next, progress: 0.5)
+        let zone = midway.zones.first { $0.reading.sourceID == "tdie1" }!
+        XCTAssertEqual(zone.temperature, 65)
+        XCTAssertEqual(zone.reading.value, 80)
+        XCTAssertEqual(zone.center, first.zones[0].center)
+        XCTAssertEqual(first.components.map(\.frame), next.components.map(\.frame))
+        XCTAssertEqual(first.components.map(\.id), next.components.map(\.id))
+    }
+
+    func testThermalInvalidAndDuplicateReadingsAreExcluded() {
+        var thermal = ThermalInfo()
+        thermal.sensors = [SensorReading.hid(name: "tdie1", temperature: 50),
+                           SensorReading.hid(name: "tdie1", temperature: 51),
+                           SensorReading.hid(name: "tdie2", temperature: .nan),
+                           SensorReading.hid(name: "tdie3", temperature: .infinity),
+                           SensorReading.hid(name: "tdie4", temperature: 0)]
+        let field = MacBookThermalField(thermal: thermal, fans: [], modelIdentifier: "Mac15,6")
+        XCTAssertEqual(field.activeSensorCount, 1)
+        XCTAssertEqual(field.zones.count, 1)
+        XCTAssertEqual(field.zones[0].temperature, 50)
+    }
+
+    func testThermalAxisDoesNotClipMeasuredHighTemperatures() {
+        var thermal = ThermalInfo()
+        thermal.sensors = [SensorReading.hid(name: "tdie1", temperature: 108)]
+        let field = MacBookThermalField(thermal: thermal, fans: [], modelIdentifier: "Mac15,6")
+        XCTAssertEqual(field.temperatureCeiling, 110)
+        XCTAssertGreaterThan(field.height(for: 108), field.height(for: 95))
+        XCTAssertLessThan(field.height(for: 108), 1)
+    }
+
     func testPathBoundaryDoesNotAcceptSiblingPrefix() {
         XCTAssertTrue(SafeDeletionService.isPath("/Users/test/Library/Caches/App", inside: "/Users/test/Library/Caches"))
         XCTAssertFalse(SafeDeletionService.isPath("/Users/test/Library/CachesBackup/App", inside: "/Users/test/Library/Caches"))

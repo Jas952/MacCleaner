@@ -90,10 +90,46 @@ enum SensorCategory: String {
 }
 
 struct SensorReading: Identifiable {
-    let id = UUID()
+    var id: String { "\(source):\(sourceID)" }
     let name: String
     let value: Double
     let category: SensorCategory
+    let sourceID: String
+    let source: String
+
+    init(name: String, value: Double, category: SensorCategory, sourceID: String? = nil, source: String = "Sensor") {
+        self.name = name
+        self.value = value
+        self.category = category
+        self.sourceID = sourceID ?? name
+        self.source = source
+    }
+
+    /// Preserve the hardware identifier. A HID channel number is not a core
+    /// number or a documented physical position on the board.
+    static func hid(name: String, temperature: Double) -> SensorReading {
+        let n = name.lowercased()
+        let number = n.components(separatedBy: CharacterSet.decimalDigits.inverted)
+            .compactMap(Int.init).first.map(String.init) ?? name
+        let label: String
+        let category: SensorCategory
+        if n.contains("tdie") {
+            label = "CPU Die Sensor \(number)"; category = .cpuCore
+        } else if n.contains("tdev") || n.contains("tcal") {
+            label = "SoC Sensor \(name)"; category = .soc
+        } else if n.contains("gpu") {
+            label = name; category = .soc
+        } else if n.contains("gas gauge") || n.contains("battery") {
+            label = "Battery · \(name)"; category = .battery
+        } else if n.contains("nand") || n.contains("ssd") || n.contains("flash") {
+            label = "Storage · \(name)"; category = .storage
+        } else if n.contains("airflow") || n.contains("exhaust") {
+            label = name; category = .airflow
+        } else {
+            label = name; category = .other
+        }
+        return SensorReading(name: label, value: temperature, category: category, sourceID: name, source: "HID")
+    }
 }
 
 struct ThermalInfo {
@@ -250,6 +286,12 @@ final class SMCService {
         t.gpuTemp     = readSP78(key: SMCKey.gpuTemp)
         t.batteryTemp = readSP78(key: SMCKey.batteryTemp)
         t.socTemp     = readSP78(key: SMCKey.socTemp)
+        t.sensors = [
+            SensorReading(name: "CPU", value: t.cpuTemp, category: .cpuCore, sourceID: cpu1 >= cpu2 ? SMCKey.cpuTemp : SMCKey.cpuDieTemp, source: "SMC"),
+            SensorReading(name: "GPU", value: t.gpuTemp, category: .soc, sourceID: SMCKey.gpuTemp, source: "SMC"),
+            SensorReading(name: "Battery", value: t.batteryTemp, category: .battery, sourceID: SMCKey.batteryTemp, source: "SMC"),
+            SensorReading(name: "SoC", value: t.socTemp, category: .soc, sourceID: SMCKey.socTemp, source: "SMC")
+        ].filter { $0.value.isFinite && $0.value > 1 && $0.value < 130 }
         return t
     }
 
@@ -456,45 +498,13 @@ final class HIDThermalReader {
         loaded = hidCreate != nil && hidCopyServices != nil && hidCopyEvent != nil && hidEventValue != nil
     }
 
-    // Maps raw HID sensor names to human-readable labels + categories
     private func mapSensor(name: String, temp: Double, into t: inout ThermalInfo, dieTemps: inout [Double], devTemps: inout [Double]) {
-        let n = name.lowercased()
-        let (label, cat): (String, SensorCategory)
-
-        if n.contains("tdie") {
-            // tdie1..tdie10 → CPU Performance/Efficiency Cores
-            let num = n.components(separatedBy: CharacterSet.decimalDigits.inverted).compactMap(Int.init).first ?? 0
-            label = "CPU Core \(num)"
-            cat = .cpuCore
-            dieTemps.append(temp)
-        } else if n.contains("tdev") {
-            let num = n.components(separatedBy: CharacterSet.decimalDigits.inverted).compactMap(Int.init).first ?? 0
-            // tdev1-4 ≈ efficiency cores, tdev5-8 ≈ performance/GPU
-            label = num <= 4 ? "CPU Efficiency \(num)" : "SoC Block \(num)"
-            cat = num <= 4 ? .cpuCore : .soc
-            devTemps.append(temp)
-        } else if n.contains("tcal") {
-            label = "CPU Average"
-            cat = .cpuCore
-        } else if n.contains("gas gauge") || n.contains("battery") {
-            label = "Battery"
-            cat = .battery
-            if t.batteryTemp == 0 { t.batteryTemp = temp }
-        } else if n.contains("nand") || n.contains("ssd") || n.contains("flash") {
-            label = "Storage (NAND)"
-            cat = .storage
-        } else if n.contains("airflow") || n.contains("left") {
-            label = n.contains("left") ? "Airflow Left" : "Airflow Right"
-            cat = .airflow
-        } else {
-            label = name
-            cat = .other
-        }
-
-        // Deduplicate by label
-        if !t.sensors.contains(where: { $0.name == label }) {
-            t.sensors.append(SensorReading(name: label, value: temp, category: cat))
-        }
+        let reading = SensorReading.hid(name: name, temperature: temp)
+        guard !t.sensors.contains(where: { $0.id == reading.id }) else { return }
+        t.sensors.append(reading)
+        if name.lowercased().contains("tdie") { dieTemps.append(temp) }
+        if name.lowercased().contains("tdev") { devTemps.append(temp) }
+        if reading.category == .battery, t.batteryTemp == 0 { t.batteryTemp = temp }
     }
 
     func read() -> ThermalInfo {
@@ -544,24 +554,12 @@ final class HIDThermalReader {
         if !dieTemps.isEmpty {
             t.cpuTemp = dieTemps.max() ?? 0
             t.socTemp = dieTemps.reduce(0, +) / Double(dieTemps.count)
-        } else if !devTemps.isEmpty {
-            t.cpuTemp = devTemps.max() ?? 0
         }
-        if t.gpuTemp == 0, let gpuT = dieTemps.sorted().last {
-            t.gpuTemp = gpuT
+        if !devTemps.isEmpty {
+            t.socTemp = devTemps.reduce(0, +) / Double(devTemps.count)
         }
-
-        // Insert Airflow sensors from airflow reading (tdev7/tdev8 area)
-        if let airL = devTemps.dropFirst(6).first {
-            if !t.sensors.contains(where: { $0.name == "Airflow Left" }) {
-                t.sensors.insert(SensorReading(name: "Airflow Left", value: airL, category: .airflow), at: 0)
-            }
-        }
-        if let airR = devTemps.dropFirst(7).first {
-            if !t.sensors.contains(where: { $0.name == "Airflow Right" }) {
-                t.sensors.insert(SensorReading(name: "Airflow Right", value: airR, category: .airflow), at: 1)
-            }
-        }
+        t.gpuTemp = t.sensors.filter { $0.sourceID.localizedCaseInsensitiveContains("gpu") }
+            .map(\.value).max() ?? 0
 
         return t
     }
