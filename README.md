@@ -58,7 +58,7 @@ It combines live system monitoring, storage analysis, safe cleanup, process insp
 
 MacCleaner brings monitoring, cleanup, file management, diagnostics, and local AI visibility into one native macOS workspace. Each section starts with a clear overview and provides deeper tools when more detailed inspection is needed.
 
-### Current release — 1.0.7
+### Current release — 1.0.8
 
 - The menu bar now contains a configurable compact dashboard with reorderable, hideable, and restorable system cards.
 - Status readings are stacked into compact pairs, while disabling all readings restores the MacCleaner app icon.

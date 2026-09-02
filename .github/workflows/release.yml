@@ -18,7 +18,7 @@ jobs:
       - name: Validate release notes version
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          EXPECTED_TITLE="# v$VERSION"
+          EXPECTED_TITLE="# MacCleaner $VERSION"
           ACTUAL_TITLE="$(head -n 1 MacCleaner/ReleaseNotes.md)"
           if [[ "$ACTUAL_TITLE" != "$EXPECTED_TITLE" ]]; then
             echo "Release notes title '$ACTUAL_TITLE' does not match tag '$GITHUB_REF_NAME'."
