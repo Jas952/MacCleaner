@@ -8,9 +8,9 @@ Menu bar graphs:
 - Process History tracks CPU, memory, and relative energy activity for active applications over the last 30 minutes or four hours. It includes linear and logarithmic scales, minor-process filtering, per-process colors, hover details, and honest indications for gaps in collected data.
 - Thermal Surface maps available Mac temperature sensors onto an interactive 3D chassis view. You can rotate and zoom the surface, separate the heat and component layers, inspect internal zones, and view temperature severity, fan airflow, charging-port activity, and connected-display information when macOS exposes it.
 
-![Process History](https://raw.githubusercontent.com/Jas952/MacCleaner/v1.0.8/docs/readme-media/releases/v1.0.8/process-history.png)
+<img src="https://raw.githubusercontent.com/Jas952/MacCleaner/v1.0.8/docs/readme-media/releases/v1.0.8/process-history.png" width="400" alt="Process History">
 
-![Thermal Surface](https://raw.githubusercontent.com/Jas952/MacCleaner/v1.0.8/docs/readme-media/releases/v1.0.8/thermal-surface.png)
+<img src="https://raw.githubusercontent.com/Jas952/MacCleaner/v1.0.8/docs/readme-media/releases/v1.0.8/thermal-surface.png" width="400" alt="Thermal Surface">
 
 Other changes:
 
