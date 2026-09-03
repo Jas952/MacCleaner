@@ -74,6 +74,7 @@ jobs:
         run: |
           cp appcast.xml "$RUNNER_TEMP/appcast.xml"
           git fetch origin main
+          git reset --hard HEAD
           git checkout main
           cp "$RUNNER_TEMP/appcast.xml" appcast.xml
           git config user.name github-actions[bot]
