@@ -4,7 +4,7 @@
         <title>MacCleaner</title>
         <item>
             <title>1.0.8</title>
-            <pubDate>Thu, 03 Sep 2026 12:44:15 +0000</pubDate>
+            <pubDate>Thu, 03 Sep 2026 13:21:37 +0000</pubDate>
             <link>https://github.com/Jas952/MacCleaner</link>
             <sparkle:version>10</sparkle:version>
             <sparkle:shortVersionString>1.0.8</sparkle:shortVersionString>
@@ -37,7 +37,7 @@ Other changes:
 
 This build uses ad-hoc signing and is not notarized, so macOS may show an unknown-developer warning on first launch. Privileged manual fan control requires a future Developer ID build; fan telemetry remains available.
 ]]></description>
-            <enclosure url="https://github.com/Jas952/MacCleaner/releases/download/v1.0.8/MacCleaner.dmg" length="10457407" type="application/octet-stream" sparkle:edSignature="EuaQCeK8+hqMw8k/DwNCLVF3rOSjVb6LDBIWBdDxRKkSYQLp6mUyTh2eFgCkOMmpF+FmWGzIrFJypW3IspuUDQ=="/>
+            <enclosure url="https://github.com/Jas952/MacCleaner/releases/download/v1.0.8/MacCleaner.dmg" length="10457470" type="application/octet-stream" sparkle:edSignature="Zzkiz1QPb76KPvOB9yRepRBJHVnHfwzVyF2GqEXZa8qkVoUyXfTM4rq+ECUpUY6Vj0XnB+mxTnKtoGqFULBkDg=="/>
         </item>
     </channel>
 </rss>
