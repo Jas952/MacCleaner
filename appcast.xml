@@ -4,37 +4,17 @@
         <title>MacCleaner</title>
         <item>
             <title>1.0.9</title>
-            <pubDate>Sun, 06 Sep 2026 14:48:49 +0000</pubDate>
+            <pubDate>Sun, 06 Sep 2026 15:25:37 +0000</pubDate>
             <link>https://github.com/Jas952/MacCleaner</link>
-            <sparkle:version>11</sparkle:version>
+            <sparkle:version>12</sparkle:version>
             <sparkle:shortVersionString>1.0.9</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
             <description sparkle:format="markdown"><![CDATA[# MacCleaner 1.0.9
 
-## What's new
-
-Fan control:
-
-- Added a dedicated **Fan control** tab to the menu bar popover with live RPM, operating mode, target range, and temperature context for each detected fan.
-- Supported Macs can return individual fans to macOS Auto, choose a manual RPM, temporarily disable a channel, or run both fans at maximum speed for ten seconds.
-- Added a compact live temperature chart with fan start, stop, mode, and RPM-change events, including navigation back to earlier activations.
-- Local fan control can be enabled after standard macOS administrator approval. The helper is tied to the exact app build and returns controlled fans to Auto when MacCleaner disconnects or quits.
-
-Other changes:
-
-- Improved fan-mode confirmation, helper installation diagnostics, RPM decoding, and recovery after sleep or interrupted control.
-- Reduced unnecessary menu bar animation work and refined graph switching, hit areas, and active Thermal Surface controls.
-
-## Install
-
-1. Download `MacCleaner.dmg` below.
-2. Open the DMG and drag MacCleaner to Applications.
-3. Open MacCleaner from Applications. If macOS blocks the first launch, allow it in **System Settings → Privacy & Security**.
-
-This build uses ad-hoc signing and is not notarized, so macOS may show an unknown-developer warning on first launch. Fan control requires a one-time administrator approval for each newly signed build; telemetry remains available without enabling control.
+Added fan control to the menu bar.
 ]]></description>
-            <enclosure url="https://github.com/Jas952/MacCleaner/releases/download/v1.0.9/MacCleaner.dmg" length="10740011" type="application/octet-stream" sparkle:edSignature="DQrAVkIoTbiPXG0NcEdW/qpz8+TWf57x1tc5RYI8YexPcowUOg2wcOFPl/gzG+qciQjOe+3/7MzLUj4fNWuOAw=="/>
+            <enclosure url="https://github.com/Jas952/MacCleaner/releases/download/v1.0.9/MacCleaner.dmg" length="10739110" type="application/octet-stream" sparkle:edSignature="n0ktNYS8VEHIw66USEhLesY+WBnVIGzXFuxsggc/taJ5w88CjR5UCLFyf9eaflBs3oQ4nODf3Fqs76bc6MyFCw=="/>
         </item>
     </channel>
 </rss>
