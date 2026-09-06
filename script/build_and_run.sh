@@ -20,6 +20,10 @@ xcodebuild \
   CODE_SIGNING_ALLOWED=NO \
   build
 
+# Ad-hoc signatures identify this exact app/helper pair for local XPC trust.
+/usr/bin/codesign --force --deep --sign - "$APP_BUNDLE"
+/usr/bin/codesign --verify --deep --strict "$APP_BUNDLE"
+
 open_app() {
   /usr/bin/open -n "$APP_BUNDLE"
 }

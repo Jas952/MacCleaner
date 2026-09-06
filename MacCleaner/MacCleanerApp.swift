@@ -11,14 +11,18 @@ struct MacCleanerApp: App {
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
-        WindowGroup(id: "main") {
+        Window("MacCleaner", id: "main") {
             Group {
                 #if DEBUG
                 if ProcessInfo.processInfo.arguments.contains(where: {
-                    $0.hasPrefix("--debug-process-history-") || $0.hasPrefix("--debug-thermal-")
+                    $0.hasPrefix("--debug-fans") || $0.hasPrefix("--debug-process-history-") || $0.hasPrefix("--debug-thermal-")
                 }) {
                     MenuBarPopover(
                         monitor: sharedMonitor,
+                        fanPanelModel: FanPanelModel(
+                            initialFans: sharedMonitor.fans,
+                            initialThermal: sharedMonitor.thermal
+                        ),
                         openMain: {},
                         openShelf: {},
                         openSettings: {},
@@ -122,6 +126,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             metadata: ["os": ProcessInfo.processInfo.operatingSystemVersionString]
         )
         Task { @MainActor [weak self] in
+            // Decode the persisted chart archive before the user opens the
+            // menu-bar graph for the first time.
+            _ = ProcessHistoryStore.shared
             self?.installUtilityRuntime()
         }
         #if DEBUG
@@ -247,6 +254,7 @@ private final class StatusBarPassthroughHostingView<Content: View>: NSHostingVie
 @MainActor
 final class StatusBarController: NSObject, NSPopoverDelegate {
     private let monitor: SystemMonitor
+    private let fanPanelModel: FanPanelModel
     private let settings = SettingsManager.shared
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let popover = NSPopover()
@@ -264,6 +272,7 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
         openSettings: @escaping () -> Void
     ) {
         self.monitor = monitor
+        self.fanPanelModel = FanPanelModel(initialFans: monitor.fans, initialThermal: monitor.thermal)
         self.openMain = openMain
         self.openShelf = openShelf
         self.openSettings = openSettings
@@ -272,6 +281,7 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
         configurePopover()
         observeUpdates()
         updateStatusItem()
+        fanPanelModel.refresh()
     }
 
     deinit {
@@ -289,7 +299,6 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
         self.openMain = openMain
         self.openShelf = openShelf
         self.openSettings = openSettings
-        configurePopover()
     }
 
     private func configureStatusItem() {
@@ -314,9 +323,10 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
         popover.contentViewController = NSHostingController(
             rootView: MenuBarPopover(
                 monitor: monitor,
-                openMain: openMain,
-                openShelf: openShelf,
-                openSettings: openSettings,
+                fanPanelModel: fanPanelModel,
+                openMain: { [weak self] in self?.openMain() },
+                openShelf: { [weak self] in self?.openShelf() },
+                openSettings: { [weak self] in self?.openSettings() },
                 openAbout: {
                     NSApp.activate(ignoringOtherApps: true)
                     NSApp.orderFrontStandardAboutPanel(nil)
@@ -396,15 +406,16 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
             button.image = nil
             button.imagePosition = .noImage
             button.attributedTitle = NSAttributedString()
-            labelHost.rootView = MenuBarLabel(monitor: monitor)
             labelHost.isHidden = false
-            let fittingSize = labelHost.fittingSize
-            statusItem.length = max(30, fittingSize.width + 8)
+            // Every gauge row has fixed metrics. Avoid NSHostingView.fittingSize:
+            // while SwiftUI invalidates the label it can transiently report -1.
+            let labelSize = MenuBarLabel.preferredSize(gaugeCount: gauges.count)
+            statusItem.length = max(30, labelSize.width + 8)
             labelHost.frame = NSRect(
                 x: 4,
-                y: max(0, (button.bounds.height - fittingSize.height) / 2),
-                width: fittingSize.width,
-                height: min(button.bounds.height, fittingSize.height)
+                y: max(0, (button.bounds.height - labelSize.height) / 2),
+                width: labelSize.width,
+                height: min(max(0, button.bounds.height), labelSize.height)
             )
         }
 
@@ -578,6 +589,12 @@ struct MenuBarLabel: View {
         }
     }
 
+    static func preferredSize(gaugeCount: Int) -> NSSize {
+        guard gaugeCount > 0 else { return NSSize(width: 17, height: 20) }
+        let columns = CGFloat((gaugeCount + 1) / 2)
+        return NSSize(width: ceil(columns * 48.5 + max(0, columns - 1) * 6), height: 20)
+    }
+
     var body: some View {
         HStack(spacing: 6) {
             if settings.menuBarGaugeIDs.isEmpty {
@@ -594,7 +611,11 @@ struct MenuBarLabel: View {
                 .frame(height: 20, alignment: .center)
             }
         }
-        .fixedSize(horizontal: true, vertical: true)
+        .frame(
+            width: Self.preferredSize(gaugeCount: settings.menuBarGaugeIDs.count).width,
+            height: 20,
+            alignment: .leading
+        )
         .help(accessibilitySummary)
         .accessibilityLabel(accessibilitySummary)
     }
@@ -631,8 +652,7 @@ struct MenuBarLabel: View {
             }
             .frame(width: 27, alignment: .leading)
         }
-        .frame(height: 10, alignment: .center)
-        .fixedSize()
+        .frame(width: 48.5, height: 10, alignment: .leading)
         .help("\(gauge.title): \(data.value)")
     }
 
@@ -851,6 +871,7 @@ private struct MenuBarBatteryIndicator: View {
 
 struct MenuBarPopover: View {
     let monitor: SystemMonitor
+    @ObservedObject var fanPanelModel: FanPanelModel
     @ObservedObject private var settings = SettingsManager.shared
     @StateObject private var refreshDriver: MenuBarRefreshDriver
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -868,6 +889,7 @@ struct MenuBarPopover: View {
 
     init(
         monitor: SystemMonitor,
+        fanPanelModel: FanPanelModel,
         openMain: @escaping () -> Void,
         openShelf: @escaping () -> Void,
         openSettings: @escaping () -> Void,
@@ -875,12 +897,16 @@ struct MenuBarPopover: View {
         quit: @escaping () -> Void
     ) {
         self.monitor = monitor
+        self.fanPanelModel = fanPanelModel
         self.openMain = openMain
         self.openShelf = openShelf
         self.openSettings = openSettings
         self.openAbout = openAbout
         self.quit = quit
         _refreshDriver = StateObject(wrappedValue: MenuBarRefreshDriver(monitor: monitor))
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--debug-fans") { _selectedTab = State(initialValue: .fans) }
+        #endif
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains(where: {
             $0.hasPrefix("--debug-thermal-") || $0.hasPrefix("--debug-process-history-")
@@ -907,7 +933,6 @@ struct MenuBarPopover: View {
             header
                 .padding(.horizontal, 14)
                 .padding(.vertical, 12)
-                .background(.ultraThinMaterial)
 
             Group {
                 switch selectedTab {
@@ -915,6 +940,8 @@ struct MenuBarPopover: View {
                     systemTab
                 case .graphs:
                     MenuBarGraphsView(monitor: monitor)
+                case .fans:
+                    MenuBarFansView(model: fanPanelModel)
                 case .tools:
                     toolsTab
                 }
@@ -924,12 +951,13 @@ struct MenuBarPopover: View {
             footer
                 .padding(.horizontal, 12)
                 .padding(.vertical, 5)
-                .background(.ultraThinMaterial)
         }
-        .background(.regularMaterial)
+        .background(Color(nsColor: .windowBackgroundColor))
         .onChange(of: isEditing) { editing in
             if !editing { finishCardDrag() }
         }
+        .onAppear { fanPanelModel.start() }
+        .onDisappear { fanPanelModel.stop() }
     }
 
     private var header: some View {
@@ -950,16 +978,15 @@ struct MenuBarPopover: View {
             HStack(spacing: 4) {
                 ForEach(MenuBarPopoverTab.allCases) { tab in
                     Button {
-                        withAnimation(.easeInOut(duration: 0.16)) {
-                            selectedTab = tab
-                            if tab != .system { isEditing = false }
-                        }
+                        selectedTab = tab
+                        if tab != .system { isEditing = false }
                     } label: {
                         Image(systemName: tab.icon)
                             .font(.system(size: 14, weight: .semibold))
                             .foregroundStyle(selectedTab == tab ? Color.accentBlue : Color.secondary)
                             .frame(width: 32, height: 32)
                             .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+                            .animation(.easeInOut(duration: 0.14), value: selectedTab)
                     }
                     .buttonStyle(.plain)
                     .menuBarHoverChrome(isSelected: selectedTab == tab)
@@ -1172,7 +1199,7 @@ struct MenuBarPopover: View {
                 .foregroundStyle(.tertiary)
         }
         .padding(10)
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.68), in: RoundedRectangle(cornerRadius: 11))
+        .background(Color.primary.opacity(0.025), in: RoundedRectangle(cornerRadius: 11))
         .contentShape(RoundedRectangle(cornerRadius: 11))
     }
 
@@ -1437,6 +1464,7 @@ struct MenuBarPopover: View {
 private enum MenuBarPopoverTab: String, CaseIterable, Identifiable {
     case system
     case graphs
+    case fans
     case tools
 
     var id: String { rawValue }
@@ -1444,6 +1472,7 @@ private enum MenuBarPopoverTab: String, CaseIterable, Identifiable {
         switch self {
         case .system: return "System"
         case .graphs: return "Graphs"
+        case .fans: return "Fan control"
         case .tools: return "Tools"
         }
     }
@@ -1451,6 +1480,7 @@ private enum MenuBarPopoverTab: String, CaseIterable, Identifiable {
         switch self {
         case .system: return "rectangle.stack"
         case .graphs: return "chart.xyaxis.line"
+        case .fans: return "fanblades"
         case .tools: return "wrench.and.screwdriver"
         }
     }
@@ -1488,12 +1518,14 @@ private struct MenuBarDashboardCard<Content: View>: View {
     @ViewBuilder let content: Content
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: isEditing && !reduceMotion ? 1.0 / 30.0 : 1.0)) { timeline in
-            card(
-                rotation: isEditing && !reduceMotion && !isDragging
-                    ? wiggleAngle(at: timeline.date)
-                    : .zero
-            )
+        Group {
+            if isEditing && !reduceMotion {
+                TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
+                    card(rotation: isDragging ? .zero : wiggleAngle(at: timeline.date))
+                }
+            } else {
+                card(rotation: .zero)
+            }
         }
     }
 
@@ -1526,7 +1558,7 @@ private struct MenuBarDashboardCard<Content: View>: View {
                         .contentShape(Capsule())
                         .offset(x: 5)
                         .highPriorityGesture(
-                            DragGesture(minimumDistance: 1, coordinateSpace: .named("menuBarCards"))
+                            DragGesture(minimumDistance: 0, coordinateSpace: .named("menuBarCards"))
                                 .onChanged(dragChanged)
                                 .onEnded { _ in dragEnded() }
                         )
@@ -1549,32 +1581,8 @@ private struct MenuBarDashboardCard<Content: View>: View {
 
 private struct MenuBarSystemBackdrop: View {
     var body: some View {
-        ZStack {
-            Rectangle().fill(.thinMaterial)
-            LinearGradient(
-                colors: [
-                    Color.white.opacity(0.34),
-                    Color.accentBlue.opacity(0.055),
-                    Color.clear,
-                    Color.accentGreen.opacity(0.05)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            RadialGradient(
-                colors: [Color.accentBlue.opacity(0.11), Color.clear],
-                center: UnitPoint(x: 0.12, y: 0.08),
-                startRadius: 0,
-                endRadius: 245
-            )
-            RadialGradient(
-                colors: [Color.accentGreen.opacity(0.09), Color.clear],
-                center: UnitPoint(x: 0.92, y: 0.78),
-                startRadius: 0,
-                endRadius: 300
-            )
-        }
-        .allowsHitTesting(false)
+        Color(nsColor: .windowBackgroundColor)
+            .allowsHitTesting(false)
     }
 }
 

@@ -69,7 +69,7 @@ struct MenuBarProcessHistoryView: View {
                     .padding(10)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             .overlay { RoundedRectangle(cornerRadius: 16).strokeBorder(Color.primary.opacity(0.10)) }
             .animation(.easeOut(duration: 0.32), value: samples.last?.date)
@@ -189,7 +189,7 @@ struct MenuBarProcessHistoryView: View {
         }
         .padding(.horizontal, 9).padding(.vertical, 7)
         .frame(maxWidth: .infinity, minHeight: 50)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+        .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
         .overlay { RoundedRectangle(cornerRadius: 11).strokeBorder(Color.primary.opacity(0.08)) }
     }
 
@@ -206,7 +206,7 @@ struct MenuBarProcessHistoryView: View {
             }
         }
         .padding(.horizontal, 9).frame(height: 40)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+        .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
         .overlay { RoundedRectangle(cornerRadius: 10).strokeBorder(hover.color.opacity(0.48)) }
         .shadow(color: .black.opacity(0.10), radius: 8, y: 3)
     }

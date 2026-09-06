@@ -58,11 +58,11 @@ It combines live system monitoring, storage analysis, safe cleanup, process insp
 
 MacCleaner brings monitoring, cleanup, file management, diagnostics, and local AI visibility into one native macOS workspace. Each section starts with a clear overview and provides deeper tools when more detailed inspection is needed.
 
-### Current release — 1.0.8
+### Current release — 1.0.9
 
-- The menu bar now contains a configurable compact dashboard with reorderable, hideable, and restorable system cards.
-- Status readings are stacked into compact pairs, while disabling all readings restores the MacCleaner app icon.
-- The local BETA File Reader is available in Tools, and Apple Silicon fan telemetry no longer invents placeholder readings.
+- A dedicated Fan control tab is now available directly in the menu bar popover.
+- Supported Macs can switch individual fans between macOS Auto and a selected RPM, or run a ten-second maximum cooling boost.
+- The fan panel now includes live temperature history, fan events, verified RPM telemetry, and automatic recovery to Auto when control ends.
 
 ## Local AI Workload
 

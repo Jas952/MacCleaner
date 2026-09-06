@@ -1,21 +1,18 @@
-# MacCleaner 1.0.8
+# MacCleaner 1.0.9
 
 ## What's new
 
-Menu bar graphs:
+Fan control:
 
-- Added a new **Graphs** section to the menu bar popover with **Process History** and **Thermal Surface** views.
-- Process History tracks CPU, memory, and relative energy activity for active applications over the last 30 minutes or four hours. It includes linear and logarithmic scales, minor-process filtering, per-process colors, hover details, and honest indications for gaps in collected data.
-- Thermal Surface maps available Mac temperature sensors onto an interactive 3D chassis view. You can rotate and zoom the surface, separate the heat and component layers, inspect internal zones, and view temperature severity, fan airflow, charging-port activity, and connected-display information when macOS exposes it.
-
-<img src="https://raw.githubusercontent.com/Jas952/MacCleaner/v1.0.8/docs/readme-media/releases/v1.0.8/process-history.png" width="400" alt="Process History">
-
-<img src="https://raw.githubusercontent.com/Jas952/MacCleaner/v1.0.8/docs/readme-media/releases/v1.0.8/thermal-surface.png" width="400" alt="Thermal Surface">
+- Added a dedicated **Fan control** tab to the menu bar popover with live RPM, operating mode, target range, and temperature context for each detected fan.
+- Supported Macs can return individual fans to macOS Auto, choose a manual RPM, temporarily disable a channel, or run both fans at maximum speed for ten seconds.
+- Added a compact live temperature chart with fan start, stop, mode, and RPM-change events, including navigation back to earlier activations.
+- Local fan control can be enabled after standard macOS administrator approval. The helper is tied to the exact app build and returns controlled fans to Auto when MacCleaner disconnects or quits.
 
 Other changes:
 
-- Reduced unnecessary menu bar refresh work, reused the existing system monitor, bounded the local four-hour history, and paused hidden thermal animation to keep background overhead low.
-- Improved process-history continuity, startup behavior, switching responsiveness, sensor and fan decoding, and layout alignment in both light and dark appearances.
+- Improved fan-mode confirmation, helper installation diagnostics, RPM decoding, and recovery after sleep or interrupted control.
+- Reduced unnecessary menu bar animation work and refined graph switching, hit areas, and active Thermal Surface controls.
 
 ## Install
 
@@ -23,4 +20,4 @@ Other changes:
 2. Open the DMG and drag MacCleaner to Applications.
 3. Open MacCleaner from Applications. If macOS blocks the first launch, allow it in **System Settings → Privacy & Security**.
 
-This build uses ad-hoc signing and is not notarized, so macOS may show an unknown-developer warning on first launch. Privileged manual fan control requires a future Developer ID build; fan telemetry remains available.
+This build uses ad-hoc signing and is not notarized, so macOS may show an unknown-developer warning on first launch. Fan control requires a one-time administrator approval for each newly signed build; telemetry remains available without enabling control.
