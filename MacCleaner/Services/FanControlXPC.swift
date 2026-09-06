@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 
 @objc protocol MacCleanerFanHelperProtocol {
     func status(withReply reply: @escaping (Bool, String?) -> Void)
@@ -34,6 +35,11 @@ final class FanControlXPCClient {
         #endif
     }
     func installHelper(completion: @escaping (Bool, String?) -> Void) {
+        // The action is commonly initiated from the menu bar popover. Bring the
+        // owning app forward before osascript asks SecurityAgent for approval,
+        // otherwise the administrator sheet can open behind another MacCleaner
+        // copy or behind the dismissed popover and look as if Enable did nothing.
+        NSApp.activate(ignoringOtherApps: true)
         resetConnection()
         DispatchQueue.global(qos: .userInitiated).async {
             switch FanHelperInstaller.install() {
