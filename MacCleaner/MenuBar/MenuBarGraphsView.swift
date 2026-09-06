@@ -47,10 +47,9 @@ struct MenuBarGraphsView: View {
             if !monitor.processNodes.isEmpty {
                 ProcessHistoryStore.shared.record(nodes: monitor.processNodes)
             }
-            // Give the chart its lightweight process snapshot first. Sensors
-            // and battery can follow without keeping the history placeholder up.
-            monitor.refresh(forceProcesses: true)
-            monitor.refresh(forceSensors: true, forceBattery: true)
+            // Collect one coherent snapshot. Separate forced refreshes queued
+            // two back-to-back process/sensor passes during tab presentation.
+            monitor.refresh(forceProcesses: true, forceSensors: true, forceBattery: true)
         }
         .onDisappear {
             monitor.setConsumer(.graphs, active: false)
@@ -82,7 +81,7 @@ struct MenuBarGraphsView: View {
             }
         }
         .padding(3)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+        .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 11, style: .continuous)
                 .strokeBorder(Color.primary.opacity(0.08))
@@ -162,7 +161,7 @@ private struct MenuBarTemperatureHistoryView: View {
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 7)
                     .padding(.vertical, 4)
-                    .background(.thinMaterial, in: Capsule())
+                    .background(Color(nsColor: .windowBackgroundColor), in: Capsule())
             }
 
             legend
@@ -556,7 +555,7 @@ private struct MenuBarThermalSurfaceView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -665,8 +664,10 @@ private struct MenuBarThermalSurfaceView: View {
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(selected ? Color.white : Color.primary.opacity(0.78))
                 .frame(width: 28, height: 28)
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
-                .background(selected ? Color.accentBlue : Color.clear, in: RoundedRectangle(cornerRadius: 8))
+                .background(
+                    selected ? Color.accentBlue : Color(nsColor: .windowBackgroundColor),
+                    in: RoundedRectangle(cornerRadius: 8)
+                )
                 .overlay {
                     RoundedRectangle(cornerRadius: 8)
                         .strokeBorder(Color.primary.opacity(selected ? 0.03 : 0.10))
@@ -711,7 +712,7 @@ private struct MenuBarThermalSurfaceView: View {
                 .foregroundStyle(.secondary)
                 .padding(.vertical, 7)
                 .frame(width: 38, height: 116)
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                 .overlay {
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
                         .strokeBorder(Color.primary.opacity(0.10))
@@ -753,7 +754,7 @@ private struct MenuBarThermalSurfaceView: View {
         }
         .padding(9)
         .frame(width: 208)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+        .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
         .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.primary.opacity(0.10)))
     }
 
@@ -963,7 +964,7 @@ private struct MenuBarThermalSurfaceView: View {
         }
         .padding(9)
         .frame(width: 206, alignment: .leading)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+        .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 11, style: .continuous)
                 .strokeBorder(component.tint.opacity(0.38))
@@ -986,7 +987,7 @@ private struct MenuBarThermalSurfaceView: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
-        .background(.regularMaterial, in: Capsule())
+        .background(Color(nsColor: .windowBackgroundColor), in: Capsule())
         .overlay {
             Capsule().strokeBorder(
                 field.hasActiveFans ? Color.accentBlue.opacity(0.34) : Color.primary.opacity(0.10)
@@ -1966,14 +1967,7 @@ private final class ScrollWheelView: NSView {
 
 private struct MenuBarGraphBackdrop: View {
     var body: some View {
-        ZStack {
-            Rectangle().fill(.regularMaterial)
-            LinearGradient(
-                colors: [Color.accentBlue.opacity(0.055), .clear, Color.accentPurple.opacity(0.04)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        }
-        .allowsHitTesting(false)
+        Color(nsColor: .windowBackgroundColor)
+            .allowsHitTesting(false)
     }
 }

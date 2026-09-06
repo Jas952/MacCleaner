@@ -189,6 +189,18 @@ struct FanHubView: View {
 struct FansView: View {
     @ObservedObject var monitor: SystemMonitor
     @State private var fanActionMessage: String?
+    @State private var helperReady = false
+    @State private var actionPending = false
+    @State private var boostSeconds = 0
+    @State private var stateRequestPending = false
+    private let controlTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+    private var supportsControl: Bool {
+        #if arch(arm64)
+        return true
+        #else
+        return false
+        #endif
+    }
 
     private var hasFans: Bool { !monitor.fans.isEmpty }
 
@@ -239,6 +251,20 @@ struct FansView: View {
         .onAppear {
             monitor.setConsumer(.fans, active: true)
             monitor.refresh(forceSensors: true)
+            refreshHelper()
+        }
+        .onReceive(controlTimer) { _ in
+            guard helperReady, !stateRequestPending else { return }
+            stateRequestPending = true
+            FanControlXPCClient.shared.controlState { seconds, _, error in
+                stateRequestPending = false
+                if boostSeconds > 0 && seconds == 0 && error == nil {
+                    fanActionMessage = "Boost finished. Automatic control restored."
+                    monitor.refresh(forceSensors: true)
+                }
+                boostSeconds = seconds
+                if let error { fanActionMessage = error }
+            }
         }
         .onDisappear {
             monitor.setConsumer(.fans, active: false)
@@ -250,16 +276,20 @@ struct FansView: View {
     private var fansPanel: some View {
         ScrollView(showsIndicators: false) {
         VStack(spacing: 16) {
-            if FanControlXPCClient.shared.availability == .helperNotInstalled {
+            if supportsControl && !helperReady {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Manual fan control requires a one-time administrator approval.")
+                    Text("Enable fan control with administrator approval. No Developer ID subscription is required.")
                         .font(.system(size: 11))
                         .foregroundStyle(Color.textSecondaryLight)
-                    Button("Install Fan Control Helper") {
+                    Button(actionPending ? "Installing…" : "Enable Fan Control") {
+                        actionPending = true
                         FanControlXPCClient.shared.installHelper { success, message in
-                            fanActionMessage = success ? "Fan helper installed." : (message ?? "Could not install fan helper.")
+                            actionPending = false
+                            helperReady = success
+                            fanActionMessage = success ? "Fan control is ready." : (message ?? "Could not install fan helper.")
                         }
                     }
+                    .disabled(actionPending)
                     .buttonStyle(.borderedProminent)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -314,32 +344,32 @@ struct FansView: View {
                         }
                         .frame(width: 120)
 
-                        if FanControlXPCClient.shared.availability != .notAppleSilicon {
+                        Text(fan.mode.map { $0 == 1 ? "Manual · \(fan.targetRPM) RPM" : "Auto · macOS" } ?? "Mode unavailable")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(Color.textSecondaryLight)
+
+                        if supportsControl {
                             HStack(spacing: 6) {
                                 Button("Auto") {
-                                    FanControlXPCClient.shared.setAutomatic(fanIndex: fan.id) { success, message in
-                                        DispatchQueue.main.async {
-                                            fanActionMessage = success ? "Automatic fan control restored." : (message ?? "Fan helper failed.")
-                                            monitor.refresh(forceSensors: true)
-                                        }
+                                    runAction { done in
+                                        FanControlXPCClient.shared.setAutomatic(fanIndex: fan.id, completion: done)
                                     }
                                 }
                                 .buttonStyle(.bordered)
 
                                 Menu("Manual") {
-                                    ForEach([2000, 3000, 4000, 5000, 6000], id: \.self) { rpm in
+                                    ForEach(rpmChoices(fan), id: \.self) { rpm in
                                         Button("\(rpm) RPM") {
-                                            FanControlXPCClient.shared.setManualRPM(rpm, fanIndex: fan.id) { success, message in
-                                                DispatchQueue.main.async {
-                                                    fanActionMessage = success ? "Fan set to \(rpm) RPM." : (message ?? "Fan helper failed.")
-                                                    monitor.refresh(forceSensors: true)
-                                                }
+                                            runAction { done in
+                                                FanControlXPCClient.shared.setManualRPM(rpm, fanIndex: fan.id, completion: done)
                                             }
                                         }
                                     }
                                 }
                                 .menuStyle(.borderlessButton)
+                                .disabled(boostSeconds > 0)
                             }
+                            .disabled(!helperReady || actionPending)
                         }
                     }
                     .frame(maxWidth: .infinity)
@@ -350,6 +380,31 @@ struct FansView: View {
                             .shadow(color: Color.shadowLight, radius: 8, x: 0, y: 2)
                     )
                 }
+            }
+
+            if supportsControl {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Button(boostSeconds > 0 ? "Maximum · \(boostSeconds)s" : "Maximum for 10s") {
+                            runAction { done in
+                                FanControlXPCClient.shared.boostForTenSeconds(completion: done)
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(!helperReady || actionPending || boostSeconds > 0)
+                        Button("All Auto") {
+                            runAction { done in
+                                FanControlXPCClient.shared.setAllAutomatic(completion: done)
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(!helperReady || actionPending)
+                    }
+                    Text("Both fans return to Auto after the boost. Manual control ends when MacCleaner quits.")
+                        .font(.system(size: 10))
+                        .foregroundStyle(Color.textSecondaryLight)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             if let fanActionMessage {
@@ -366,6 +421,41 @@ struct FansView: View {
         .padding(.top, 16)
         .padding(.bottom, 24)
         }
+    }
+
+    private func refreshHelper() {
+        guard supportsControl else { return }
+        DispatchQueue.global(qos: .utility).async {
+            let current = FanControlXPCClient.shared.availability == .ready
+            DispatchQueue.main.async {
+                guard current else { helperReady = false; return }
+                FanControlXPCClient.shared.checkStatus { ready, error in
+                    helperReady = ready
+                    if let error { fanActionMessage = error }
+                }
+            }
+        }
+    }
+
+    private func runAction(_ action: (@escaping (Bool, String?) -> Void) -> Void) {
+        actionPending = true
+        action { success, error in
+            actionPending = false
+            fanActionMessage = success ? "Fan setting confirmed." : (error ?? "Fan control failed.")
+            monitor.refresh(forceSensors: true)
+            if success {
+                FanControlXPCClient.shared.controlState { seconds, _, error in
+                    boostSeconds = seconds
+                    if let error { fanActionMessage = error }
+                }
+            }
+        }
+    }
+
+    private func rpmChoices(_ fan: FanInfo) -> [Int] {
+        guard fan.minRPM > 0, fan.maxRPM >= fan.minRPM else { return [] }
+        return Array(Set([fan.minRPM, fan.maxRPM] + Array(stride(from: 2500, through: 20000, by: 500))))
+            .filter { (fan.minRPM...fan.maxRPM).contains($0) }.sorted()
     }
 
     private var fanlessPanel: some View {

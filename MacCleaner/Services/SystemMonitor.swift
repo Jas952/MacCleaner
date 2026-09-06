@@ -97,7 +97,8 @@ final class SystemMonitor: ObservableObject {
     }
 
     private func scheduleMonitoringTimer() {
-        let interval = isBackgroundSuspended
+        let isInteractive = !isBackgroundSuspended || !activeConsumers.isEmpty
+        let interval = !isInteractive
             ? 60.0
             : Self.recommendedRefreshInterval(hasActiveConsumers: !activeConsumers.isEmpty)
         timer?.invalidate()
@@ -123,11 +124,12 @@ final class SystemMonitor: ObservableObject {
         let networkInfo = fetchNetwork()
 
         // ── Determine what else to fetch ──
-        let wantsGraphProcesses = !isBackgroundSuspended && activeConsumers.contains(.graphs)
-        let wantsLiveProcesses = !isBackgroundSuspended && !activeConsumers.isDisjoint(with: [.processes, .windows, .graphs])
-        let wantsSummaryProcesses = !isBackgroundSuspended && !activeConsumers.isDisjoint(with: [.dashboard, .ai])
-        let wantsGraphSensors = !isBackgroundSuspended && activeConsumers.contains(.graphs)
-        let wantsFrequentSensors = !isBackgroundSuspended && !activeConsumers.isDisjoint(with: [.dashboard, .fans, .ai, .graphs])
+        let isInteractive = !isBackgroundSuspended || !activeConsumers.isEmpty
+        let wantsGraphProcesses = isInteractive && activeConsumers.contains(.graphs)
+        let wantsLiveProcesses = isInteractive && !activeConsumers.isDisjoint(with: [.processes, .windows, .graphs])
+        let wantsSummaryProcesses = isInteractive && !activeConsumers.isDisjoint(with: [.dashboard, .ai])
+        let wantsGraphSensors = isInteractive && activeConsumers.contains(.graphs)
+        let wantsFrequentSensors = isInteractive && !activeConsumers.isDisjoint(with: [.dashboard, .fans, .ai, .graphs])
         let processInterval = wantsGraphProcesses
             ? 1
             : (wantsLiveProcesses
@@ -135,17 +137,17 @@ final class SystemMonitor: ObservableObject {
             : (wantsSummaryProcesses ? Self.summaryProcessInterval : Self.idleProcessInterval))
         let sensorInterval = isBackgroundSuspended ? 2 : (wantsGraphSensors ? 1 : (wantsFrequentSensors ? Self.activeSensorInterval : Self.idleSensorInterval))
         let runSensors = forceSensors || (refreshTick > 1 && refreshTick % sensorInterval == 0)
-        let runBackgroundHistoryProcesses = isBackgroundSuspended
+        let runBackgroundHistoryProcesses = !isInteractive
             && (refreshTick == 1 || refreshTick % Self.backgroundHistoryProcessInterval == 0)
         let runProcesses = runBackgroundHistoryProcesses
-            || (!isBackgroundSuspended && (forceProcesses || refreshTick == 1 || (refreshTick > 1 && refreshTick % processInterval == 0)))
-        let includeProcessWindows = !isBackgroundSuspended
+            || (isInteractive && (forceProcesses || refreshTick == 1 || (refreshTick > 1 && refreshTick % processInterval == 0)))
+        let includeProcessWindows = isInteractive
             && !activeConsumers.isDisjoint(with: [.processes, .windows])
-        let runDisks = !isBackgroundSuspended
+        let runDisks = isInteractive
             && (refreshTick == 1 || (activeConsumers.contains(.dashboard) && runProcesses))
-        let runBattery = !isBackgroundSuspended && (forceBattery || refreshTick == 1 || refreshTick % Self.batteryInterval == 0)
-        let runExternalBattery = !isBackgroundSuspended && refreshTick > 1 && refreshTick % Self.externalBatteryInterval == 0
-        let runGPU = runSensors && !isBackgroundSuspended
+        let runBattery = isInteractive && (forceBattery || refreshTick == 1 || refreshTick % Self.batteryInterval == 0)
+        let runExternalBattery = isInteractive && refreshTick > 1 && refreshTick % Self.externalBatteryInterval == 0
+        let runGPU = runSensors && isInteractive
 
         // ── Heavy work on background thread ──
         DispatchQueue.global(qos: .utility).async { [weak self] in

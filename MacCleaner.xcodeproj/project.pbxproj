@@ -7,6 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A_FAN_DRAW /* FanEngineeringDrawing.swift in Sources */ = {isa = PBXBuildFile; fileRef = F_FAN_DRAW /* FanEngineeringDrawing.swift */; };
+		A_FAN_MODEL /* FanPanelModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F_FAN_MODEL /* FanPanelModel.swift */; };
+		A_FAN_PANEL /* MenuBarFansView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F_FAN_PANEL /* MenuBarFansView.swift */; };
 		A001 /* MacCleanerApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = F001 /* MacCleanerApp.swift */; };
 		A004_SM /* SettingsManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = F004_SM /* SettingsManager.swift */; };
 		A005_SV /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F005_SV /* SettingsView.swift */; };
@@ -105,6 +108,9 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		F_FAN_DRAW /* FanEngineeringDrawing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FanEngineeringDrawing.swift; sourceTree = "<group>"; };
+		F_FAN_MODEL /* FanPanelModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FanPanelModel.swift; sourceTree = "<group>"; };
+		F_FAN_PANEL /* MenuBarFansView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarFansView.swift; sourceTree = "<group>"; };
 		F001 /* MacCleanerApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacCleanerApp.swift; sourceTree = "<group>"; };
 		F004_SM /* SettingsManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Settings/SettingsManager.swift; sourceTree = "<group>"; };
 		F005_SV /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Settings/SettingsView.swift; sourceTree = "<group>"; };
@@ -264,6 +270,9 @@
 		G_MENUBAR /* MenuBar */ = {
 			isa = PBXGroup;
 			children = (
+				F_FAN_PANEL /* MenuBarFansView.swift */,
+				F_FAN_MODEL /* FanPanelModel.swift */,
+				F_FAN_DRAW /* FanEngineeringDrawing.swift */,
 				F067_MBG /* MenuBarGraphsView.swift */,
 				F068_MPH /* MenuBarProcessHistoryView.swift */,
 				F069_PHS /* ProcessHistoryStore.swift */,
@@ -494,6 +503,9 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A_FAN_PANEL /* MenuBarFansView.swift in Sources */,
+				A_FAN_MODEL /* FanPanelModel.swift in Sources */,
+				A_FAN_DRAW /* FanEngineeringDrawing.swift in Sources */,
 				A067_MBG /* MenuBarGraphsView.swift in Sources */,
 				A068_MPH /* MenuBarProcessHistoryView.swift in Sources */,
 				A069_PHS /* ProcessHistoryStore.swift in Sources */,

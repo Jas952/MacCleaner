@@ -42,6 +42,7 @@ struct FanInfo: Identifiable {
     let maxRPM: Int
     let safeRPM: Int
     var targetRPM: Int
+    var mode: Int? = nil
 
     var percentOfMax: Double {
         guard maxRPM > 0 else { return 0 }
@@ -198,7 +199,7 @@ final class SMCService {
     private var conn: io_connect_t = 0
     private(set) var isOpen = false
 
-    private init() { open() }
+    init() { open() }
     deinit { close() }
 
     private func open() {
@@ -263,7 +264,9 @@ final class SMCService {
             guard readKey(key: actualKey) != nil else { return nil }
             return FanInfo(id: i, actualRPM: Int(actual), minRPM: Int(min),
                            maxRPM: max > 0 ? Int(max) : 1,
-                           safeRPM: Int(safe), targetRPM: Int(target))
+                           safeRPM: Int(safe), targetRPM: Int(target),
+                           mode: readKey(key: String(format: SMCKey.appleSiliconModeUpper, i)).map { Int($0.bytes.0) }
+                               ?? readKey(key: String(format: SMCKey.appleSiliconModeLower, i)).map { Int($0.bytes.0) })
         }
     }
 

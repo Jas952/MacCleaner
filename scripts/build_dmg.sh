@@ -45,7 +45,7 @@ if [[ -n "$CODESIGN_IDENTITY" ]]; then
   echo "Signing app and privileged helper with Developer ID..."
   codesign --force --deep --options runtime --entitlements "$ROOT_DIR/MacCleaner/MacCleaner.entitlements" --sign "$CODESIGN_IDENTITY" "$APP_PATH"
 else
-  echo "Ad-hoc signing app; privileged fan control remains unavailable..."
+  echo "Ad-hoc signing app; fan control uses local administrator approval..."
   codesign --force --deep --options runtime --entitlements "$ROOT_DIR/MacCleaner/MacCleaner.entitlements" --sign - "$APP_PATH"
 fi
 codesign --verify --deep --strict --verbose=2 "$APP_PATH"
