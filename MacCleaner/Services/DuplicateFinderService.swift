@@ -439,6 +439,11 @@ extension DuplicateFinderService {
             }
 
             guard let values = try? url.resourceValues(forKeys: keys) else { continue }
+            if root.standardizedFileURL == FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL,
+               !AssistantFileScope.includes(url, home: root) {
+                if values.isDirectory == true { enumerator.skipDescendants() }
+                continue
+            }
             if SafeDeletionService.isApplicationOwnedPath(url, policy: protectionPolicy) {
                 if values.isDirectory == true { enumerator.skipDescendants() }
                 continue
@@ -550,7 +555,8 @@ extension DuplicateFinderService {
         let name = url.lastPathComponent.lowercased()
         let skippedNames: Set<String> = [
             ".trash", ".git", ".svn", ".hg", ".build", "node_modules",
-            "deriveddata", "pods", "carthage", "backups.backupdb"
+            "deriveddata", "pods", "carthage", "backups.backupdb", "vendor",
+            "venv", "site-packages", "__pycache__", "pkg", "node_modules"
         ]
         if skippedNames.contains(name) { return true }
 

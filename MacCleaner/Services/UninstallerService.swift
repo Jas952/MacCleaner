@@ -46,6 +46,7 @@ class UninstallerService: ObservableObject {
     @Published var isScanning = false
     @Published var scanWasLimited = false
     @Published var scannedEntryCount = 0
+    @Published var requestedSelectionBundleIdentifier: String?
 
     @MainActor
     func resetForNavigation() {
@@ -436,6 +437,7 @@ class UninstallerService: ObservableObject {
                     _ = try SafeDeletionService.moveToTrash(url)
                     trashedPaths.insert(url.path)
                 } catch {
+                    success = false
                     print("Failed to trash \(url.path): \(error)")
                 }
             }

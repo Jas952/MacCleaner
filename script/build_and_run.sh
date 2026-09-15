@@ -11,6 +11,20 @@ APP_BINARY="$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 
 pkill -x "$APP_NAME" >/dev/null 2>&1 || true
 
+# Never force a second GUI instance on top of an app that is still exiting.
+# A lingering/zombie process previously made a visual verification unsafe.
+for _ in {1..50}; do
+  if ! pgrep -x "$APP_NAME" >/dev/null 2>&1; then
+    break
+  fi
+  sleep 0.1
+done
+
+if pgrep -x "$APP_NAME" >/dev/null 2>&1; then
+  echo "$APP_NAME is still running after 5 seconds; refusing to launch another instance." >&2
+  exit 1
+fi
+
 xcodebuild \
   -project "$ROOT_DIR/MacCleaner.xcodeproj" \
   -scheme "$APP_NAME" \

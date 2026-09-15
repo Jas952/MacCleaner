@@ -31,3 +31,7 @@ dist/
 # Temporary patch/debug files
 *_patch
 *.tmp
+
+# Local AI experiments and review snapshots
+NeedleAI/
+MacCleaner-AI-Draft-*/

@@ -58,6 +58,19 @@ It combines live system monitoring, storage analysis, safe cleanup, process insp
 
 MacCleaner brings monitoring, cleanup, file management, diagnostics, and local AI visibility into one native macOS workspace. Each section starts with a clear overview and provides deeper tools when more detailed inspection is needed.
 
+## Project structure
+
+- `MacCleaner/` — native macOS application source.
+- `MacCleanerTests/` — XCTest safety and behavior checks used during development.
+- `MacCleanerFanHelper/` — privileged fan-control helper and its tests.
+- `script/` — local build/run entrypoint for development.
+- `scripts/` — packaging and release automation.
+- `docs/` — architecture notes, research, release guidance, and media.
+- `website/` — project website assets.
+- `NeedleAI/` and `MacCleaner-AI-Draft-*` — local-only AI experiments and draft snapshots; they are intentionally excluded from the public repository.
+
+The public repository contains the application source and its tests. Local model checkpoints, training datasets, virtual environments, and draft application bundles stay outside GitHub.
+
 ### Current release — 1.0.9
 
 - A dedicated Fan control tab is now available directly in the menu bar popover.

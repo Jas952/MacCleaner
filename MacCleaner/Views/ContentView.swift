@@ -15,6 +15,7 @@ enum Tab: String, CaseIterable {
     case storage   = "Storage"
     case desktop = "Desktop"
     case webApps = "Pake Apps"
+    case assistant = "Quick Assist"
     case aiAgents = "Agents"
     case aiIndexes = "Indexes"
     case aiLibrary = "Library"
@@ -33,6 +34,7 @@ enum Tab: String, CaseIterable {
         case .storage: return "externaldrive.badge.timemachine"
         case .desktop: return "desktopcomputer"
         case .webApps: return "globe.badge.chevron.backward"
+        case .assistant: return "bubble.left.and.bubble.right"
         case .aiAgents: return "cpu.fill"
         case .aiIndexes: return "point.3.connected.trianglepath.dotted"
         case .aiLibrary: return "books.vertical"
@@ -57,13 +59,15 @@ struct ContentView: View {
     @State private var showingUpdates: Bool
     
     // Global state for Storage and Uninstaller tools
-    @StateObject private var uninstallerService = UninstallerService()
-    @StateObject private var analyzerService = StorageAnalyzerService()
-    @StateObject private var storageWorkspace = StorageWorkspaceService()
+    @StateObject private var uninstallerService: UninstallerService
+    @StateObject private var analyzerService: StorageAnalyzerService
+    @StateObject private var storageWorkspace: StorageWorkspaceService
     @StateObject private var desktopService = DesktopService()
     @StateObject private var cleanerViewState: CleanerViewState
-    @StateObject private var startupOptimizerService = StartupOptimizerService()
+    @StateObject private var startupOptimizerService: StartupOptimizerService
     @StateObject private var webAppsPackager = PakePackager()
+    @StateObject private var assistantChatModel = AssistantChatViewModel()
+    @StateObject private var assistantCommandExecutor: AssistantCommandExecutor
     @StateObject private var updateService = UpdateService.shared
     @StateObject private var modalCoordinator = AppModalCoordinator()
 
@@ -93,7 +97,23 @@ struct ContentView: View {
         _showingUpdates = State(initialValue: arguments.contains("--show-updates"))
         _cleanerSelectedTool = State(initialValue: nil)
         let cleanerState = CleanerViewState()
+        let uninstaller = UninstallerService()
+        let analyzer = StorageAnalyzerService()
+        let workspace = StorageWorkspaceService()
+        let startup = StartupOptimizerService()
         _cleanerViewState = StateObject(wrappedValue: cleanerState)
+        _uninstallerService = StateObject(wrappedValue: uninstaller)
+        _analyzerService = StateObject(wrappedValue: analyzer)
+        _storageWorkspace = StateObject(wrappedValue: workspace)
+        _startupOptimizerService = StateObject(wrappedValue: startup)
+        _assistantCommandExecutor = StateObject(wrappedValue: AssistantCommandExecutor(
+            monitor: monitor,
+            analyzer: analyzer,
+            workspace: workspace,
+            uninstaller: uninstaller,
+            startup: startup,
+            updates: UpdateService.shared
+        ))
     }
 
     private var isCleanerWorking: Bool {
@@ -159,6 +179,8 @@ struct ContentView: View {
                 AppModalOverlay(
                     title: presentation.title,
                     subtitle: presentation.subtitle,
+                    width: presentation.width,
+                    height: presentation.height,
                     onDismiss: modalCoordinator.dismiss
                 ) {
                     presentation.content
@@ -216,6 +238,38 @@ struct ContentView: View {
                         DesktopManagerView(service: desktopService, operationActive: $desktopOperationActive)
                     case .webApps:
                         WebAppsView(packager: webAppsPackager)
+                    case .assistant:
+                        AssistantChatView(model: assistantChatModel)
+                            .onAppear {
+                                assistantChatModel.executeCommand = { call, completion in
+                                    assistantCommandExecutor.execute(call, completion: completion)
+                                }
+                                assistantChatModel.executeRowAction = { action, completion in
+                                    assistantCommandExecutor.executeRowAction(action, completion: completion)
+                                }
+                                assistantChatModel.openDestination = { destination in
+                                    switch destination {
+                                    case "dashboard": selectedTab = .dashboard
+                                    case "processes": selectedTab = .processes
+                                    case "fans": selectedTab = .fans
+                                    case "startup": selectedTab = .startup
+                                    case "maintenance": selectedTab = .maintenance
+                                    case "agents": selectedTab = .aiAgents
+                                    case "desktop": selectedTab = .desktop
+                                    case "storage": selectedTab = .storage
+                                    case "storage-large":
+                                        storageSelectedTool = .largeFiles
+                                        selectedTab = .storage
+                                    case "storage-duplicates":
+                                        storageSelectedTool = .duplicates
+                                        selectedTab = .storage
+                                    case "storage-uninstaller":
+                                        storageSelectedTool = .uninstaller
+                                        selectedTab = .storage
+                                    default: break
+                                    }
+                                }
+                            }
                     case .aiAgents: AIAgentsView(monitor: monitor)
                     case .aiIndexes: AILoadView(monitor: monitor)
                     case .aiLibrary: AILibraryView()
@@ -322,6 +376,30 @@ struct SidebarView: View {
 
             // Nav — main tabs
             VStack(spacing: 4) {
+                Button { selectedTab = .assistant } label: {
+                    HStack(spacing: 9) {
+                        Image(systemName: "bolt.fill")
+                            .font(.system(size: 14, weight: .semibold))
+                        Text("Quick Assist")
+                            .font(.system(size: 13, weight: .semibold))
+                        Spacer(minLength: 0)
+                        Text("BETA")
+                            .font(.system(size: 8, weight: .bold))
+                            .tracking(0.6)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 3)
+                            .background(Color.accentBlue.opacity(0.12))
+                            .clipShape(Capsule())
+                    }
+                    .foregroundStyle(Color.accentBlue)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 12)
+                    .background(selectedTab == .assistant ? Color.surfaceCardLight : Color.accentBlue.opacity(0.06))
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.accentBlue.opacity(0.18)))
+                }
+                .buttonStyle(.plain)
+                .padding(.bottom, 14)
                 ForEach([Tab.dashboard, .processes, .fans, .disk], id: \.self) { tab in
                     SidebarItemLight(tab: tab, isSelected: selectedTab == tab) {
                         selectedTab = tab
@@ -1002,7 +1080,21 @@ struct UninstallerView: View {
             if service.apps.isEmpty {
                 service.scan()
             }
+            selectRequestedApplication()
         }
+        .onChange(of: service.requestedSelectionBundleIdentifier) { _ in
+            selectRequestedApplication()
+        }
+        .onChange(of: service.apps.map(\.bundleIdentifier)) { _ in
+            selectRequestedApplication()
+        }
+    }
+
+    private func selectRequestedApplication() {
+        guard let bundleIdentifier = service.requestedSelectionBundleIdentifier,
+              let app = service.apps.first(where: { $0.bundleIdentifier == bundleIdentifier }) else { return }
+        selectedAppId = app.id
+        service.requestedSelectionBundleIdentifier = nil
     }
 
     private func presentSortPicker() {
