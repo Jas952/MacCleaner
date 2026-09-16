@@ -5,6 +5,391 @@ import XCTest
 @testable import MacCleaner
 
 final class SafetyPolicyTests: XCTestCase {
+    func testEveryVisibleAssistantPromptHasDeterministicRouting() {
+        for prompt in AssistantPrompt.all {
+            let result = AssistantModelBridge.deterministicDecision(for: prompt.text)
+            if prompt.tool == "uninstall_app" {
+                guard case .clarification = result else { return XCTFail("An application name must be requested") }
+            } else {
+                guard case .command(let call) = result else { return XCTFail("No route for \(prompt.text)") }
+                XCTAssertEqual(call.name, prompt.tool, prompt.text)
+            }
+        }
+    }
+    func testAssistantLargeFileDefaultAndLessThanAreDistinct() {
+        XCTAssertEqual(AssistantModelBridge.deterministicDecision(for: "Find large files"),
+            .command(.init(name: "scan_large_files", arguments: ["minimum_size": "100 MB"])))
+        guard case .clarification = AssistantModelBridge.deterministicDecision(for: "files under 1 GB") else {
+            return XCTFail("Must not turn an upper bound into a lower bound")
+        }
+    }
+
+    func testAssistantDiscoveryExcludesDependenciesAndSystemData() {
+        let home = URL(fileURLWithPath: "/Users/test")
+        for path in ["Documents/report.pdf", "Downloads/movie.mp4", "Docs/project/model.bin"] {
+            XCTAssertTrue(AssistantFileScope.includes(home.appendingPathComponent(path), home: home), path)
+        }
+        for path in ["Library/Application Support/app/weights.bin", "Docs/project/vendor/tables.go", "Docs/project/venv/data", "go/pkg/mod/tables.go", "Documents/.git/config"] {
+            XCTAssertFalse(AssistantFileScope.includes(home.appendingPathComponent(path), home: home), path)
+        }
+        XCTAssertTrue(AssistantFileScope.includes(home.appendingPathComponent("Library/Caches/app/blob"), home: home, allowCaches: true))
+        XCTAssertFalse(AssistantFileScope.includes(home.appendingPathComponent("Library/Caches/app/blob"), home: home))
+    }
+
+    func testAssistantFolderSearchCanBeStoppedWithoutBlockingTheApp() {
+        let started = Date()
+        let result = AssistantCommandExecutor.runBoundedCommand(
+            executable: "/bin/sleep",
+            arguments: ["2"],
+            timeout: 0.05
+        )
+        XCTAssertTrue(result.timedOut)
+        XCTAssertFalse(result.succeeded)
+        XCTAssertLessThan(Date().timeIntervalSince(started), 0.8)
+    }
+
+    func testAssistantFolderSearchPreservesPathsContainingSpaces() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("MacCleaner Search \(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let file = root.appendingPathComponent("large sample.bin")
+        try Data(repeating: 0xA5, count: 2_048).write(to: file)
+
+        let result = AssistantCommandExecutor.runBoundedCommand(
+            executable: "/usr/bin/find",
+            arguments: [root.path, "-type", "f", "-size", "+1024c", "-print0"],
+            timeout: 1
+        )
+
+        XCTAssertTrue(result.succeeded)
+        XCTAssertEqual(AssistantCommandExecutor.nullSeparatedStrings(in: result.data), [file.path])
+    }
+
+    func testAssistantOrganizationNeverOverwrites() throws {
+        let home = FileManager.default.temporaryDirectory.resolvingSymlinksInPath().appendingPathComponent(UUID().uuidString)
+        let downloads = home.appendingPathComponent("Downloads")
+        let destination = downloads.appendingPathComponent("Documents/report.txt")
+        try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let source = downloads.appendingPathComponent("report.txt")
+        try Data("new".utf8).write(to: source)
+        try Data("keep".utf8).write(to: destination)
+        let values = try source.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
+        let result = AssistantCommandExecutor.applyOrganization([
+            .init(source: source, destination: destination, size: values.fileSize!, modified: values.contentModificationDate!)
+        ], home: home)
+        XCTAssertFalse(result.succeeded)
+        XCTAssertEqual(try String(contentsOf: destination, encoding: .utf8), "keep")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: source.path))
+    }
+
+    func testAssistantOrganizationMovesOnlyConfirmedSnapshot() throws {
+        let home = FileManager.default.temporaryDirectory.resolvingSymlinksInPath().appendingPathComponent(UUID().uuidString)
+        let root = home.appendingPathComponent("Downloads")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let source = root.appendingPathComponent("example.txt")
+        let destination = root.appendingPathComponent("Documents/example.txt")
+        try Data("sample".utf8).write(to: source)
+        let values = try source.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
+        let plan = AssistantMoveItem(source: source, destination: destination, size: values.fileSize!, modified: values.contentModificationDate!)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: source.path), "Preview cannot move anything")
+        XCTAssertTrue(AssistantCommandExecutor.applyOrganization([plan], home: home).succeeded)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: source.path))
+        XCTAssertEqual(try Data(contentsOf: destination), Data("sample".utf8))
+        XCTAssertFalse(AssistantCommandExecutor.applyOrganization([plan], home: home).succeeded, "Stale plans must not be replayed")
+    }
+
+    func testAssistantModelBridgeRoutesRussianLargeFilePhrase() {
+        let routed = expectation(description: "The bundled local router returns a large-file command")
+        AssistantModelBridge.propose(to: "найди файлы тяжелее 5 гб") { decision in
+            XCTAssertEqual(
+                decision,
+                .command(AssistantToolCall(name: "scan_large_files", arguments: ["minimum_size": "5 GB"]))
+            )
+            routed.fulfill()
+        }
+        wait(for: [routed], timeout: 10)
+    }
+
+    func testAssistantModelBridgeDoesNotClaimExecution() {
+        let text = AssistantModelBridge.displayText(["ok": true, "tool_call": ["name": "uninstall_app", "arguments": ["app_name": "Spotify"]]])
+        XCTAssertTrue(text.contains("Spotify"))
+        XCTAssertTrue(text.contains("calculate what would be removed"))
+        XCTAssertFalse(text.localizedCaseInsensitiveContains("executed"))
+        let failure = AssistantModelBridge.displayText(["ok": false])
+        XCTAssertTrue(failure.contains("No action was performed"))
+        let rejected = AssistantModelBridge.displayText(["reason": "out_of_scope_guard", "response": ["text": "Outside scope"]])
+        XCTAssertEqual(rejected, "Outside scope")
+    }
+
+    func testAssistantModelBridgeRejectsUnknownToolsAndMissingRequiredArguments() {
+        let unknown = AssistantModelBridge.decision(from: [
+            "ok": true,
+            "tool_call": ["name": "invented_tool", "arguments": [:]]
+        ])
+        XCTAssertEqual(unknown, .failed("The model proposed an unsupported action. Nothing was performed."))
+
+        let missingTarget = AssistantModelBridge.decision(from: [
+            "ok": true,
+            "tool_call": ["name": "uninstall_app", "arguments": [:]]
+        ])
+        XCTAssertEqual(missingTarget, .clarification("Which application should I prepare for removal?"))
+
+        let valid = AssistantModelBridge.decision(from: [
+            "ok": true,
+            "tool_call": ["name": "uninstall_app", "arguments": ["app_name": "Spotify"]]
+        ])
+        XCTAssertEqual(valid, .command(AssistantToolCall(name: "uninstall_app", arguments: ["app_name": "Spotify"])))
+    }
+
+    func testAssistantConfirmationExecutesOnlyAfterYes() {
+        let model = AssistantChatViewModel()
+        let call = AssistantToolCall(name: "check_battery_health", arguments: [:])
+        var executions = 0
+        let executionFinished = expectation(description: "Assistant execution updates its live card")
+        model.executeCommand = { received, completion in
+            XCTAssertEqual(received, call)
+            executions += 1
+            completion(AssistantExecutionResult(text: "Done"))
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { executionFinished.fulfill() }
+        }
+        model.prepareForConfirmation(call, query: "Check battery health")
+
+        XCTAssertEqual(executions, 0)
+        model.confirmPendingCommand()
+        XCTAssertEqual(executions, 1)
+        wait(for: [executionFinished], timeout: 4)
+        XCTAssertNil(model.pendingCommand)
+        XCTAssertEqual(model.messages.last?.previewTool, "check_battery_health")
+        XCTAssertEqual(model.messages.last?.previewPhase, .result)
+        XCTAssertFalse(model.messages.last?.isProcessing ?? true)
+    }
+
+    func testAssistantConfirmationIsLimitedToStateChangingCommands() {
+        XCTAssertFalse(AssistantToolCall(name: "check_battery_health", arguments: [:]).requiresConfirmation)
+        XCTAssertFalse(AssistantToolCall(name: "list_processes", arguments: [:]).requiresConfirmation)
+        XCTAssertFalse(AssistantToolCall(name: "scan_large_files", arguments: ["minimum_size": "1 GB"]).requiresConfirmation)
+        XCTAssertFalse(AssistantToolCall(name: "uninstall_app", arguments: ["app_name": "Spotify"]).requiresConfirmation)
+
+        XCTAssertTrue(AssistantToolCall(name: "move_items_to_trash", arguments: ["items": "selected"]).requiresConfirmation)
+        XCTAssertTrue(AssistantToolCall(name: "clean_selected_items", arguments: ["items": "selected"]).requiresConfirmation)
+        XCTAssertTrue(AssistantToolCall(name: "flush_dns", arguments: [:]).requiresConfirmation)
+    }
+
+    func testAssistantUsesReadableTemperatureLabelsAndAssessments() {
+        XCTAssertEqual(AssistantCommandExecutor.readableSensorName("CPU Die Sensor 10"), "Processor sensor 10")
+        XCTAssertEqual(AssistantCommandExecutor.readableSensorName("SoC Sensor PMU tcal"), "Apple silicon")
+        XCTAssertEqual(AssistantCommandExecutor.readableSensorName("gas gauge battery"), "Battery")
+        XCTAssertEqual(AssistantCommandExecutor.temperatureAssessment(52), "Normal temperature")
+        XCTAssertEqual(AssistantCommandExecutor.temperatureAssessment(78), "Warm — keep an eye on it")
+        XCTAssertEqual(AssistantCommandExecutor.temperatureAssessment(94), "Very hot — reduce the load")
+    }
+
+    func testLongRunningCommandStaysVisibleAsContinuing() {
+        let model = AssistantChatViewModel()
+        let finished = expectation(description: "Long-running result is reflected in the card")
+        model.executeCommand = { _, completion in
+            completion(AssistantExecutionResult(
+                text: "The scan is still running.",
+                actionTitle: "Open Current Scan…",
+                destination: "storage-large",
+                stillRunning: true
+            ))
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { finished.fulfill() }
+        }
+        model.prepareForConfirmation(
+            AssistantToolCall(name: "scan_large_files", arguments: ["minimum_size": "1 GB"]),
+            query: "Find files larger than 1 GB"
+        )
+
+        model.confirmPendingCommand()
+        wait(for: [finished], timeout: 4)
+
+        XCTAssertEqual(model.messages.last?.previewPhase, .deferred)
+        XCTAssertEqual(model.messages.last?.resultDestination, "storage-large")
+    }
+
+    func testAssistantConfirmationNoDoesNotExecute() {
+        let model = AssistantChatViewModel()
+        var executions = 0
+        model.executeCommand = { _, _ in executions += 1 }
+        model.prepareForConfirmation(AssistantToolCall(name: "flush_dns", arguments: [:]), query: "Clear DNS")
+
+        model.declinePendingCommand()
+
+        XCTAssertEqual(executions, 0)
+        XCTAssertNil(model.pendingCommand)
+        XCTAssertTrue(model.messages.last?.text.contains("not executed") == true)
+    }
+
+    func testAssistantConfirmationRequestErrorDoesNotExecute() {
+        let model = AssistantChatViewModel()
+        var executions = 0
+        model.executeCommand = { _, _ in executions += 1 }
+        model.prepareForConfirmation(AssistantToolCall(name: "list_processes", arguments: [:]), query: "Check battery")
+
+        model.reportPendingCommandError()
+
+        XCTAssertEqual(executions, 0)
+        XCTAssertNil(model.pendingCommand)
+        XCTAssertTrue(model.messages.last?.text.contains("incorrect interpretation") == true)
+    }
+
+    func testAssistantPendingConfirmationCannotBeReplacedByAnotherSubmission() {
+        let model = AssistantChatViewModel()
+        let original = AssistantToolCall(name: "check_battery_health", arguments: [:])
+        model.prepareForConfirmation(original, query: "Check battery health")
+        let messageCount = model.messages.count
+        model.draft = "Check temperature"
+
+        model.submit()
+
+        XCTAssertEqual(model.pendingCommand?.call, original)
+        XCTAssertEqual(model.messages.count, messageCount)
+        XCTAssertEqual(model.draft, "Check temperature")
+    }
+
+    func testAssistantNaturalPrefixAndCompletion() {
+        let apps = assistantTestApplications()
+        XCTAssertEqual(AssistantSuggestionEngine.matchingApplications(for: "я хочу удалить приложение sp", in: apps).map(\.name), ["Spotify"])
+        XCTAssertEqual(AssistantSuggestionEngine.completedDraft(from: "я хочу удалить приложение sp", applicationName: "Spotify"), "я хочу удалить приложение Spotify")
+        XCTAssertEqual(AssistantSuggestionEngine.matchingApplications(for: "я хочу удалить", in: apps).count, 4)
+        XCTAssertTrue(AssistantSuggestionEngine.matchingApplications(for: "расскажи про Spotify", in: apps).isEmpty)
+    }
+
+    func testAssistantCommandContinuationAndDismissal() {
+        XCTAssertTrue(AssistantPrompt.completions(for: "").isEmpty)
+        XCTAssertEqual(AssistantPrompt.completions(for: "organize").map(\.text), ["Organize Downloads", "Organize Desktop"])
+        XCTAssertTrue(AssistantPrompt.completions(for: "Check").contains { $0.tool == "check_battery_health" })
+        let model = AssistantChatViewModel()
+        model.draft = "Check"
+        XCTAssertTrue(model.hasSuggestions)
+        model.dismissSuggestions()
+        XCTAssertFalse(model.hasSuggestions)
+        model.draft = "Check b"
+        model.acceptSelectedSuggestion()
+        XCTAssertEqual(model.draft, "Check battery health")
+        XCTAssertFalse(model.hasSuggestions)
+    }
+
+    func testAssistantPreviewCatalogHasUniqueCommands() {
+        XCTAssertEqual(AssistantToolPresentation.all.count, 39)
+        XCTAssertEqual(Set(AssistantToolPresentation.all.map(\.id)).count, 39)
+        let model = AssistantChatViewModel()
+        model.addPreview(tool: AssistantToolPresentation.all[0], phase: .failed)
+        XCTAssertEqual(model.messages.last?.previewPhase, .failed)
+        XCTAssertEqual(model.messages.last?.previewTool, "request_clarification")
+    }
+
+    func testAssistantSuggestionsRequireSupportedCommand() {
+        let applications = assistantTestApplications()
+        XCTAssertTrue(AssistantSuggestionEngine.matchingApplications(for: "spotify", in: applications).isEmpty)
+        XCTAssertEqual(
+            AssistantSuggestionEngine.matchingApplications(for: "удали", in: applications).map(\.name),
+            ["DisplayLink Manager", "Notion", "Spotify", "Telegram"]
+        )
+    }
+
+    func testAssistantSuggestionsPreferApplicationNamePrefix() {
+        let applications = assistantTestApplications()
+        XCTAssertEqual(
+            AssistantSuggestionEngine.matchingApplications(for: "удали sp", in: applications).map(\.name),
+            ["Spotify"]
+        )
+        XCTAssertEqual(
+            AssistantSuggestionEngine.matchingApplications(for: "uninstall tel", in: applications).map(\.name),
+            ["Telegram"]
+        )
+    }
+
+    func testAssistantTabCompletionPreservesCommand() {
+        XCTAssertEqual(
+            AssistantSuggestionEngine.completedDraft(from: "очисти spot", applicationName: "Spotify"),
+            "очисти Spotify"
+        )
+    }
+
+    func testAssistantProcessRowsExposeOnlySafeQuitActions() {
+        let protected = ProcessNode(
+            id: 44,
+            name: "WindowServer",
+            commandLine: "/System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer",
+            cpuUsage: 20,
+            cpuTime: "00:10",
+            memoryBytes: 80_000_000,
+            parentPID: 1,
+            isBackgroundAgent: true
+        )
+        let application = ProcessNode(
+            id: 1234,
+            name: "Spotify",
+            commandLine: "/Applications/Spotify.app/Contents/MacOS/Spotify",
+            cpuUsage: 4,
+            cpuTime: "00:01",
+            memoryBytes: 240_000_000,
+            parentPID: 1,
+            isBackgroundAgent: false
+        )
+
+        let protectedRow = AssistantCommandExecutor.processRow(protected)
+        let applicationRow = AssistantCommandExecutor.processRow(application)
+
+        XCTAssertNil(protectedRow.action)
+        XCTAssertEqual(protectedRow.fallbackIcon, "lock.shield")
+        XCTAssertEqual(applicationRow.iconPath, "/Applications/Spotify.app")
+        XCTAssertEqual(
+            applicationRow.action,
+            .quitProcess(pid: 1234, name: "Spotify", instanceCount: 1)
+        )
+    }
+
+    func testAssistantProcessRowsGroupApplicationInstancesIntoOneQuitAction() throws {
+        let first = ProcessNode(
+            id: 1234,
+            name: "Spotify",
+            commandLine: "/Applications/Spotify.app/Contents/MacOS/Spotify",
+            cpuUsage: 4,
+            cpuTime: "00:01",
+            memoryBytes: 240_000_000,
+            parentPID: 1,
+            isBackgroundAgent: false
+        )
+        let helper = ProcessNode(
+            id: 1235,
+            name: "Spotify",
+            commandLine: "/Applications/Spotify.app/Contents/MacOS/Spotify --type=helper",
+            cpuUsage: 2,
+            cpuTime: "00:01",
+            memoryBytes: 120_000_000,
+            parentPID: 1234,
+            isBackgroundAgent: false
+        )
+
+        let group = try XCTUnwrap(AssistantCommandExecutor.rankedProcessGroups([first, helper]).first)
+        let row = AssistantCommandExecutor.processRow(group)
+
+        XCTAssertEqual(group.instanceCount, 2)
+        XCTAssertTrue(row.detail.contains("2 processes"))
+        XCTAssertEqual(
+            row.action,
+            .quitProcess(pid: 1234, name: "Spotify", instanceCount: 2)
+        )
+    }
+
+    private func assistantTestApplications() -> [AssistantApplication] {
+        ["Telegram", "Spotify", "Notion", "DisplayLink Manager"].map { name in
+            AssistantApplication(
+                id: name,
+                name: name,
+                bundleIdentifier: "test.\(name.lowercased())",
+                url: URL(fileURLWithPath: "/Applications/\(name).app"),
+                icon: NSImage(size: NSSize(width: 16, height: 16))
+            )
+        }
+    }
+
     func testThermalSurfaceDoesNotFabricateMissingSensors() {
         var thermal = ThermalInfo()
         thermal.cpuTemp = 80
@@ -111,6 +496,12 @@ final class SafetyPolicyTests: XCTestCase {
         ))
         XCTAssertTrue(SafeDeletionService.isApplicationOwnedPath(
             home.appendingPathComponent("Library/Caches/com.maccleaner.app/cache.bin"),
+            policy: policy
+        ))
+        XCTAssertTrue(SafeDeletionService.isApplicationOwnedPath(
+            home.appendingPathComponent(
+                "Library/Application Support/Steam/steamapps/common/Cyberpunk 2077/archive/Mac/mod/example.archive"
+            ),
             policy: policy
         ))
         XCTAssertFalse(SafeDeletionService.isApplicationOwnedPath(

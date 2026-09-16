@@ -6,7 +6,7 @@ enum SafeDeletionError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .protectedApplicationData:
-            return "MacCleaner protects its running app and working data from cleanup."
+            return "MacCleaner protects application and game data from cleanup."
         }
     }
 }
@@ -75,6 +75,7 @@ enum SafeDeletionService {
         let identifier = bundleIdentifier.flatMap { $0.isEmpty ? nil : $0 } ?? "com.maccleaner.app"
         var roots: [URL] = [
             library.appendingPathComponent("Application Support/MacCleaner", isDirectory: true),
+            library.appendingPathComponent("Application Support/Steam/steamapps/common", isDirectory: true),
             library.appendingPathComponent("Caches/MacCleaner", isDirectory: true),
             library.appendingPathComponent("Caches/\(identifier)", isDirectory: true),
             library.appendingPathComponent("HTTPStorages/\(identifier)", isDirectory: true),

@@ -315,6 +315,8 @@ struct AppModalPresentation: Identifiable {
     let title: String
     let subtitle: String?
     let content: AnyView
+    var width: CGFloat = 560
+    var height: CGFloat = 460
 }
 
 @MainActor
@@ -324,9 +326,11 @@ final class AppModalCoordinator: ObservableObject {
     func present<Content: View>(
         title: String,
         subtitle: String? = nil,
+        width: CGFloat = 560,
+        height: CGFloat = 460,
         @ViewBuilder content: () -> Content
     ) {
-        presentation = AppModalPresentation(title: title, subtitle: subtitle, content: AnyView(content()))
+        presentation = AppModalPresentation(title: title, subtitle: subtitle, content: AnyView(content()), width: width, height: height)
     }
 
     func dismiss() {

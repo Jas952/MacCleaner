@@ -14,6 +14,11 @@
 		A004_SM /* SettingsManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = F004_SM /* SettingsManager.swift */; };
 		A005_SV /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F005_SV /* SettingsView.swift */; };
 		A002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F002 /* ContentView.swift */; };
+		A071_ACM /* AssistantChatModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F071_ACM /* AssistantChatModels.swift */; };
+		A072_ASS /* ApplicationSuggestionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F072_ASS /* ApplicationSuggestionService.swift */; };
+		A073_ACV /* AssistantChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F073_ACV /* AssistantChatView.swift */; };
+		A074_ACP /* AssistantPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = F074_ACP; };
+		A075_ACC /* AssistantCommandCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = F075_ACC; };
 		A067_MBG /* MenuBarGraphsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F067_MBG /* MenuBarGraphsView.swift */; };
 		A068_MPH /* MenuBarProcessHistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F068_MPH /* MenuBarProcessHistoryView.swift */; };
 		A069_PHS /* ProcessHistoryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F069_PHS /* ProcessHistoryStore.swift */; };
@@ -115,6 +120,11 @@
 		F004_SM /* SettingsManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Settings/SettingsManager.swift; sourceTree = "<group>"; };
 		F005_SV /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Settings/SettingsView.swift; sourceTree = "<group>"; };
 		F002 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		F071_ACM /* AssistantChatModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantChatModels.swift; sourceTree = "<group>"; };
+		F072_ASS /* ApplicationSuggestionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplicationSuggestionService.swift; sourceTree = "<group>"; };
+		F073_ACV /* AssistantChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantChatView.swift; sourceTree = "<group>"; };
+		F074_ACP /* AssistantPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantPresentation.swift; sourceTree = "<group>"; };
+		F075_ACC /* AssistantCommandCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantCommandCard.swift; sourceTree = "<group>"; };
 		F067_MBG /* MenuBarGraphsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarGraphsView.swift; sourceTree = "<group>"; };
 		F068_MPH /* MenuBarProcessHistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarProcessHistoryView.swift; sourceTree = "<group>"; };
 		F069_PHS /* ProcessHistoryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessHistoryStore.swift; sourceTree = "<group>"; };
@@ -258,6 +268,8 @@
 		G_MODELS /* Models */ = {
 			isa = PBXGroup;
 			children = (
+				F071_ACM /* AssistantChatModels.swift */,
+				F074_ACP /* AssistantPresentation.swift */,
 				F003 /* SystemInfo.swift */,
 				F020AIM /* AIWorkload.swift */,
 				F023AII /* AIIndexStore.swift */,
@@ -284,6 +296,7 @@
 		G_SERVICES /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				F072_ASS /* ApplicationSuggestionService.swift */,
 				F004 /* SystemMonitor.swift */,
 				F012PT /* ProcessTreeService.swift */,
 				F014SM /* SMCService.swift */,
@@ -322,6 +335,8 @@
 			isa = PBXGroup;
 			children = (
 				F002 /* ContentView.swift */,
+				F073_ACV /* AssistantChatView.swift */,
+				F075_ACC /* AssistantCommandCard.swift */,
 				F035LIV /* LaunchIntroView.swift */,
 				F011DS /* DesignSystem.swift */,
 				F005 /* OverviewView.swift */,
@@ -516,6 +531,11 @@
 				A004_SM /* SettingsManager.swift in Sources */,
 				A005_SV /* SettingsView.swift in Sources */,
 				A002 /* ContentView.swift in Sources */,
+				A071_ACM /* AssistantChatModels.swift in Sources */,
+				A072_ASS /* ApplicationSuggestionService.swift in Sources */,
+				A073_ACV /* AssistantChatView.swift in Sources */,
+				A074_ACP /* AssistantPresentation.swift in Sources */,
+				A075_ACC /* AssistantCommandCard.swift in Sources */,
 				A003 /* SystemInfo.swift in Sources */,
 				A006 /* MemoryDetailView.swift in Sources */,
 				A007 /* CPUDetailView.swift in Sources */,
